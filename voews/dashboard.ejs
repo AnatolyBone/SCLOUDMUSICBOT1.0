@@ -1,0 +1,172 @@
+<% if (typeof query !== 'undefined' && query.ping) { %>
+  <div class="alert <%= query.ping === 'ok' ? 'alert-success' : 'alert-danger' %>" data-autohide>
+    <%= query.ping === 'ok' ? 'Канал доступен' : 'Ошибка отправки в канал' %>
+  </div>
+<% } %>
+
+<!-- Фильтры для поиска и экспорта -->
+<form id="filterForm" class="row g-2 align-items-end mb-3" method="get" action="/dashboard">
+  <input type="hidden" id="periodInput" name="period" value="<%= period || '30' %>">
+  
+  <div class="col-auto">
+    <label class="form-label mb-0">Период:</label>
+  </div>
+  
+  <div class="col-auto">
+    <select id="rangeSelect" class="form-select form-select-sm">
+      <option value="">— выбрать —</option>
+      <option value="7">Последние 7 дней</option>
+      <option value="30">Последние 30 дней</option>
+      <option value="90">Последние 90 дней</option>
+    </select>
+  </div>
+
+  <div class="col-auto">
+    <a class="btn btn-sm btn-outline-success" href="/export">Экспорт пользователей</a>
+  </div>
+</form>
+
+<!-- Метрики -->
+<div class="d-flex flex-wrap gap-3 mb-4">
+  <div class="card card-metric shadow-sm flex-fill">
+    <div class="card-body">
+      <div class="text-muted">Пользователей</div>
+      <div class="h4 mb-0"><%= stats.total_users %></div>
+    </div>
+  </div>
+  <div class="card card-metric shadow-sm flex-fill">
+    <div class="card-body">
+      <div class="text-muted">Активных сегодня</div>
+      <div class="h4 mb-0"><%= stats.active_today %></div>
+    </div>
+  </div>
+  <div class="card card-metric shadow-sm flex-fill">
+    <div class="card-body">
+      <div class="text-muted">Загрузки (всего)</div>
+      <div class="h4 mb-0"><%= stats.total_downloads %></div>
+    </div>
+  </div>
+</div>
+
+<!-- Графики -->
+<div class="row g-4">
+  <div class="col-12 col-xl-8">
+    <div class="card shadow-sm">
+      <div class="card-header">Регистрации / Загрузки / Активные</div>
+      <div class="card-body chart-wrap" style="min-height:320px">
+        <div id="combinedEmpty" class="text-center text-muted py-5 d-none">Нет данных за выбранный период</div>
+        <canvas id="chartCombined"></canvas>
+      </div>
+    </div>
+  </div>
+  
+  <div class="col-12 col-xl-4">
+    <div class="card shadow-sm mb-4">
+      <div class="card-header">Активность по часам</div>
+      <div class="card-body chart-wrap" style="height:280px">
+        <div id="hoursEmpty" class="text-center text-muted py-4 d-none">Нет данных</div>
+        <canvas id="chartHours"></canvas>
+      </div>
+    </div>
+    <div class="card shadow-sm">
+      <div class="card-header">Активность по дням недели</div>
+      <div class="card-body chart-wrap" style="height:280px">
+        <div id="weekEmpty" class="text-center text-muted py-4 d-none">Нет данных</div>
+        <canvas id="chartWeek"></canvas>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Стиль для графиков и элементов -->
+<style>
+  .card-metric {
+    border-radius: 10px;
+    box-shadow: 0px 0px 10px rgba(0, 0, 0, 0.1);
+    transition: transform 0.3s;
+  }
+
+  .card-metric:hover {
+    transform: scale(1.05);
+  }
+
+  .card-header {
+    background-color: #0069d9;
+    color: white;
+  }
+
+  .chart-wrap {
+    border-radius: 8px;
+    overflow: hidden;
+  }
+
+  .text-muted {
+    font-size: 0.9em;
+    color: #6c757d;
+  }
+</style>
+
+<script>
+  // Инициализация графиков с данными
+  const combined = <%- JSON.stringify(chartDataCombined || {}) %>;
+  const byHour   = <%- JSON.stringify(chartDataHourActivity || {}) %>;
+  const byWeek   = <%- JSON.stringify(chartDataWeekdayActivity || {}) %>;
+
+  function isAllZeros(arr) {
+    return arr.every(v => (typeof v === 'number' ? v : 0) === 0);
+  }
+
+  const commonOpts = {
+    responsive: true,
+    maintainAspectRatio: false,
+    interaction: { mode: 'index', intersect: false },
+    plugins: {
+      legend: { display: true, position: 'top' },
+      tooltip: { enabled: true }
+    },
+    scales: {
+      x: { ticks: { autoSkip: true, maxTicksLimit: 10 } },
+      y: { beginAtZero: true }
+    }
+  };
+
+  const elCombined = document.getElementById('chartCombined');
+  const emptyCombined = document.getElementById('combinedEmpty');
+  if (elCombined && combined && Array.isArray(combined.labels)) {
+    const allZero = isAllZeros(combined.datasets?.[0]?.data || []);
+    if (combined.labels.length === 0 || allZero) {
+      emptyCombined.classList.remove('d-none');
+      elCombined.classList.add('d-none');
+    } else {
+      (combined.datasets || []).forEach(ds => {
+        ds.tension = 0.25;
+        ds.fill = false;
+        ds.pointRadius = 2;
+        ds.borderWidth = 2;
+      });
+      new Chart(elCombined, { type:'line', data: combined, options: commonOpts });
+    }
+  }
+
+  const elHours = document.getElementById('chartHours');
+  const emptyHours = document.getElementById('hoursEmpty');
+  if (elHours && byHour && Array.isArray(byHour.datasets?.[0]?.data)) {
+    if (isAllZeros(byHour.datasets[0].data)) {
+      emptyHours.classList.remove('d-none');
+      elHours.classList.add('d-none');
+    } else {
+      new Chart(elHours, { type:'bar', data: byHour, options: commonOpts });
+    }
+  }
+
+  const elWeek = document.getElementById('chartWeek');
+  const emptyWeek = document.getElementById('weekEmpty');
+  if (elWeek && byWeek && Array.isArray(byWeek.datasets?.[0]?.data)) {
+    if (isAllZeros(byWeek.datasets[0].data)) {
+      emptyWeek.classList.remove('d-none');
+      elWeek.classList.add('d-none');
+    } else {
+      new Chart(elWeek, { type:'bar', data: byWeek, options: commonOpts });
+    }
+  }
+</script>
