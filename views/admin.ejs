@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Админ-панель</title>
+  <link rel="stylesheet" href="/path-to-your-styles/admin.css">
+</head>
+<body class="bg-body">
+
+  <!-- Верхняя панель навигации -->
+  <div class="topbar">
+    <a class="btn" href="/dashboard">Дашборд</a>
+    <a class="btn" href="/admin/users">Пользователи</a>
+    <a class="btn" href="/admin/texts">Тексты бота</a>
+    <a class="btn" href="/admin/broadcast">Рассылка</a>
+    <form method="post" action="/admin/logout">
+      <button class="btn">Выйти</button>
+    </form>
+  </div>
+
+  <!-- Сводка -->
+  <h1>📊 Админ-панель</h1>
+  <p>Всего пользователей: <strong><%= users.length %></strong></p>
+
+  <!-- Таблица пользователей -->
+  <div class="card">
+    <div class="card-header">Пользователи</div>
+    <div class="card-body">
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Имя</th>
+            <th>Юзернейм</th>
+            <th>Треков сегодня</th>
+            <th>Лимит</th>
+            <th>Тариф до</th>
+            <th>Изменить тариф</th>
+          </tr>
+        </thead>
+        <tbody>
+          <% users.forEach(u => { %>
+            <tr>
+              <td><%= u.id %></td>
+              <td><%= u.first_name %></td>
+              <td>@<%= u.username || '-' %></td>
+              <td><%= u.downloads_today %></td>
+              <td><%= u.premium_limit %></td>
+              <td><%= u.premium_until ? u.premium_until.split('T')[0] : '-' %></td>
+              <td>
+                <form class="inline" method="post" action="/admin/set-plan">
+                  <input type="hidden" name="id" value="<%= u.id %>">
+                  <select name="plan">
+                    <option value="10" <%= u.premium_limit === 10 ? 'selected' : '' %>>Free</option>
+                    <option value="50" <%= u.premium_limit === 50 ? 'selected' : '' %>>Plus</option>
+                    <option value="100" <%= u.premium_limit === 100 ? 'selected' : '' %>>Pro</option>
+                    <option value="1000" <%= u.premium_limit >= 1000 ? 'selected' : '' %>>Unlim</option>
+                  </select>
+                  <input type="number" name="days" placeholder="Дней" min="1" style="width: 60px;">
+                  <input type="submit" value="OK">
+                </form>
+              </td>
+            </tr>
+          <% }) %>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Последние отзывы -->
+  <div class="card">
+    <div class="card-header">📝 Последние отзывы</div>
+    <div class="card-body">
+      <% reviews.slice(-20).reverse().forEach(r => { %>
+        <div class="review">
+          <div><strong>ID:</strong> <%= r.userId %></div>
+          <div><strong>⏱</strong> <%= new Date(r.time).toLocaleString() %></div>
+          <p><%= r.text %></p>
+        </div>
+      <% }) %>
+    </div>
+  </div>
+
+</body>
+</html>
