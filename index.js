@@ -1,5 +1,4 @@
 // index.js
-
 // === Встроенные и сторонние библиотеки ===
 import express from 'express';
 import session from 'express-session';
