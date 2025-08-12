@@ -36,7 +36,10 @@ if (!BOT_TOKEN || !ADMIN_ID || !ADMIN_LOGIN || !ADMIN_PASSWORD || !WEBHOOK_URL |
 }
 
 // === Глобальные экземпляры и утилиты ===
-const bot = new Telegraf(BOT_TOKEN);
+// <<< ИСПРАВЛЕНИЕ №3: Даем Telegraf больше времени на обработку >>>
+const bot = new Telegraf(BOT_TOKEN, {
+    handlerTimeout: 90_000 // 90 секунд (90,000 мс)
+});
 const app = express();
 const upload = multer({ dest: 'uploads/' });
 const __filename = fileURLToPath(import.meta.url);
