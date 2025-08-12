@@ -54,7 +54,6 @@ async function trackDownloadProcessor(task) {
     let statusMessage = null;
     
     try {
-        // <<< НОВОЕ: Отправляем сообщение о начале работы
         statusMessage = await safeSendMessage(userId, `⏳ Начинаю обработку трека: "${trackName}"`);
 
         console.log(`[Worker] Начинаю скачивание: ${trackName}`);
@@ -76,7 +75,6 @@ async function trackDownloadProcessor(task) {
             throw new Error(`Трек слишком большой: ${trackName}`);
         }
 
-        // <<< НОВОЕ: Редактируем сообщение перед отправкой файла
         if (statusMessage) {
             await bot.telegram.editMessageText(userId, statusMessage.message_id, undefined, `✅ Скачал. Отправляю вам "${trackName}"...`);
         }
@@ -85,17 +83,15 @@ async function trackDownloadProcessor(task) {
             caption: trackName, title: trackName, performer: uploader || 'SoundCloud'
         });
         
-        // <<< НОВОЕ: Удаляем статусное сообщение после успеха
         if (statusMessage) {
             await bot.telegram.deleteMessage(userId, statusMessage.message_id);
         }
         
-        // Манипуляции с базой данных ТОЛЬКО ПОСЛЕ УСПЕШНОЙ отправки
         if (sentMessage?.audio?.file_id) {
             console.log(`[Worker] Трек "${trackName}" отправлен, кэширую...`);
             await cacheTrack(url, sentMessage.audio.file_id, trackName);
             await saveTrackForUser(userId, trackName, sentMessage.audio.file_id);
-            await incrementDownloads(userId);
+            await incrementDownloads(userId, trackName, url); // Передаем url для логирования
         }
         
         if (playlistUrl) {
@@ -109,18 +105,21 @@ async function trackDownloadProcessor(task) {
         }
         
     } catch (err) {
-        // <<< НОВОЕ: Редактируем статусное сообщение на ошибку
-        const errorMessage = `❌ Не удалось обработать трек: "${trackName}"`;
+        // <<< ИЗМЕНЕНО: Более детальная обработка ошибок, включая TimeoutError
+        let errorMessage = `❌ Не удалось обработать трек: "${trackName}"`;
+        if (err.name === 'TimeoutError' || (err.stderr && err.stderr.includes('timed out'))) {
+            errorMessage += '. Причина: таймаут скачивания.';
+            console.error(`❌ Таймаут воркера при обработке "${trackName}"`);
+        } else if (err.response?.error_code === 403) {
+            await updateUserField(userId, 'active', false);
+        } else {
+            console.error(`❌ Ошибка воркера при обработке "${trackName}":`, err.stderr || err.message || err);
+        }
+
         if (statusMessage) {
             await bot.telegram.editMessageText(userId, statusMessage.message_id, undefined, errorMessage);
         } else {
             await safeSendMessage(userId, errorMessage);
-        }
-
-        if (err.response?.error_code === 403) {
-            await updateUserField(userId, 'active', false);
-        } else {
-            console.error(`❌ Ошибка воркера при обработке "${trackName}":`, err.stderr || err.message || err);
         }
     } finally {
         if (tempFilePath && fs.existsSync(tempFilePath)) {
@@ -137,11 +136,12 @@ export const downloadQueue = new TaskQueue({
 
 // --- Основной входной метод ---
 export async function enqueue(ctx, userId, url) {
+    let processingMessage = null;
     try {
         await logUserActivity(userId);
         await resetDailyLimitIfNeeded(userId);
         
-        const processingMessage = await safeSendMessage(userId, '🔍 Анализирую ссылку...');
+        processingMessage = await safeSendMessage(userId, '🔍 Анализирую ссылку...');
         
         const info = await ytdl(url, { dumpSingleJson: true, retries: 2, "socket-timeout": 120 });
         if (!info) throw new Error('Не удалось получить метаданные по ссылке.');
@@ -164,7 +164,8 @@ export async function enqueue(ctx, userId, url) {
         }
 
         if (processingMessage) {
-            await bot.telegram.deleteMessage(userId, processingMessage.message_id);
+            await bot.telegram.deleteMessage(userId, processingMessage.message_id).catch(() => {});
+            processingMessage = null;
         }
 
         if (tracksToProcess.length === 0) return await safeSendMessage(userId, 'Не удалось найти треки для загрузки.');
@@ -199,7 +200,7 @@ export async function enqueue(ctx, userId, url) {
                 try {
                     await bot.telegram.sendAudio(userId, track.fileId, { caption: track.trackName, title: track.trackName });
                     await saveTrackForUser(userId, track.trackName, track.fileId);
-                    await incrementDownloads(userId);
+                    await incrementDownloads(userId, track.trackName, track.url); // Передаем url
                     sentFromCacheCount++;
                 } catch (err) {
                     if (err.response?.error_code === 403) { await updateUserField(userId, 'active', false); return; }
@@ -233,7 +234,11 @@ export async function enqueue(ctx, userId, url) {
             }
         }
     } catch (err) {
-        if (err.message.includes('timed out')) {
+        // <<< ИЗМЕНЕНО: Более надежная проверка на TimeoutError
+        if (processingMessage) {
+            await bot.telegram.deleteMessage(userId, processingMessage.message_id).catch(() => {});
+        }
+        if (err.name === 'TimeoutError' || (err.message && err.message.includes('timed out'))) {
             console.error(`❌ TimeoutError в enqueue для userId ${userId}:`, err.message);
             await safeSendMessage(userId, '❌ Ошибка: SoundCloud отвечает слишком долго. Попробуйте позже.');
         } else {
