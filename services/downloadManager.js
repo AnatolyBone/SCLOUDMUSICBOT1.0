@@ -123,7 +123,7 @@ async function trackDownloadProcessor(task) {
 // --- Очередь задач ---
 // <<< ИСПРАВЛЕНИЕ №2: Резко снижаем параллельность для выживания на слабом железе >>>
 export const downloadQueue = new TaskQueue({
-    maxConcurrent: 2,
+    maxConcurrent: 1,
     taskProcessor: trackDownloadProcessor
 });
 
