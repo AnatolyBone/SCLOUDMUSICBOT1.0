@@ -135,7 +135,7 @@ async function trackDownloadProcessor(task) {
 
 // --- Очередь задач ---
 export const downloadQueue = new TaskQueue({
-    maxConcurrent: 8, // Можно уменьшить до 2-4 для бесплатного тарифа, чтобы снизить нагрузку
+    maxConcurrent: 4, // Можно уменьшить до 2-4 для бесплатного тарифа, чтобы снизить нагрузку
     taskProcessor: trackDownloadProcessor
 });
 
