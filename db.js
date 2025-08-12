@@ -247,9 +247,12 @@ export async function logDownload(userId, trackTitle, url) {
     await supabase.from('downloads_log').insert([{ user_id: userId, track_title: trackTitle, url: url }]);
 }
 
+// db.js (правильно)
 export async function logEvent(userId, event) {
   try {
-    const { error } = await supabase.from('events').insert([{ user_id: userId, event }]);
+    const { error } = await supabase
+      .from('events')
+      .insert([{ user_id: userId, event_type: event }]); // <-- ИСПРАВЛЕНО
     if (error) console.error(`❌ Ошибка логирования события "${event}":`, error.message);
   } catch (e) {
     console.error(`❌ Критическая ошибка вызова Supabase для logEvent:`, e.message);
