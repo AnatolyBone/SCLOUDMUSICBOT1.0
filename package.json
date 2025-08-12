@@ -15,6 +15,7 @@
     "compression": "^1.7.4",
     "concurrently": "^8.2.2",
     "connect-pg-simple": "^8.0.0",
+    "dotenv": "^16.4.5",
     "ejs": "^3.1.9",
     "express": "^4.19.2",
     "express-ejs-layouts": "^2.5.1",
@@ -24,6 +25,7 @@
     "json-2-csv": "^5.5.9",
     "multer": "^1.4.5-lts.1",
     "node-id3": "^0.2.0",
+    "p-limit": "^5.0.0",
     "redis": "^4.6.7",
     "telegraf": "^4.16.3",
     "youtube-dl-exec": "^2.0.1"
