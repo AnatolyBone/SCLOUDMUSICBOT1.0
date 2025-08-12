@@ -4,11 +4,14 @@ import path from 'path';
 import fs from 'fs';
 import ytdl from 'youtube-dl-exec';
 import { fileURLToPath } from 'url';
-import { Markup } from 'telegraf';
 import crypto from 'crypto';
+import pLimit from 'p-limit';
 
+// <<< ИСПРАВЛЕНО: Правильные, прямые импорты >>>
+import { bot } from '../bot.js';
+import redisService from './redisClient.js';
+import { T } from '../config/texts.js';
 import { TaskQueue } from '../lib/TaskQueue.js';
-import { getRedisClient, texts, bot } from '../index.js';
 import {
     getUser,
     resetDailyLimitIfNeeded,
@@ -28,9 +31,10 @@ const cacheDir = path.join(__dirname, 'cache');
 const TELEGRAM_FILE_LIMIT_MB = 49;
 const MAX_PLAYLIST_TRACKS_FREE = 10;
 const TRACK_TITLE_LIMIT = 100;
-
-// <<< ИСПРАВЛЕНО: Уменьшаем таймаут, чтобы "падать" быстрее и попадать в наш catch >>>
 const YTDL_TIMEOUT = 60; // 60 секунд
+
+// Ограничиваем ytdl для получения метаданных, чтобы не перегружать CPU
+const ytdlLimit = pLimit(1);
 
 function sanitizeFilename(name) {
     return (name || 'track').replace(/[<>:"/\\|?*]+/g, '').trim();
@@ -38,7 +42,6 @@ function sanitizeFilename(name) {
 
 async function safeSendMessage(userId, text, extra = {}) {
     try {
-        if (!bot) throw new Error("Bot is not initialized");
         return await bot.telegram.sendMessage(userId, text, extra);
     } catch (e) {
         if (e.response?.error_code === 403) {
@@ -51,7 +54,6 @@ async function safeSendMessage(userId, text, extra = {}) {
     }
 }
 
-// --- Основной обработчик одной задачи (Воркер) ---
 async function trackDownloadProcessor(task) {
     const { userId, url, trackName, trackId, uploader, playlistUrl } = task;
     let tempFilePath = null;
@@ -99,7 +101,7 @@ async function trackDownloadProcessor(task) {
         }
         
         if (playlistUrl) {
-            const redisClient = getRedisClient();
+            const redisClient = redisService.getClient();
             const playlistKey = `playlist:${userId}:${playlistUrl}`;
             const remaining = await redisClient.decr(playlistKey);
             if (remaining <= 0) {
@@ -131,14 +133,11 @@ async function trackDownloadProcessor(task) {
     }
 }
 
-// --- Очередь задач ---
-// <<< ИСПРАВЛЕНО: Резко снижаем параллельность для выживания на слабом железе >>>
 export const downloadQueue = new TaskQueue({
-    maxConcurrent: 2,
+    maxConcurrent: 2, // Оптимально для бесплатного тарифа
     taskProcessor: trackDownloadProcessor
 });
 
-// --- Основной входной метод ---
 export async function enqueue(ctx, userId, url) {
     let processingMessage = null;
     try {
@@ -147,7 +146,8 @@ export async function enqueue(ctx, userId, url) {
         
         processingMessage = await safeSendMessage(userId, '🔍 Анализирую ссылку...');
         
-        const info = await ytdl(url, { dumpSingleJson: true, retries: 2, "socket-timeout": YTDL_TIMEOUT });
+        // Оборачиваем вызов ytdl в наш лимит, чтобы не перегружать CPU на старте
+        const info = await ytdlLimit(() => ytdl(url, { dumpSingleJson: true, retries: 2, "socket-timeout": YTDL_TIMEOUT }));
         
         if (!info) {
             throw new Error('Не удалось получить метаданные по ссылке.');
@@ -157,45 +157,29 @@ export async function enqueue(ctx, userId, url) {
             await bot.telegram.deleteMessage(userId, processingMessage.message_id).catch(() => {});
             processingMessage = null;
         }
-        
+
+        // <<< ИСПРАВЛЕНО: Запрет плейлистов для экономии памяти на бесплатном тарифе >>>
         const isPlaylist = Array.isArray(info.entries) && info.entries.length > 0;
-        let tracksToProcess = [];
         
         if (isPlaylist) {
-            tracksToProcess = info.entries.filter(e => e?.webpage_url && e?.id).map(e => ({
-                url: e.webpage_url, trackId: e.id,
-                trackName: sanitizeFilename(e.title).slice(0, TRACK_TITLE_LIMIT),
-                uploader: e.uploader || 'SoundCloud'
-            }));
-        } else {
-            tracksToProcess = [{
-                url: info.webpage_url || url, trackId: info.id,
-                trackName: sanitizeFilename(info.title).slice(0, TRACK_TITLE_LIMIT),
-                uploader: info.uploader || 'SoundCloud'
-            }];
+            console.warn(`[OPTIMIZATION] Отклонен плейлист от ${userId} для экономии ресурсов.`);
+            await safeSendMessage(userId, 'ℹ️ Обработка плейлистов временно ограничена для повышения стабильности. Пожалуйста, отправляйте треки по одной ссылке.');
+            return;
         }
 
-        if (tracksToProcess.length === 0) {
-            return await safeSendMessage(userId, 'Не удалось найти треки для загрузки по этой ссылке.');
-        }
+        let tracksToProcess = [{
+            url: info.webpage_url || url, trackId: info.id,
+            trackName: sanitizeFilename(info.title).slice(0, TRACK_TITLE_LIMIT),
+            uploader: info.uploader || 'SoundCloud'
+        }];
         
         const user = await getUser(userId);
         let remainingLimit = user.premium_limit - user.downloads_today;
         
         if (remainingLimit <= 0) {
-            return await safeSendMessage(userId, texts.limitReached);
+            return await safeSendMessage(userId, T('limitReached'));
         }
         
-        if (isPlaylist && user.premium_limit <= 10 && tracksToProcess.length > MAX_PLAYLIST_TRACKS_FREE) {
-            await safeSendMessage(userId, `ℹ️ Бесплатный тариф: можно скачать до ${MAX_PLAYLIST_TRACKS_FREE} треков из плейлиста.`);
-            tracksToProcess = tracksToProcess.slice(0, MAX_PLAYLIST_TRACKS_FREE);
-        }
-        
-        if (tracksToProcess.length > remainingLimit) {
-            await safeSendMessage(userId, `⚠️ В плейлисте ${tracksToProcess.length} треков, но ваш лимит: ${remainingLimit}. Добавляю доступное количество.`);
-            tracksToProcess = tracksToProcess.slice(0, remainingLimit);
-        }
-
         const tasksFromCache = [];
         const tasksToDownload = [];
         
@@ -241,15 +225,9 @@ export async function enqueue(ctx, userId, url) {
             
             if (tasksToReallyDownload.length > 0) {
                 await safeSendMessage(userId, `⏳ ${tasksToReallyDownload.length} трек(ов) добавлено в очередь. Вы получите их по мере готовности.`);
-                if (isPlaylist) {
-                    const redisClient = getRedisClient();
-                    const playlistKey = `playlist:${userId}:${url}`;
-                    await redisClient.setEx(playlistKey, 3600, tasksToReallyDownload.length.toString());
-                    await logEvent(userId, 'download_playlist');
-                }
                 
                 for (const track of tasksToReallyDownload) {
-                    downloadQueue.add({ userId, ...track, playlistUrl: isPlaylist ? url : null, priority: user.premium_limit });
+                    downloadQueue.add({ userId, ...track, playlistUrl: null, priority: user.premium_limit });
                     await logEvent(userId, 'download');
                 }
             }
@@ -262,8 +240,8 @@ export async function enqueue(ctx, userId, url) {
         const errorMessage = err.stderr || err.message || '';
 
         if (err.name === 'TimeoutError' || errorMessage.includes('timed out')) {
-            console.error(`❌ Таймаут при получении информации по ссылке для ${userId}:`, errorMessage);
-            await safeSendMessage(userId, '❌ Ошибка: SoundCloud или сеть отвечает слишком долго. Пожалуйста, попробуйте позже.');
+            console.error(`❌ Таймаут в enqueue для ${userId}:`, errorMessage);
+            await safeSendMessage(userId, '❌ Ошибка: SoundCloud отвечает слишком долго. Пожалуйста, попробуйте позже.');
         } else if (errorMessage.includes('404: Not Found')) {
             console.warn(`[User Error] Трек не найден (404) для ${userId}.`);
             await safeSendMessage(userId, '❌ Трек по этой ссылке не найден. Возможно, он был удален или ссылка неверна.');
