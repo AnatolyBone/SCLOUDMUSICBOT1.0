@@ -57,7 +57,6 @@ export async function getUser(id, first_name = '', username = '') {
 }
 
 export async function logUserActivity(userId) {
-  // Исправлено: убран ON CONFLICT, который вызывал ошибку
   await query(
     'INSERT INTO user_activity_logs (user_id, activity_time) VALUES ($1, NOW())',
     [userId]
@@ -104,27 +103,23 @@ export async function getFunnelData(from, to) {
   return result;
 }
 
-// db.js
+// ==================== Функции кэширования треков ====================
+// ИЗМЕНЕНИЯ ЗДЕСЬ
 
-// ... (ваши текущие функции) ...
-
-// В файле db.js
-
-export async function findCachedTrack(soundcloudUrl) {
+export async function findCachedTrack(trackUrl) {
   try {
     const { data, error } = await supabase
       .from('track_cache')
       .select('file_id, track_name')
-      .eq('soundcloud_url', soundcloudUrl)
+      .eq('url', trackUrl) // ИСПРАВЛЕНО с 'soundcloud_url' на 'url'
       .single();
     
-    if (error && error.code !== 'PGRST116') { // PGRST116 - это "not found", это не ошибка
+    if (error && error.code !== 'PGRST116') { // PGRST116 - "not found", это не ошибка
       console.error('Ошибка поиска в кэше Supabase:', error);
       return null;
     }
     
     if (data) {
-      // Возвращаем объект, а не просто строку!
       return {
         fileId: data.file_id,
         trackName: data.track_name
@@ -138,14 +133,18 @@ export async function findCachedTrack(soundcloudUrl) {
     return null;
   }
 }
-export async function cacheTrack(soundcloudUrl, fileId, title) {
-  await pool.query(
-    'INSERT INTO track_cache (soundcloud_url, telegram_file_id, title) VALUES ($1, $2, $3) ON CONFLICT (soundcloud_url) DO UPDATE SET telegram_file_id = $2, title = $3',
-    [soundcloudUrl, fileId, title]
+
+export async function cacheTrack(trackUrl, fileId, title) {
+    // ИСПРАВЛЕНО: 'soundcloud_url' заменено на 'url' в именах колонок и в ON CONFLICT
+    await pool.query(
+    'INSERT INTO track_cache (url, telegram_file_id, title) VALUES ($1, $2, $3) ON CONFLICT (url) DO UPDATE SET telegram_file_id = $2, title = $3',
+    [trackUrl, fileId, title]
   );
 }
 
-export async function incrementDownloads(id, trackName = 'track', url = null) { // <-- Добавляем url как параметр
+// ==================== Остальные функции ====================
+
+export async function incrementDownloads(id, trackName = 'track', url = null) {
   const res = await pool.query(`
     UPDATE users 
     SET 
@@ -157,7 +156,6 @@ export async function incrementDownloads(id, trackName = 'track', url = null) { 
   `, [id]);
   
   if (res.rowCount > 0) {
-    // Передаем url в logDownload
     await logDownload(id, trackName, url); 
     return res.rows[0];
   }
@@ -245,11 +243,10 @@ export async function getLatestReviews(limit = 10) {
   return data || [];
 }
 
-export async function logDownload(userId, trackTitle, url) { // 
+export async function logDownload(userId, trackTitle, url) { 
     await supabase.from('downloads_log').insert([{ user_id: userId, track_title: trackTitle, url: url }]);
 }
 
-// Добавлено: недостающая функция для downloadManager
 export async function logEvent(userId, event) {
   try {
     const { error } = await supabase.from('events').insert([{ user_id: userId, event }]);
@@ -259,7 +256,6 @@ export async function logEvent(userId, event) {
   }
 }
 
-// Восстановлено: ваши функции, которые я пропустил
 export async function getTrackMetadata(url) {
   const res = await query('SELECT metadata, updated_at FROM track_metadata WHERE url = $1', [url]);
   if (!res.rows.length) return null;
@@ -280,7 +276,6 @@ export async function saveTrackMetadata(url, metadata) {
         updated_at = NOW()
   `, [url, JSON.stringify(metadata)]);
 }
-
 
 export async function getRegistrationsByDate() {
   const { rows } = await query(`SELECT TO_CHAR(created_at, 'YYYY-MM-DD') as date, COUNT(*) as count FROM users GROUP BY date ORDER BY date`);
