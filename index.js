@@ -1,6 +1,4 @@
 // index.js
-
-// === Встроенные и сторонние библиотеки ===
 import express from 'express';
 import session from 'express-session';
 import compression from 'compression';
@@ -10,32 +8,27 @@ import expressLayouts from 'express-ejs-layouts';
 import { fileURLToPath } from 'url';
 import pgSessionFactory from 'connect-pg-simple';
 import pLimit from 'p-limit';
-
-// === Импорты модулей НАШЕГО приложения ===
-import { pool, getUserById, resetDailyStats } from './db.js';
+import { pool, getUserById, resetDailyStats, getAllUsers, getReferralSourcesStats } from './db.js';
 import { bot } from './bot.js';
 import redisService from './services/redisClient.js';
 import { WEBHOOK_URL, PORT, SESSION_SECRET, ADMIN_ID, ADMIN_LOGIN, ADMIN_PASSWORD } from './config.js';
 import { loadTexts } from './config/texts.js';
 import { downloadQueue } from './services/downloadManager.js';
 
-// === Глобальные экземпляры и утилиты ===
 const app = express();
 const upload = multer({ dest: 'uploads/' });
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
-// Главный "дроссель" для защиты от перегрузки: обрабатываем не более 1 сообщения за раз
-const limit = pLimit(1); 
+const limit = pLimit(1);
 
 async function startApp() {
     console.log('[App] Запуск приложения...');
     try {
         await loadTexts(true);
         await redisService.connect();
-
+        
         setupExpress();
-
+        
         bot.on('message', async (ctx, next) => limit(() => next()));
 
         if (process.env.NODE_ENV === 'production') {
@@ -51,7 +44,7 @@ async function startApp() {
         setInterval(() => resetDailyStats(), 24 * 3600 * 1000);
         setInterval(() => console.log(`[Monitor] Очередь: ${downloadQueue.size} в ожидании, ${downloadQueue.activeTasks} в работе.`), 60000);
         console.log('[App] Фоновый индексатор временно отключен.');
-
+        
     } catch (err) {
         console.error('🔴 Критическая ошибка при запуске приложения:', err);
         process.exit(1);
@@ -67,7 +60,7 @@ function setupExpress() {
     app.set('view engine', 'ejs');
     app.set('views', path.join(__dirname, 'views'));
     app.set('layout', 'layout');
-
+    
     const pgSession = pgSessionFactory(session);
     app.use(session({
         store: new pgSession({ pool, tableName: 'session' }),
@@ -76,7 +69,7 @@ function setupExpress() {
         saveUninitialized: false,
         cookie: { maxAge: 30 * 24 * 60 * 60 * 1000 }
     }));
-
+    
     app.use(async (req, res, next) => {
         res.locals.user = null;
         if (req.session.authenticated && req.session.userId === ADMIN_ID) {
@@ -92,9 +85,9 @@ function setupExpress() {
         if (req.session.authenticated && req.session.userId === ADMIN_ID) return next();
         res.redirect('/admin');
     };
-
+    
     app.get('/health', (req, res) => res.status(200).send('OK'));
-
+    
     app.get('/admin', (req, res) => {
         if (req.session.authenticated) return res.redirect('/dashboard');
         res.render('login', { title: 'Вход' });
@@ -114,14 +107,29 @@ function setupExpress() {
         req.session.destroy(() => res.redirect('/admin'));
     });
 
-    app.get('/dashboard', requireAuth, (req, res) => {
-        // <<< ИСПРАВЛЕНО: Добавлена передача переменной `period` в шаблон >>>
-        // Это исправит ошибку 'period is not defined' при открытии админки.
-        res.render('dashboard', { 
-            title: 'Дашборд', 
-            user: req.user,
-            period: req.query.period || '30' // Берем `period` из URL или ставим '30' по умолчанию
-        });
+    app.get('/dashboard', requireAuth, async (req, res) => {
+        try {
+            const users = await getAllUsers(true);
+            const referralStats = await getReferralSourcesStats();
+            
+            const stats = {
+                total_users: users.length,
+                active_users: users.filter(u => u.active).length,
+                total_downloads: users.reduce((sum, u) => sum + (u.total_downloads || 0), 0),
+            };
+
+            res.render('dashboard', { 
+                title: 'Дашборд', 
+                user: req.user,
+                stats: stats,
+                users: users.slice(0, 50),
+                referralStats: referralStats,
+                period: req.query.period || '30'
+            });
+        } catch (error) {
+            console.error("Ошибка при загрузке дашборда:", error);
+            res.status(500).send("Ошибка сервера при загрузке дашборда");
+        }
     });
 }
 
@@ -129,13 +137,11 @@ async function stopBot(signal) {
     console.log(`[App] Получен сигнал ${signal}. Начинаю корректное завершение...`);
     try {
         if (bot.polling?.isRunning()) bot.stop(signal);
-
+        
         const promises = [];
-        if (redisService.client?.isOpen) {
-            promises.push(redisService.client.quit().then(() => console.log('✅ [Redis] Клиент отключен')));
-        }
-        promises.push(pool.end().then(() => console.log('✅ [DB] Пул PostgreSQL закрыт')));
-
+        if (redisService.client?.isOpen) promises.push(redisService.client.quit());
+        promises.push(pool.end());
+        
         await Promise.allSettled(promises);
         console.log('[App] Все соединения закрыты. Выход.');
         process.exit(0);
