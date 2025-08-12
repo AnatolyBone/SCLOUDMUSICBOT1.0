@@ -142,7 +142,7 @@ async function processUrlForIndexing(url) {
 }
 
 async function startIndexer() {
-    console.log('🚀 Запуск фонового индексатора...');
+    console.log('🚀 [Indexer] Запуск фонового индексатора...');
     while (true) {
         try {
             const urls = await getUrlsToIndex();
@@ -166,31 +166,37 @@ async function startIndexer() {
 // =================================================================
 async function startApp() {
     try {
+        console.log('[App] Запуск приложения...');
         const client = createClient({ url: process.env.REDIS_URL, socket: { connectTimeout: 10000 } });
         client.on('error', (err) => console.error('🔴 Ошибка Redis:', err));
         await client.connect();
         redisClient = client;
-        console.log('✅ Redis подключён');
+        console.log('✅ [App] Redis подключён');
 
         if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir);
 
         setupExpress();
         setupTelegramBot();
         
+        console.log('[App] Настройка фоновых задач (таймеров)...');
         setInterval(() => resetDailyStats(), 24 * 3600 * 1000);
         setInterval(() => console.log(`[Monitor] Очередь: ${downloadQueue.size} в ожидании, ${downloadQueue.active} в работе.`), 60000);
         setInterval(() => cleanupCache(cacheDir, 60), 30 * 60 * 1000);
-        cleanupCache(cacheDir, 60);
+        await cleanupCache(cacheDir, 60);
 
         if (process.env.NODE_ENV === 'production') {
+            console.log(`[App] Настройка вебхука для Telegram на ${WEBHOOK_URL}...`);
             app.use(await bot.createWebhook({ domain: WEBHOOK_URL, path: WEBHOOK_PATH }));
-            app.listen(PORT, () => console.log(`✅ Сервер запущен на порту ${PORT}.`));
+            app.listen(PORT, () => console.log(`✅ [App] Сервер запущен на порту ${PORT}.`));
         } else {
+            console.log('[App] Запуск бота в режиме long-polling для разработки...');
             await bot.launch();
-            console.log('✅ Бот запущен в режиме long-polling.');
+            console.log('✅ [App] Бот запущен.');
         }
         
-        startIndexer().catch(err => console.error("🔴 Критическая ошибка в индексаторе:", err));
+        // <<< ИЗМЕНЕНО: Фоновый индексатор отключен для снижения нагрузки >>>
+        console.log('[App] Фоновый индексатор временно отключен.');
+        // startIndexer().catch(err => console.error("🔴 Критическая ошибка в индексаторе:", err));
 
     } catch (err) {
         console.error('🔴 Критическая ошибка при запуске приложения:', err);
@@ -199,6 +205,7 @@ async function startApp() {
 }
 
 function setupExpress() {
+    console.log('[Express] Настройка Express сервера...');
     app.use(compression());
     app.use(express.urlencoded({ extended: true }));
     app.use(express.json());
@@ -233,8 +240,6 @@ function setupExpress() {
         res.redirect('/admin');
     };
     
-    // <<< ИСПРАВЛЕНИЕ №1: Добавлен маршрут для Health Check >>>
-    // Render будет обращаться сюда, чтобы проверить, что веб-сервер жив.
     app.get('/health', (req, res) => res.status(200).send('OK'));
     
     app.get('/admin', (req, res) => {
@@ -256,11 +261,11 @@ function setupExpress() {
     app.get('/logout', (req, res) => { req.session.destroy(() => res.redirect('/admin')); });
     
     app.get('/broadcast', requireAuth, (req, res) => {
-        // <<< ИСПРАВЛЕНИЕ №2: Убран csrfToken из передаваемых данных, так как мы его не используем >>>
         res.render('broadcast-form', { title: 'Рассылка', error: null, success: null });
     });
 
     app.post('/broadcast', requireAuth, upload.single('audio'), async (req, res) => {
+        console.log('[Admin] Запущена рассылка...');
         const { message } = req.body;
         const audio = req.file;
         if (!message && !audio) return res.status(400).render('broadcast-form', { error: 'Текст или файл обязательны' });
@@ -278,10 +283,11 @@ function setupExpress() {
                 error++;
                 if (e.response?.error_code === 403) await updateUserField(u.id, 'active', false);
             }
-            await new Promise(r => setTimeout(r, 150)); // Пауза для избежания лимитов Telegram
+            await new Promise(r => setTimeout(r, 150));
         }
         
         if (audio) await fs.promises.unlink(audio.path);
+        console.log(`[Admin] Рассылка завершена. Успешно: ${success}, Ошибок: ${error}`);
         
         try {
             await bot.telegram.sendMessage(ADMIN_ID, `📣 Рассылка: ✅ ${success} ❌ ${error}`);
@@ -291,19 +297,15 @@ function setupExpress() {
         
         res.render('broadcast-form', { title: 'Рассылка', success: `Успешно отправлено: ${success}`, error: `Ошибок: ${error}` });
     });
-
-    // ... Остальные маршруты вашей админки ...
 }
 
 function setupTelegramBot() {
-    // <<< ИСПРАВЛЕНИЕ №3: Добавлен глобальный обработчик ошибок >>>
-    // Это "спасательный круг". Если любая ошибка не будет поймана в другом месте,
-    // она попадёт сюда, запишется в лог, и приложение НЕ УПАДЁТ.
+    console.log('[Telegraf] Настройка обработчиков бота...');
+
     bot.catch((err, ctx) => {
-        console.error(`🔴 Глобальная ошибка Telegraf для update ${ctx.update.update_id}:`, err);
-        // Можно попытаться отправить сообщение пользователю, если это возможно
+        console.error(`🔴 [Telegraf] Глобальная необработанная ошибка для update ${ctx.update.update_id}:`, err);
         try {
-            ctx.reply('Ой, что-то пошло не так. Попробуйте, пожалуйста, еще раз.').catch(() => {});
+            ctx.reply('Ой, что-то пошло не так на сервере. Попробуйте, пожалуйста, еще раз.').catch(() => {});
         } catch {}
     });
 
@@ -311,71 +313,70 @@ function setupTelegramBot() {
         const userId = ctx.from?.id;
         if (!userId) return next();
         try {
-            const user = await getUser(userId, ctx.from.first_name, ctx.from.username);
-            ctx.state.user = user;
-        } catch (error) { console.error(`Ошибка в мидлваре для userId ${userId}:`, error); }
+            ctx.state.user = await getUser(userId, ctx.from.first_name, ctx.from.username);
+        } catch (error) { console.error(`Ошибка в мидлваре получения пользователя ${userId}:`, error); }
         return next();
     });
 
     bot.start(async (ctx) => {
+        console.log(`[Bot] /start от пользователя ${ctx.from.id}`);
         try {
             await createUser(ctx.from.id, ctx.from.first_name, ctx.from.username, ctx.startPayload || null);
             await ctx.reply(texts.start, kb());
-        } catch (e) { console.error(e); }
+        } catch (e) { console.error(`Ошибка в /start для ${ctx.from.id}:`, e); }
     });
 
     bot.hears(texts.menu, async (ctx) => {
+        console.log(`[Bot] "Меню" от пользователя ${ctx.from.id}`);
         try {
-            const user = await getUser(ctx.from.id);
-            // ... Логика отображения меню
-        } catch (e) { console.error(e); }
+            // ... ваша логика меню
+        } catch (e) { console.error(`Ошибка в "Меню" для ${ctx.from.id}:`, e); }
     });
 
-    // ... Остальные обработчики команд (hears, command) ...
+    // ... Другие обработчики ...
 
     bot.on('text', async (ctx) => {
+        const userId = ctx.from.id;
+        console.log(`[Bot] Получено текстовое сообщение от ${userId}`);
         try {
             const url = ctx.message.text.match(/(https?:\/\/[^\s]+)/g)?.find(u => u.includes('soundcloud.com'));
             if (url) {
-                await enqueue(ctx, ctx.from.id, url);
+                console.log(`[Bot] Найдена SoundCloud ссылка от ${userId}: ${url}`);
+                await enqueue(ctx, userId, url);
             } else {
-                // Избегаем ответа на кнопки клавиатуры
                 if (!Object.values(texts).includes(ctx.message.text)) {
                     await ctx.reply('Пожалуйста, пришлите корректную ссылку на трек или плейлист.');
                 }
             }
         } catch (e) {
-            console.error('Ошибка в обработчике текста:', e);
+            console.error(`[Bot] Ошибка в обработчике текста для ${userId}:`, e);
             await ctx.reply(texts.error).catch(() => {});
         }
     });
 }
 
 // === ЗАПУСК И ОСТАНОВКА ПРИЛОЖЕНИЯ ===
-// <<< ИСПРАВЛЕНИЕ №4: Улучшенный обработчик остановки >>>
 async function stopBot(signal) {
-    console.log(`Получен сигнал ${signal}. Начинаю корректное завершение...`);
+    console.log(`[App] Получен сигнал ${signal}. Начинаю корректное завершение...`);
     try {
-        // 1. Останавливаем Telegraf
         if (bot.polling?.isRunning()) {
             bot.stop(signal);
-            console.log('Бот остановлен.');
+            console.log('[App] Telegraf бот остановлен.');
         }
         
-        // 2. Закрываем соединения с базами данных
         const promises = [];
         if (redisClient?.isOpen) {
-            promises.push(redisClient.quit().then(() => console.log('Redis отключён.')));
+            promises.push(redisClient.quit().then(() => console.log('[App] Redis отключён.')));
         }
-        promises.push(pool.end().then(() => console.log('Пул PostgreSQL закрыт.')));
+        promises.push(pool.end().then(() => console.log('[App] Пул PostgreSQL закрыт.')));
         
         await Promise.allSettled(promises);
-        console.log('Все соединения закрыты. Выход.');
+        console.log('[App] Все соединения закрыты. Выход.');
         
         process.exit(0);
 
     } catch (e) {
-        console.error('Ошибка при завершении работы:', e);
+        console.error('🔴 Ошибка при завершении работы:', e);
         process.exit(1);
     }
 }
