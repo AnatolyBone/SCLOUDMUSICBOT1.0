@@ -95,7 +95,7 @@ async function getUrlsToIndex() {
         const { rows } = await pool.query(`
             SELECT url, COUNT(url) as download_count
             FROM downloads_log
-            WHERE url IS NOT NULL AND url LIKE '%soundcloud.com%' AND url NOT IN (SELECT soundcloud_url FROM track_cache)
+            WHERE url IS NOT NULL AND url LIKE '%soundcloud.com%' AND url NOT IN (SELECT url FROM track_cache)
             GROUP BY url
             ORDER BY download_count DESC
             LIMIT 10;
