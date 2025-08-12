@@ -1,9 +1,11 @@
 // config.js
 
-// Загружаем переменные из .env файла, если он есть (для локальной разработки)
+// Эта строка позволяет использовать .env файл для локальной разработки
+// Убедитесь, что вы выполнили `npm install dotenv`
 import dotenv from 'dotenv';
 dotenv.config();
 
+// Экспортируем все переменные, которые могут понадобиться в других частях приложения
 export const BOT_TOKEN = process.env.BOT_TOKEN;
 export const ADMIN_ID = Number(process.env.ADMIN_ID);
 export const WEBHOOK_URL = process.env.WEBHOOK_URL;
@@ -12,11 +14,15 @@ export const SESSION_SECRET = process.env.SESSION_SECRET || 'a-very-secret-key-f
 export const ADMIN_LOGIN = process.env.ADMIN_LOGIN;
 export const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
 export const STORAGE_CHANNEL_ID = process.env.STORAGE_CHANNEL_ID;
+export const DATABASE_URL = process.env.DATABASE_URL;
+export const REDIS_URL = process.env.REDIS_URL;
+export const SUPABASE_URL = process.env.SUPABASE_URL;
+export const SUPABASE_KEY = process.env.SUPABASE_KEY;
 
-// Проверка на наличие обязательных переменных
-if (!BOT_TOKEN || !ADMIN_ID || !WEBHOOK_URL || !ADMIN_LOGIN || !ADMIN_PASSWORD) {
-    console.error('❌ Отсутствуют необходимые переменные окружения!');
-    // В продакшене лучше сразу остановить приложение, если нет конфигурации
+// Проверка на наличие самых важных переменных
+if (!BOT_TOKEN || !ADMIN_ID || !WEBHOOK_URL || !DATABASE_URL || !REDIS_URL) {
+    console.error('❌ Отсутствуют критически важные переменные окружения! (BOT_TOKEN, ADMIN_ID, WEBHOOK_URL, DATABASE_URL, REDIS_URL)');
+    // В продакшене лучше сразу остановить приложение
     if (process.env.NODE_ENV === 'production') {
         process.exit(1);
     }
