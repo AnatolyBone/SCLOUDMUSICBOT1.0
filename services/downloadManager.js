@@ -86,7 +86,7 @@ async function trackDownloadProcessor(task) {
         }
         
         const sentMessage = await bot.telegram.sendAudio(userId, { source: fs.createReadStream(tempFilePath) }, {
-            caption: trackName, title: trackName, performer: uploader || 'SoundCloud'
+             title: trackName, performer: uploader || 'SoundCloud'
         });
         
         if (statusMessage) {
@@ -134,7 +134,7 @@ async function trackDownloadProcessor(task) {
 }
 
 export const downloadQueue = new TaskQueue({
-    maxConcurrent: 2, // Оптимально для бесплатного тарифа
+    maxConcurrent: 4, // Оптимально для бесплатного тарифа
     taskProcessor: trackDownloadProcessor
 });
 
