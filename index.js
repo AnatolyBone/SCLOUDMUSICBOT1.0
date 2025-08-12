@@ -1,4 +1,4 @@
-// index.js (ФИНАЛЬНАЯ ВЕРСИЯ)
+// index.js
 
 // === Встроенные и сторонние библиотеки ===
 import express from 'express';
@@ -13,7 +13,19 @@ import pLimit from 'p-limit';
 import json2csv from 'json-2-csv';
 
 // === Импорты модулей НАШЕГО приложения ===
-import { pool, supabase, getUserById, resetDailyStats, getAllUsers, getReferralSourcesStats, getDownloadsByDate, getRegistrationsByDate, getActiveUsersByDate, getExpiringUsersPaginated, getExpiringUsersCount, setPremium, updateUserField } from './db.js';
+import { 
+    pool, 
+    supabase,
+    getUserById, 
+    resetDailyStats, 
+    getAllUsers, 
+    getReferralSourcesStats, 
+    getDownloadsByDate, 
+    getRegistrationsByDate, 
+    getActiveUsersByDate, 
+    getUserActivityByDayHour,
+    setPremium
+} from './db.js';
 import { bot } from './bot.js';
 import redisService from './services/redisClient.js';
 import { WEBHOOK_URL, PORT, SESSION_SECRET, ADMIN_ID, ADMIN_LOGIN, ADMIN_PASSWORD, WEBHOOK_PATH } from './config.js';
@@ -32,7 +44,9 @@ async function startApp() {
     try {
         await loadTexts(true);
         await redisService.connect();
+        
         setupExpress();
+        
         bot.on('message', async (ctx, next) => limit(() => next()));
 
         if (process.env.NODE_ENV === 'production') {
@@ -42,7 +56,7 @@ async function startApp() {
                 await bot.telegram.setWebhook(WEBHOOK_URL + WEBHOOK_PATH, { drop_pending_updates: true });
                 console.log('[App] Вебхук установлен, старые сообщения пропущены.');
             } else {
-                console.log('[App] Вебхук уже установлен.');
+                 console.log('[App] Вебхук уже установлен.');
             }
             app.use(bot.webhookCallback(WEBHOOK_PATH));
             app.listen(PORT, () => console.log(`✅ [App] Сервер запущен на порту ${PORT}.`));
@@ -82,7 +96,7 @@ function setupExpress() {
     
     app.use(async (req, res, next) => {
         res.locals.user = null;
-        res.locals.page = ''; // Устанавливаем значение по умолчанию
+        res.locals.page = '';
         if (req.session.authenticated && req.session.userId === ADMIN_ID) {
             try {
                 req.user = await getUserById(req.session.userId);
@@ -101,7 +115,6 @@ function setupExpress() {
     
     app.get('/admin', (req, res) => {
         if (req.session.authenticated) return res.redirect('/dashboard');
-        // <<< ИСПРАВЛЕНО: Добавлена переменная page >>>
         res.render('login', { title: 'Вход', page: 'login' });
     });
 
@@ -124,23 +137,41 @@ function setupExpress() {
         try {
             const users = await getAllUsers(true);
             const referralStats = await getReferralSourcesStats();
-            
+            const [downloadsRaw, registrationsRaw, activeRaw, activityByHourRaw] = await Promise.all([
+                getDownloadsByDate(),
+                getRegistrationsByDate(),
+                getActiveUsersByDate(),
+                getUserActivityByDayHour()
+            ]);
+
             const stats = {
                 total_users: users.length,
                 active_users: users.filter(u => u.active).length,
                 total_downloads: users.reduce((sum, u) => sum + (u.total_downloads || 0), 0),
+                active_today: users.filter(u => u.last_active && new Date(u.last_active).toDateString() === new Date().toDateString()).length
+            };
+            
+            const prepareChartData = (registrations, downloads, active) => {
+                const allDates = [...new Set([...Object.keys(registrations), ...Object.keys(downloads), ...Object.keys(active)])].sort();
+                return {
+                    labels: allDates,
+                    datasets: [
+                        { label: 'Регистрации', data: allDates.map(date => registrations[date] || 0) },
+                        { label: 'Загрузки', data: allDates.map(date => downloads[date] || 0) },
+                        { label: 'Активные', data: allDates.map(date => active[date] || 0) }
+                    ]
+                };
             };
 
             res.render('dashboard', { 
                 title: 'Дашборд', 
                 user: req.user,
-                page: 'dashboard', // Передаем page
+                page: 'dashboard',
                 stats: stats,
                 users: users.slice(0, 50),
                 referralStats: referralStats,
                 period: req.query.period || '30',
-                // Передаем пустые заглушки для графиков, чтобы избежать ошибок
-                chartDataCombined: { labels: [], datasets: [] },
+                chartDataCombined: prepareChartData(registrationsRaw, downloadsRaw, activeRaw),
                 chartDataHourActivity: { labels: [], datasets: [] },
                 chartDataWeekdayActivity: { labels: [], datasets: [] }
             });
@@ -150,17 +181,36 @@ function setupExpress() {
         }
     });
 
+    // <<< НОВОЕ: Добавлен недостающий маршрут для /users >>>
+    app.get('/users', requireAuth, async (req, res) => {
+        try {
+            const users = await getAllUsers(true);
+            res.render('users', { // Убедитесь, что у вас есть шаблон views/users.ejs
+                title: 'Пользователи',
+                page: 'users',
+                user: req.user,
+                users: users
+            });
+        } catch (error) {
+            console.error("Ошибка при загрузке страницы пользователей:", error);
+            res.status(500).send("Ошибка сервера");
+        }
+    });
+
     // <<< ВОССТАНОВЛЕНО: Остальные маршруты админки >>>
     app.get('/user/:id', requireAuth, async (req, res) => {
         try {
             const userId = parseInt(req.params.id);
             if (isNaN(userId)) return res.status(400).send('Неверный ID');
-            const user = await getUserById(userId);
-            if (!user) return res.status(404).send('Пользователь не найден');
+            const userProfile = await getUserById(userId);
+            if (!userProfile) return res.status(404).send('Пользователь не найден');
             const { data: downloads } = await supabase.from('downloads_log').select('*').eq('user_id', userId).order('downloaded_at', { ascending: false }).limit(100);
             res.render('user-profile', {
-                title: `Профиль: ${user.first_name || user.username}`, user,
-                downloads: downloads || [], page: 'user-profile'
+                title: `Профиль: ${userProfile.first_name || userProfile.username}`,
+                user: req.user, // Для layout'а
+                userProfile: userProfile, // Для страницы
+                downloads: downloads || [],
+                page: 'user-profile'
             });
         } catch (e) {
             res.status(500).send('Ошибка сервера');
@@ -168,12 +218,12 @@ function setupExpress() {
     });
     
     app.get('/broadcast', requireAuth, (req, res) => { 
-        res.render('broadcast-form', { title: 'Рассылка', page: 'broadcast', error: null, success: null }); 
+        res.render('broadcast-form', { title: 'Рассылка', page: 'broadcast', user: req.user, error: null, success: null }); 
     });
 
     app.post('/broadcast', requireAuth, upload.single('audio'), async (req, res) => {
-        // ... (ваша логика рассылки) ...
-        res.render('broadcast-form', { title: 'Рассылка', page: 'broadcast', success: 'Рассылка завершена' });
+        // Здесь ваша логика рассылки...
+        res.render('broadcast-form', { title: 'Рассылка', page: 'broadcast', user: req.user, success: 'Рассылка завершена' });
     });
     
     app.get('/export', requireAuth, async (req, res) => {
