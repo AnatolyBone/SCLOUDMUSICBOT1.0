@@ -44,7 +44,7 @@ function formatMenuMessage(user, ctx) {
 }
 
 export const bot = new Telegraf(BOT_TOKEN, {
-    handlerTimeout: 90_000
+    handlerTimeout: 300_000
 });
 
 bot.catch(async (err, ctx) => {
