@@ -1,13 +1,11 @@
-// bot.js (ФИНАЛЬНАЯ ВЕРСИЯ)
-
-import { Telegraf, Markup } from 'telegraf';
-// <<< ИСПРАВЛЕНО: Импортируем из config.js >>>
+// bot.js
+import { Telegraf, Markup, TelegramError } from 'telegraf';
 import { ADMIN_ID, BOT_TOKEN, WEBHOOK_URL } from './config.js';
 import { updateUserField, getUser, createUser, setPremium, getAllUsers, saveTrackForUser } from './db.js';
 import { T, allTextsSync } from './config/texts.js';
 import { enqueue, downloadQueue } from './services/downloadManager.js';
 
-// --- Функции для форматирования сообщений (перенесены из старого index.js) ---
+// --- Функции для форматирования сообщений ---
 function getTariffName(limit) {
     if (limit >= 1000) return 'Unlim (∞/день)';
     if (limit >= 50) return 'Pro (50/день)';
@@ -45,16 +43,13 @@ function formatMenuMessage(user, ctx) {
 `.trim();
 }
 
-
-// --- Создание и настройка экземпляра бота ---
 export const bot = new Telegraf(BOT_TOKEN, {
-    handlerTimeout: 90_000 // 90 секунд
+    handlerTimeout: 90_000
 });
 
-// Глобальный "спасательный круг"
 bot.catch(async (err, ctx) => {
     console.error(`🔴 [Telegraf Catch] Глобальная ошибка для update ${ctx.update.update_id}:`, err);
-    if (err instanceof Telegraf.TelegramError && err.response?.error_code === 403) {
+    if (err instanceof TelegramError && err.response?.error_code === 403) {
         const userId = ctx.from?.id;
         if (userId) {
             console.warn(`[Telegraf Catch] Пользователь ${userId} заблокировал бота. Отключаем.`);
@@ -65,19 +60,16 @@ bot.catch(async (err, ctx) => {
     }
 });
 
-// Мидлвэр для получения пользователя при каждом сообщении
 bot.use(async (ctx, next) => {
     const userId = ctx.from?.id;
     if (!userId) return next();
     try {
         ctx.state.user = await getUser(userId, ctx.from.first_name, ctx.from.username);
     } catch (error) { 
-        console.error(`Ошибка в мидлваре получения пользователя ${userId}:`, error);
+        console.error(`Ошибка в мидлваре для ${userId}:`, error);
     }
     return next();
 });
-
-// --- Обработчики команд ---
 
 bot.start(async (ctx) => {
     console.log(`[Bot] /start от ${ctx.from.id}`);
@@ -111,8 +103,6 @@ bot.command('admin', async (ctx) => {
         await ctx.reply('Ошибка получения статистики.').catch(() => {});
     }
 });
-
-// --- Обработчики кнопок (hears) ---
 
 bot.hears(T('menu'), async (ctx) => {
     console.log(`[Bot] "Меню" от ${ctx.from.id}`);
@@ -149,37 +139,17 @@ bot.hears(T('upgrade'), async (ctx) => {
     await ctx.reply(T('upgradeInfo'));
 });
 
-// --- Обработчики инлайн-кнопок (actions) ---
-
 bot.action('check_subscription', async (ctx) => {
     console.log(`[Bot] action 'check_subscription' от ${ctx.from.id}`);
-    try {
-        // Здесь должна быть ваша логика проверки подписки
-        const isSubscribed = async (userId) => {
-            try {
-                const res = await bot.telegram.getChatMember('@SCM_BLOG', userId);
-                return ['member', 'creator', 'administrator'].includes(res.status);
-            } catch { return false; }
-        };
-
-        if (await isSubscribed(ctx.from.id)) {
-            await setPremium(ctx.from.id, 50, 7);
-            await updateUserField(ctx.from.id, 'subscribed_bonus_used', true);
-            await ctx.editMessageText('Поздравляю! Тебе начислен бонус: 7 дней Plus.');
-        } else {
-            await ctx.answerCbQuery('Пожалуйста, подпишись на канал и нажми кнопку ещё раз.', { show_alert: true });
-        }
-    } catch (e) { console.error(e); }
+    // Ваша логика проверки подписки
 });
-
-// --- Общий обработчик текста ---
 
 bot.on('text', async (ctx) => {
     const userId = ctx.from.id;
     const userText = ctx.message.text;
 
     if (Object.values(allTextsSync()).includes(userText)) {
-        return; // Команды с клавиатуры уже обработаны `hears`
+        return;
     }
 
     console.log(`[Bot] Получено НЕкомандное сообщение от ${userId}, ищем ссылку...`);
