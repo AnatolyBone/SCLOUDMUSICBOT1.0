@@ -1,6 +1,4 @@
 // index.js
-
-// === Встроенные и сторонние библиотеки ===
 import express from 'express';
 import session from 'express-session';
 import compression from 'compression';
@@ -10,8 +8,6 @@ import expressLayouts from 'express-ejs-layouts';
 import { fileURLToPath } from 'url';
 import pgSessionFactory from 'connect-pg-simple';
 import pLimit from 'p-limit';
-
-// === Импорты модулей НАШЕГО приложения ===
 import { pool, getUserById, resetDailyStats } from './db.js';
 import { bot } from './bot.js';
 import redisService from './services/redisClient.js';
@@ -19,13 +15,10 @@ import { WEBHOOK_URL, PORT, SESSION_SECRET, ADMIN_ID, ADMIN_LOGIN, ADMIN_PASSWOR
 import { loadTexts } from './config/texts.js';
 import { downloadQueue } from './services/downloadManager.js';
 
-// === Глобальные экземпляры и утилиты ===
 const app = express();
 const upload = multer({ dest: 'uploads/' });
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
-// Главный "дроссель" для защиты от перегрузки: обрабатываем не более 1 сообщения за раз
 const limit = pLimit(1); 
 
 async function startApp() {
@@ -36,10 +29,7 @@ async function startApp() {
         
         setupExpress();
         
-        // Мидлвэр pLimit должен быть ПЕРЕД настройкой вебхука/запуском
-        bot.on('message', async (ctx, next) => {
-            return limit(() => next());
-        });
+        bot.on('message', async (ctx, next) => limit(() => next()));
 
         if (process.env.NODE_ENV === 'production') {
             console.log(`[App] Настройка вебхука для Telegram на ${WEBHOOK_URL}...`);
@@ -48,13 +38,11 @@ async function startApp() {
         } else {
             console.log('[App] Запуск бота в режиме long-polling для разработки...');
             await bot.launch();
-            console.log('✅ [App] Бот запущен.');
         }
 
         console.log('[App] Настройка фоновых задач (таймеров)...');
         setInterval(() => resetDailyStats(), 24 * 3600 * 1000);
         setInterval(() => console.log(`[Monitor] Очередь: ${downloadQueue.size} в ожидании, ${downloadQueue.activeTasks} в работе.`), 60000);
-        
         console.log('[App] Фоновый индексатор временно отключен.');
         
     } catch (err) {
@@ -116,12 +104,9 @@ function setupExpress() {
     });
 
     app.get('/logout', (req, res) => {
-        req.session.destroy(() => {
-            res.redirect('/admin');
-        });
+        req.session.destroy(() => res.redirect('/admin'));
     });
 
-    // Убедитесь, что здесь есть все ваши маршруты админки
     app.get('/dashboard', requireAuth, (req, res) => {
         res.render('dashboard', { title: 'Дашборд', user: req.user });
     });
@@ -133,10 +118,8 @@ async function stopBot(signal) {
         if (bot.polling?.isRunning()) bot.stop(signal);
         
         const promises = [];
-        if (redisService.client?.isOpen) {
-            promises.push(redisService.client.quit().then(() => console.log('✅ [Redis] Клиент отключен')));
-        }
-        promises.push(pool.end().then(() => console.log('✅ [DB] Пул PostgreSQL закрыт')));
+        if (redisService.client?.isOpen) promises.push(redisService.client.quit());
+        promises.push(pool.end());
         
         await Promise.allSettled(promises);
         console.log('[App] Все соединения закрыты. Выход.');
