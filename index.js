@@ -13,7 +13,7 @@ import pLimit from 'p-limit';
 
 // === Импорты модулей НАШЕГО приложения ===
 import { pool, getUserById } from './db.js';
-import { bot } from './src/bot.js';
+import { bot } from './bot.js';
 import redisService from './services/redisClient.js';
 import { WEBHOOK_URL, PORT, SESSION_SECRET, ADMIN_ID, ADMIN_LOGIN, ADMIN_PASSWORD } from './config.js';
 import { loadTexts } from './config/texts.js';
