@@ -12,13 +12,12 @@ import pgSessionFactory from 'connect-pg-simple';
 import pLimit from 'p-limit';
 
 // === Импорты модулей НАШЕГО приложения ===
-import { pool, getUserById } from './db.js';
+import { pool, getUserById, resetDailyStats } from './db.js';
 import { bot } from './bot.js';
 import redisService from './services/redisClient.js';
 import { WEBHOOK_URL, PORT, SESSION_SECRET, ADMIN_ID, ADMIN_LOGIN, ADMIN_PASSWORD } from './config.js';
 import { loadTexts } from './config/texts.js';
 import { downloadQueue } from './services/downloadManager.js';
-import { resetDailyStats } from './db.js';
 
 // === Глобальные экземпляры и утилиты ===
 const app = express();
@@ -26,7 +25,7 @@ const upload = multer({ dest: 'uploads/' });
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// ГЛАВНЫЙ "ДРОССЕЛЬ" ДЛЯ ЗАЩИТЫ ОТ ПЕРЕГРУЗКИ: обрабатываем не более 1 сообщения за раз
+// Главный "дроссель" для защиты от перегрузки: обрабатываем не более 1 сообщения за раз
 const limit = pLimit(1); 
 
 async function startApp() {
@@ -44,7 +43,6 @@ async function startApp() {
 
         if (process.env.NODE_ENV === 'production') {
             console.log(`[App] Настройка вебхука для Telegram на ${WEBHOOK_URL}...`);
-            // Express должен знать о вебхуке ДО того, как он начнет слушать порт.
             app.use(await bot.createWebhook({ domain: WEBHOOK_URL }));
             app.listen(PORT, () => console.log(`✅ [App] Сервер запущен на порту ${PORT}.`));
         } else {
@@ -123,10 +121,8 @@ function setupExpress() {
         });
     });
 
-    // Добавьте сюда остальные ваши маршруты админ-панели (dashboard, broadcast и т.д.)
-    // Пример:
+    // Убедитесь, что здесь есть все ваши маршруты админки
     app.get('/dashboard', requireAuth, (req, res) => {
-        // Ваша логика для дашборда
         res.render('dashboard', { title: 'Дашборд', user: req.user });
     });
 }
