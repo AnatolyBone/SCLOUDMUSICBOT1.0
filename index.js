@@ -1,4 +1,4 @@
-// index.js
+// index.js (ФИНАЛЬНАЯ ВЕРСИЯ)
 
 // === Встроенные и сторонние библиотеки ===
 import express from 'express';
@@ -115,7 +115,7 @@ function setupExpress() {
     
     app.get('/admin', (req, res) => {
         if (req.session.authenticated) return res.redirect('/dashboard');
-        res.render('login', { title: 'Вход', page: 'login' });
+        res.render('login', { title: 'Вход', page: 'login', layout: false });
     });
 
     app.post('/admin', (req, res) => {
@@ -124,7 +124,7 @@ function setupExpress() {
             req.session.userId = ADMIN_ID;
             res.redirect('/dashboard');
         } else {
-            res.render('login', { title: 'Вход', error: 'Неверные данные', page: 'login' });
+            res.render('login', { title: 'Вход', error: 'Неверные данные', page: 'login', layout: false });
         }
     });
 
@@ -132,18 +132,16 @@ function setupExpress() {
         req.session.destroy(() => res.redirect('/admin'));
     });
 
-    // <<< ИСПРАВЛЕНО: Полностью восстановлена логика дашборда со всеми переменными >>>
     app.get('/dashboard', requireAuth, async (req, res) => {
         try {
             const users = await getAllUsers(true);
             const referralStats = await getReferralSourcesStats();
-            const [downloadsRaw, registrationsRaw, activeRaw, activityByHourRaw] = await Promise.all([
+            const [downloadsRaw, registrationsRaw, activeRaw] = await Promise.all([
                 getDownloadsByDate(),
                 getRegistrationsByDate(),
-                getActiveUsersByDate(),
-                getUserActivityByDayHour()
+                getActiveUsersByDate()
             ]);
-
+            
             const stats = {
                 total_users: users.length,
                 active_users: users.filter(u => u.active).length,
@@ -181,15 +179,15 @@ function setupExpress() {
         }
     });
 
-    // <<< НОВОЕ: Добавлен недостающий маршрут для /users >>>
     app.get('/users', requireAuth, async (req, res) => {
         try {
             const users = await getAllUsers(true);
-            res.render('users', { // Убедитесь, что у вас есть шаблон views/users.ejs
+            res.render('users', {
                 title: 'Пользователи',
                 page: 'users',
                 user: req.user,
-                users: users
+                users: users,
+                q: req.query.q || ''
             });
         } catch (error) {
             console.error("Ошибка при загрузке страницы пользователей:", error);
@@ -197,7 +195,6 @@ function setupExpress() {
         }
     });
 
-    // <<< ВОССТАНОВЛЕНО: Остальные маршруты админки >>>
     app.get('/user/:id', requireAuth, async (req, res) => {
         try {
             const userId = parseInt(req.params.id);
@@ -207,8 +204,8 @@ function setupExpress() {
             const { data: downloads } = await supabase.from('downloads_log').select('*').eq('user_id', userId).order('downloaded_at', { ascending: false }).limit(100);
             res.render('user-profile', {
                 title: `Профиль: ${userProfile.first_name || userProfile.username}`,
-                user: req.user, // Для layout'а
-                userProfile: userProfile, // Для страницы
+                user: req.user,
+                userProfile: userProfile,
                 downloads: downloads || [],
                 page: 'user-profile'
             });
@@ -218,11 +215,17 @@ function setupExpress() {
     });
     
     app.get('/broadcast', requireAuth, (req, res) => { 
-        res.render('broadcast-form', { title: 'Рассылка', page: 'broadcast', user: req.user, error: null, success: null }); 
+        res.render('broadcast-form', { 
+            title: 'Рассылка', 
+            page: 'broadcast', 
+            user: req.user, 
+            error: null,
+            success: null
+        }); 
     });
 
     app.post('/broadcast', requireAuth, upload.single('audio'), async (req, res) => {
-        // Здесь ваша логика рассылки...
+        // ... Ваша логика рассылки
         res.render('broadcast-form', { title: 'Рассылка', page: 'broadcast', user: req.user, success: 'Рассылка завершена' });
     });
     
