@@ -1,4 +1,4 @@
-// index.js (ФИНАЛЬНАЯ ВЕРСИЯ v11)
+// index.js (ФИНАЛЬНАЯ ВЕРСИЯ v13)
 
 // === Встроенные и сторонние библиотеки ===
 import express from 'express';
@@ -11,6 +11,7 @@ import { fileURLToPath } from 'url';
 import pgSessionFactory from 'connect-pg-simple';
 import pLimit from 'p-limit';
 import json2csv from 'json-2-csv';
+import fs from 'fs';
 
 // === Импорты модулей НАШЕГО приложения ===
 import { 
@@ -23,7 +24,8 @@ import {
     getDownloadsByDate, 
     getRegistrationsByDate, 
     getActiveUsersByDate, 
-    setPremium
+    setPremium,
+    updateUserField
 } from './db.js';
 import { bot } from './bot.js';
 import redisService from './services/redisClient.js';
@@ -269,8 +271,55 @@ function setupExpress() {
     });
 
     app.post('/broadcast', requireAuth, upload.single('audio'), async (req, res) => {
-        // ... Ваша логика рассылки
-        res.render('broadcast-form', { title: 'Рассылка', page: 'broadcast', user: req.user, success: 'Рассылка завершена' });
+        const { message } = req.body;
+        const audioFile = req.file;
+
+        if (!message && !audioFile) {
+            return res.render('broadcast-form', {
+                title: 'Рассылка', page: 'broadcast', user: req.user,
+                error: 'Нужно ввести текст или прикрепить аудиофайл.', success: null
+            });
+        }
+        
+        let successCount = 0;
+        let errorCount = 0;
+        
+        try {
+            const users = await getAllUsers(false); // Берем только активных
+            console.log(`[Admin] Начинаю рассылку для ${users.length} пользователей...`);
+
+            for (const u of users) {
+                try {
+                    if (audioFile) {
+                        await bot.telegram.sendAudio(u.id, { source: fs.createReadStream(audioFile.path) }, { caption: message });
+                    } else {
+                        await bot.telegram.sendMessage(u.id, message);
+                    }
+                    successCount++;
+                } catch (e) {
+                    errorCount++;
+                    if (e.response?.error_code === 403) await updateUserField(u.id, 'active', false);
+                }
+                await new Promise(r => setTimeout(r, 100));
+            }
+
+            const reportMessage = `✅ Рассылка завершена!\nУспешно отправлено: ${successCount}\nОшибок: ${errorCount}`;
+            if (audioFile) await fs.promises.unlink(audioFile.path);
+            await bot.telegram.sendMessage(ADMIN_ID, reportMessage).catch(console.error);
+
+            res.render('broadcast-form', {
+                title: 'Рассылка', page: 'broadcast', user: req.user,
+                error: null, success: reportMessage
+            });
+
+        } catch (e) {
+            console.error('🔴 Критическая ошибка во время рассылки:', e);
+            if (audioFile && fs.existsSync(audioFile.path)) await fs.promises.unlink(audioFile.path);
+            res.render('broadcast-form', {
+                title: 'Рассылка', page: 'broadcast', user: req.user,
+                error: 'Произошла критическая ошибка. См. логи сервера.', success: null
+            });
+        }
     });
     
     app.get('/export', requireAuth, async (req, res) => {
