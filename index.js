@@ -1,4 +1,4 @@
-// index.js (ФИНАЛЬНАЯ ВЕРСИЯ)
+// index.js (ФИНАЛЬНАЯ ВЕРСИЯ v4)
 
 // === Встроенные и сторонние библиотеки ===
 import express from 'express';
@@ -187,7 +187,8 @@ function setupExpress() {
                 page: 'users',
                 user: req.user,
                 users: users,
-                q: req.query.q || ''
+                q: req.query.q || '',
+                status: req.query.status || ''
             });
         } catch (error) {
             console.error("Ошибка при загрузке страницы пользователей:", error);
