@@ -1,4 +1,4 @@
-// index.js
+// index.js (ФИНАЛЬНАЯ ВЕРСИЯ v10)
 
 // === Встроенные и сторонние библиотеки ===
 import express from 'express';
@@ -283,7 +283,27 @@ function setupExpress() {
 
     app.post('/set-tariff', requireAuth, async (req, res) => {
         const { userId, limit, days } = req.body;
-        await setPremium(userId, parseInt(limit), parseInt(days) || 30);
+        
+        try {
+            await setPremium(userId, parseInt(limit), parseInt(days) || 30);
+
+            let tariffName = '';
+            const newLimit = parseInt(limit);
+            if (newLimit === 5) tariffName = 'Free';
+            else if (newLimit === 30) tariffName = 'Plus';
+            else if (newLimit === 100) tariffName = 'Pro';
+            else if (newLimit >= 10000) tariffName = 'Unlimited';
+
+            const message = `🎉 Ваш тариф был обновлен администратором!\n\nНовый тариф: *${tariffName}* (${newLimit} загрузок/день).\nСрок действия: *${parseInt(days) || 30} дней*.`;
+            
+            await bot.telegram.sendMessage(userId, message, { parse_mode: 'Markdown' });
+            
+            console.log(`[Admin] Тариф для пользователя ${userId} успешно изменен на ${tariffName}. Уведомление отправлено.`);
+
+        } catch (error) {
+            console.error(`[Admin] Ошибка при смене тарифа или отправке уведомления для ${userId}:`, error.message);
+        }
+
         res.redirect(req.get('referer') || '/dashboard');
     });
 }
