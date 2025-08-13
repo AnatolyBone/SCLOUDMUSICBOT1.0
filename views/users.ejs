@@ -1,90 +1,156 @@
-<form class="row g-2 mb-3" method="get" action="/admin/users">
-  <div class="col-auto">
-    <input class="form-control form-control-sm" type="text" name="q" placeholder="Поиск по ID/имени/@username" value="<%= q || '' %>">
+<% // views/users.ejs %>
+
+<h1 class="h3 mb-3">Пользователи (<%= totalUsers %>)</h1>
+
+<!-- Фильтры -->
+<form id="filterForm" class="row g-3 align-items-center mb-4">
+  <div class="col-md-5">
+    <label for="searchInput" class="visually-hidden">Поиск</label>
+    <input type="text" class="form-control" id="searchInput" name="q" placeholder="Поиск по ID, имени, @username..." value="<%= searchQuery %>">
   </div>
-  <div class="col-auto">
-    <button class="btn btn-sm btn-outline-primary">Поиск</button>
+  <div class="col-md-3">
+    <label for="statusSelect" class="visually-hidden">Статус</label>
+    <select class="form-select" id="statusSelect" name="status">
+      <option value="" <%= statusFilter === '' ? 'selected' : '' %>>Все статусы</option>
+      <option value="active" <%= statusFilter === 'active' ? 'selected' : '' %>>Только активные</option>
+      <option value="inactive" <%= statusFilter === 'inactive' ? 'selected' : '' %>>Только неактивные</option>
+    </select>
   </div>
-  <div class="col-auto">
-    <select name="status" class="form-select form-select-sm">
-      <option value="">Все</option>
-      <option value="active" <%= status === 'active' ? 'selected' : '' %>>Активные</option>
-      <option value="inactive" <%= status === 'inactive' ? 'selected' : '' %>>Неактивные</option>
+  <div class="col-md-2">
+    <label for="limitSelect" class="visually-hidden">На странице</label>
+    <select class="form-select" id="limitSelect" name="limit">
+      <option value="25" <%= limit == 25 ? 'selected' : '' %>>25 на странице</option>
+      <option value="50" <%= limit == 50 ? 'selected' : '' %>>50 на странице</option>
+      <option value="100" <%= limit == 100 ? 'selected' : '' %>>100 на странице</option>
     </select>
   </div>
 </form>
 
-<div class="card shadow-sm">
-  <div class="card-header bg-primary text-white">
-    <h5 class="mb-0">Пользователи</h5>
-  </div>
-  <div class="card-body p-0">
-    <div class="table-responsive">
-      <table class="table table-hover mb-0 align-middle">
-        <thead class="table-light">
+<!-- Таблица пользователей (адаптивная) -->
+<div class="table-responsive">
+  <table class="table table-striped table-hover">
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Пользователь</th>
+        <th>Статус</th>
+        <th>Всего загрузок</th>
+        <th>Лимит</th>
+        <th>Регистрация</th>
+        <th>Последняя активность</th>
+      </tr>
+    </thead>
+    <tbody>
+      <% if (users.length > 0) { %>
+        <% users.forEach(u => { %>
           <tr>
-            <th>ID</th>
-            <th>Имя</th>
-            <th>Username</th>
-            <th>Лимит</th>
-            <th>Скачано всего</th>
-            <th>Активность</th>
-            <th>Действия</th>
+            <td><a href="/user/<%= u.id %>"><%= u.id %></a></td>
+            <td>
+              <div><%= u.first_name || 'Без имени' %></div>
+              <div class="text-muted small"><%= u.username ? '@' + u.username : '' %></div>
+            </td>
+            <td>
+              <% if (u.active) { %>
+                <span class="badge bg-success">Активен</span>
+              <% } else { %>
+                <span class="badge bg-secondary">Неактивен</span>
+              <% } %>
+            </td>
+            <td><%= u.total_downloads || 0 %></td>
+            <td><%= u.premium_limit %></td>
+            <td><%= new Date(u.created_at).toLocaleDateString('ru-RU') %></td>
+            <td><%= u.last_active ? new Date(u.last_active).toLocaleString('ru-RU') : 'Никогда' %></td>
           </tr>
-        </thead>
-        <tbody>
-          <% if (!users || users.length === 0) { %>
-            <tr>
-              <td colspan="7" class="text-center text-muted py-4">Ничего не найдено</td>
-            </tr>
-          <% } else { %>
-            <% users.forEach(u => { %>
-              <tr class="table-hover-row">
-                <td><%= u.id %></td>
-                <td><%= u.first_name || 'Не указано' %></td>
-                <td><%= u.username ? '@'+u.username : 'Не указано' %></td>
-                <td class="text-center"><%= u.premium_limit || '—' %></td>
-                <td class="text-center"><%= u.total_downloads || 0 %></td>
-                <td class="text-center">
-                  <%= u.last_active
-                        ? new Date(String(u.last_active).replace(' ','T')+'Z').toLocaleString('ru-RU')
-                        : '—' %>
-                </td>
-                <td class="text-center">
-                  <a class="btn btn-sm btn-outline-primary" href="/user/<%= u.id %>">Открыть</a>
-                  <form method="post" action="/admin/users/<%= u.id %>/tariff" class="d-inline-block">
-                    <select name="limit" class="form-select form-select-sm">
-                      <option value="5">Free</option>
-                      <option value="30">Plus</option>
-                      <option value="100">Pro</option>
-                      <option value="1000">Unlimited</option>
-                    </select>
-                    <button class="btn btn-sm btn-outline-primary mt-2">Сменить тариф</button>
-                  </form>
-                </td>
-              </tr>
-            <% }) %>
-          <% } %>
-        </tbody>
-      </table>
-    </div>
-  </div>
+        <% }) %>
+      <% } else { %>
+        <tr>
+          <td colspan="7" class="text-center text-muted">Пользователи не найдены.</td>
+        </tr>
+      <% } %>
+    </tbody>
+  </table>
 </div>
 
-<!-- Стиль для таблицы -->
-<style>
-  .table-hover-row:hover {
-    background-color: #f0f8ff;
+<!-- Пагинация -->
+<% if (totalPages > 1) { %>
+<nav aria-label="Пагинация">
+  <ul class="pagination justify-content-center">
+    <li class="page-item <%= currentPage === 1 ? 'disabled' : '' %>">
+      <a class="page-link" href="#" data-page="1">«</a>
+    </li>
+    <li class="page-item <%= currentPage === 1 ? 'disabled' : '' %>">
+      <a class="page-link" href="#" data-page="<%= currentPage - 1 %>">‹</a>
+    </li>
+    
+    <% 
+      const startPage = Math.max(1, currentPage - 2);
+      const endPage = Math.min(totalPages, currentPage + 2);
+    %>
+
+    <% if (startPage > 1) { %>
+      <li class="page-item disabled"><a class="page-link" href="#">...</a></li>
+    <% } %>
+
+    <% for (let i = startPage; i <= endPage; i++) { %>
+      <li class="page-item <%= i === currentPage ? 'active' : '' %>">
+        <a class="page-link" href="#" data-page="<%= i %>"><%= i %></a>
+      </li>
+    <% } %>
+
+    <% if (endPage < totalPages) { %>
+      <li class="page-item disabled"><a class="page-link" href="#">...</a></li>
+    <% } %>
+
+    <li class="page-item <%= currentPage === totalPages ? 'disabled' : '' %>">
+      <a class="page-link" href="#" data-page="<%= currentPage + 1 %>">›</a>
+    </li>
+    <li class="page-item <%= currentPage === totalPages ? 'disabled' : '' %>">
+      <a class="page-link" href="#" data-page="<%= totalPages %>">»</a>
+    </li>
+  </ul>
+</nav>
+<% } %>
+
+<!-- Скрипт для "живого" поиска и фильтрации -->
+<script>
+  const form = document.getElementById('filterForm');
+  const searchInput = document.getElementById('searchInput');
+  const statusSelect = document.getElementById('statusSelect');
+  const limitSelect = document.getElementById('limitSelect');
+  let searchTimeout;
+
+  function updateUrl(page = 1) {
+    const params = new URLSearchParams(window.location.search);
+    params.set('q', searchInput.value);
+    params.set('status', statusSelect.value);
+    params.set('limit', limitSelect.value);
+    params.set('page', page);
+    window.location.search = params.toString();
   }
 
-  .table thead th {
-    background-color: #007bff;
-    color: white;
-  }
+  // Автоматический поиск при вводе текста с задержкой
+  searchInput.addEventListener('input', () => {
+    clearTimeout(searchTimeout);
+    searchTimeout = setTimeout(() => {
+      updateUrl(1); // При новом поиске всегда переходим на первую страницу
+    }, 500); // Задержка 500 мс
+  });
 
-  .card-header {
-    background-color: #007bff;
-    color: white;
-    font-weight: bold;
-  }
-</style>
+  // Фильтрация при изменении селектов
+  statusSelect.addEventListener('change', () => updateUrl(1));
+  limitSelect.addEventListener('change', () => updateUrl(1));
+
+  // Обработка кликов по пагинации
+  document.querySelectorAll('.pagination a').forEach(link => {
+    link.addEventListener('click', (e) => {
+      e.preventDefault();
+      const page = e.target.dataset.page;
+      if (page) {
+        updateUrl(page);
+      }
+    });
+  });
+
+  // Отключаем стандартную отправку формы по Enter
+  form.addEventListener('submit', (e) => e.preventDefault());
+</script>
