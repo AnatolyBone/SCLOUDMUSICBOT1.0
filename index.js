@@ -1,4 +1,4 @@
-// index.js (ФИНАЛЬНАЯ ВЕРСИЯ v10)
+// index.js (ФИНАЛЬНАЯ ВЕРСИЯ v11)
 
 // === Встроенные и сторонние библиотеки ===
 import express from 'express';
@@ -113,9 +113,9 @@ function setupExpress() {
     app.get('/health', (req, res) => res.status(200).send('OK'));
     
     app.get('/admin', (req, res) => {
-  if (req.session.authenticated) return res.redirect('/dashboard');
-  res.render('login', { title: 'Вход', page: 'login', layout: false, error: null }); // <-- ИСПРАВЛЕНО
-});
+        if (req.session.authenticated) return res.redirect('/dashboard');
+        res.render('login', { title: 'Вход', page: 'login', layout: false, error: null });
+    });
 
     app.post('/admin', (req, res) => {
         if (req.body.username === ADMIN_LOGIN && req.body.password === ADMIN_PASSWORD) {
@@ -269,7 +269,7 @@ function setupExpress() {
     });
 
     app.post('/broadcast', requireAuth, upload.single('audio'), async (req, res) => {
-        // Ваша логика рассылки...
+        // ... Ваша логика рассылки
         res.render('broadcast-form', { title: 'Рассылка', page: 'broadcast', user: req.user, success: 'Рассылка завершена' });
     });
     
