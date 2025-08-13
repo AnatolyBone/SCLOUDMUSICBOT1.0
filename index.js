@@ -113,9 +113,9 @@ function setupExpress() {
     app.get('/health', (req, res) => res.status(200).send('OK'));
     
     app.get('/admin', (req, res) => {
-        if (req.session.authenticated) return res.redirect('/dashboard');
-        res.render('login', { title: 'Вход', page: 'login', layout: false, error: null });
-    });
+  if (req.session.authenticated) return res.redirect('/dashboard');
+  res.render('login', { title: 'Вход', page: 'login', layout: false, error: null }); // <-- ИСПРАВЛЕНО
+});
 
     app.post('/admin', (req, res) => {
         if (req.body.username === ADMIN_LOGIN && req.body.password === ADMIN_PASSWORD) {
