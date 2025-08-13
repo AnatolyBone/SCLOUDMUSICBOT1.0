@@ -1,6 +1,4 @@
 // index.js
-
-// === Встроенные и сторонние библиотеки ===
 import express from 'express';
 import session from 'express-session';
 import compression from 'compression';
@@ -12,7 +10,6 @@ import pgSessionFactory from 'connect-pg-simple';
 import pLimit from 'p-limit';
 import json2csv from 'json-2-csv';
 
-// === Импорты модулей НАШЕГО приложения ===
 import { 
     pool, 
     supabase,
@@ -23,7 +20,6 @@ import {
     getDownloadsByDate, 
     getRegistrationsByDate, 
     getActiveUsersByDate, 
-    getUserActivityByDayHour,
     setPremium
 } from './db.js';
 import { bot } from './bot.js';
@@ -32,7 +28,6 @@ import { WEBHOOK_URL, PORT, SESSION_SECRET, ADMIN_ID, ADMIN_LOGIN, ADMIN_PASSWOR
 import { loadTexts } from './config/texts.js';
 import { downloadQueue } from './services/downloadManager.js';
 
-// === Глобальные экземпляры и утилиты ===
 const app = express();
 const upload = multer({ dest: 'uploads/' });
 const __filename = fileURLToPath(import.meta.url);
@@ -115,7 +110,7 @@ function setupExpress() {
     
     app.get('/admin', (req, res) => {
         if (req.session.authenticated) return res.redirect('/dashboard');
-        res.render('login', { title: 'Вход', page: 'login', layout: false });
+        res.render('login', { title: 'Вход', page: 'login', layout: false, error: null });
     });
 
     app.post('/admin', (req, res) => {
@@ -175,60 +170,24 @@ function setupExpress() {
             });
         } catch (error) {
             console.error("Ошибка при загрузке дашборда:", error);
-            res.status(500).send("Ошибка сервера при загрузке дашборда");
+            res.status(500).send("Ошибка сервера");
         }
     });
 
     app.get('/users', requireAuth, async (req, res) => {
         try {
-            const searchQuery = req.query.q || '';
-            const statusFilter = req.query.status || '';
-            const page = parseInt(req.query.page) || 1;
-            const limit = parseInt(req.query.limit) || 25;
-            const offset = (page - 1) * limit;
-
-            let queryText = 'SELECT id, username, first_name, total_downloads, premium_limit, created_at, last_active, active FROM users';
-            const whereClauses = [];
-            const queryParams = [];
-
-            if (statusFilter === 'active') {
-                whereClauses.push('active = TRUE');
-            } else if (statusFilter === 'inactive') {
-                whereClauses.push('active = FALSE');
-            }
-
-            if (searchQuery) {
-                queryParams.push(`%${searchQuery}%`);
-                whereClauses.push(`(CAST(id AS TEXT) ILIKE $${queryParams.length} OR first_name ILIKE $${queryParams.length} OR username ILIKE $${queryParams.length})`);
-            }
-            
-            if (whereClauses.length > 0) {
-                queryText += ' WHERE ' + whereClauses.join(' AND ');
-            }
-
-            const totalResult = await pool.query(`SELECT COUNT(*) FROM (${queryText}) AS subquery`, queryParams);
-            const totalUsers = parseInt(totalResult.rows[0].count, 10);
-            const totalPages = Math.ceil(totalUsers / limit);
-
-            queryText += ' ORDER BY created_at DESC';
-            queryParams.push(limit);
-            queryText += ` LIMIT $${queryParams.length}`;
-            queryParams.push(offset);
-            queryText += ` OFFSET $${queryParams.length}`;
-
-            const { rows: users } = await pool.query(queryText, queryParams);
-
+            const users = await getAllUsers(true);
             res.render('users', {
                 title: 'Пользователи',
                 page: 'users',
                 user: req.user,
                 users: users,
-                totalPages: totalPages,
-                currentPage: page,
-                limit: limit,
-                searchQuery: searchQuery,
-                statusFilter: statusFilter,
-                totalUsers: totalUsers
+                q: req.query.q || '',
+                status: req.query.status || '',
+                totalUsers: users.length,
+                totalPages: 1,
+                currentPage: 1,
+                limit: users.length
             });
         } catch (error) {
             console.error("Ошибка при загрузке страницы пользователей:", error);
@@ -243,14 +202,18 @@ function setupExpress() {
             const userProfile = await getUserById(userId);
             if (!userProfile) return res.status(404).send('Пользователь не найден');
             const { data: downloads } = await supabase.from('downloads_log').select('*').eq('user_id', userId).order('downloaded_at', { ascending: false }).limit(100);
+            const referralsResult = await pool.query('SELECT id, first_name, username, created_at FROM users WHERE referrer_id = $1', [userId]);
+            
             res.render('user-profile', {
                 title: `Профиль: ${userProfile.first_name || userProfile.username}`,
                 user: req.user,
                 userProfile: userProfile,
                 downloads: downloads || [],
+                referrals: referralsResult.rows,
                 page: 'user-profile'
             });
         } catch (e) {
+            console.error(`Ошибка при загрузке профиля /user/${req.params.id}:`, e);
             res.status(500).send('Ошибка сервера');
         }
     });
@@ -266,7 +229,7 @@ function setupExpress() {
     });
 
     app.post('/broadcast', requireAuth, upload.single('audio'), async (req, res) => {
-        // Здесь ваша логика рассылки...
+        // ... Ваша логика рассылки
         res.render('broadcast-form', { title: 'Рассылка', page: 'broadcast', user: req.user, success: 'Рассылка завершена' });
     });
     
