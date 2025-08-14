@@ -1,7 +1,9 @@
-// bot.js
+// bot.js (ФИНАЛЬНАЯ ВЕРСИЯ v16)
+
 import { Telegraf, Markup, TelegramError } from 'telegraf';
 import { ADMIN_ID, BOT_TOKEN, WEBHOOK_URL } from './config.js';
-import { updateUserField, getUser, createUser, setPremium, getAllUsers, saveTrackForUser } from './db.js';
+// <<< ИСПРАВЛЕНО: Убран ненужный импорт saveTrackForUser >>>
+import { updateUserField, getUser, createUser, setPremium, getAllUsers } from './db.js';
 import { T, allTextsSync } from './config/texts.js';
 import { enqueue, downloadQueue } from './services/downloadManager.js';
 
@@ -43,8 +45,9 @@ function formatMenuMessage(user, ctx) {
 `.trim();
 }
 
+
 export const bot = new Telegraf(BOT_TOKEN, {
-    handlerTimeout: 300_000
+    handlerTimeout: 300_000 // 5 минут
 });
 
 bot.catch(async (err, ctx) => {
@@ -84,23 +87,17 @@ bot.command('admin', async (ctx) => {
     console.log(`[Bot] /admin от админа`);
     try {
         const users = await getAllUsers(true);
-        const totalUsers = users.length;
-        const activeUsers = users.filter(u => u.active).length;
-        const totalDownloads = users.reduce((sum, u) => sum + (u.total_downloads || 0), 0);
-        
         const statsMessage = `
 📊 *Статистика Бота*
-👤 Всего пользователей: *${totalUsers}*
-✅ Активных: *${activeUsers}*
-📥 Всего загрузок: *${totalDownloads}*
+👤 Всего пользователей: *${users.length}*
+✅ Активных: *${users.filter(u => u.active).length}*
+📥 Всего загрузок: *${users.reduce((s, u) => s + (u.total_downloads || 0), 0)}*
 ⚙️ Очередь: *${downloadQueue.activeTasks}* в работе, *${downloadQueue.size}* в ожидании.
 [Открыть админ-панель](${WEBHOOK_URL.replace(/\/$/, '')}/dashboard)
         `.trim();
-        
         await ctx.replyWithMarkdown(statsMessage, { disable_web_page_preview: true });
     } catch (e) {
         console.error('Ошибка в команде /admin:', e);
-        await ctx.reply('Ошибка получения статистики.').catch(() => {});
     }
 });
 
@@ -140,8 +137,7 @@ bot.hears(T('upgrade'), async (ctx) => {
 });
 
 bot.action('check_subscription', async (ctx) => {
-    console.log(`[Bot] action 'check_subscription' от ${ctx.from.id}`);
-    // Ваша логика проверки подписки
+    // Ваша логика
 });
 
 bot.on('text', async (ctx) => {
@@ -152,11 +148,10 @@ bot.on('text', async (ctx) => {
         return;
     }
 
-    console.log(`[Bot] Получено НЕкомандное сообщение от ${userId}, ищем ссылку...`);
     try {
         const url = userText.match(/(https?:\/\/[^\s]+)/g)?.find(u => u.includes('soundcloud.com'));
-        
         if (url) {
+            console.log(`[Bot] Найдена SoundCloud ссылка от ${userId}`);
             await enqueue(ctx, userId, url);
         } else {
             await ctx.reply('Я не понял. Пожалуйста, пришлите ссылку или используйте кнопки меню.');
