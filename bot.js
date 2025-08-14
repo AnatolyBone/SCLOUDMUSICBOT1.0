@@ -38,6 +38,22 @@ function formatMenuMessage(user, ctx) {
 `.trim();
 }
 
+// Вспомогательная функция для обработки ошибок отправки сообщений
+async function handleSendMessageError(e, userId, ctx = null) {
+    console.error(`🔴 Ошибка при работе с пользователем ${userId}:`, e.message);
+    if (e instanceof TelegramError && e.response?.error_code === 403) {
+        await updateUserField(userId, 'active', false);
+        console.log(`- Пользователь ${userId} заблокировал бота. Помечен как неактивный.`);
+    } else if (ctx) {
+        try {
+            await ctx.reply('Произошла ошибка при выполнении вашего запроса. Попробуйте позже.');
+        } catch (sendError) {
+            console.error(`- Не удалось отправить сообщение об ошибке пользователю ${userId}.`);
+        }
+    }
+}
+
+
 export const bot = new Telegraf(BOT_TOKEN, { handlerTimeout: 300_000 });
 
 bot.catch(async (err, ctx) => {
@@ -58,18 +74,18 @@ bot.start(async (ctx) => {
 });
 
 bot.command('admin', async (ctx) => {
-        if (ctx.from.id !== ADMIN_ID) {
-            return;
-        }
-        try {
-            const users = await getAllUsers(true);
-            const totalUsers = users.length;
-            const activeUsers = users.filter(u => u.active).length;
-            const totalDownloads = users.reduce((sum, u) => sum + (u.total_downloads || 0), 0);
-            const now = new Date();
-            const activeToday = users.filter(u => u.last_active && new Date(u.last_active).toDateString() === now.toDateString()).length;
-            
-            const statsMessage = `
+    if (ctx.from.id !== ADMIN_ID) {
+        return;
+    }
+    try {
+        const users = await getAllUsers(true);
+        const totalUsers = users.length;
+        const activeUsers = users.filter(u => u.active).length;
+        const totalDownloads = users.reduce((sum, u) => sum + (u.total_downloads || 0), 0);
+        const now = new Date();
+        const activeToday = users.filter(u => u.last_active && new Date(u.last_active).toDateString() === now.toDateString()).length;
+        
+        const statsMessage = `
 📊 **Статистика Бота**
 
 👤 **Пользователи:**
@@ -86,48 +102,68 @@ bot.command('admin', async (ctx) => {
 
 🔗 **Админ-панель:**
 [Открыть дашборд](${WEBHOOK_URL.replace(/\/$/, '')}/dashboard)
-            `.trim();
-            
-            await ctx.reply(statsMessage, { parse_mode: 'Markdown' });
-        } catch (e) {
-            console.error('❌ Ошибка в команде /admin:', e);
-            try { await ctx.reply('⚠️ Произошла ошибка при получении статистики.'); } catch (adminBlockError) { console.log('Админ заблокировал бота.'); }
-        }
-    });
+        `.trim();
+        
+        await ctx.reply(statsMessage, { parse_mode: 'Markdown' });
+    } catch (e) {
+        console.error('❌ Ошибка в команде /admin:', e);
+        try { await ctx.reply('⚠️ Произошла ошибка при получении статистики.'); } catch (adminBlockError) { console.log('Админ заблокировал бота.'); }
+    }
+});
 
 bot.action('check_subscription', async (ctx) => {
-        try {
-            if (await isSubscribed(ctx.from.id)) {
-                await setPremium(ctx.from.id, 50, 7);
-                await updateUserField(ctx.from.id, 'subscribed_bonus_used', true);
-                await ctx.reply('Поздравляю! Тебе начислен бонус: 7 дней Plus.');
-            } else {
-                await ctx.reply('Пожалуйста, подпишись на канал @SCM_BLOG и нажми кнопку ещё раз.');
-            }
-        } catch (e) {
-            await handleSendMessageError(e, ctx.from.id);
+    try {
+        if (await isSubscribed(ctx.from.id)) {
+            await setPremium(ctx.from.id, 50, 7);
+            await updateUserField(ctx.from.id, 'subscribed_bonus_used', true);
+            await ctx.reply('Поздравляю! Тебе начислен бонус: 7 дней Plus.');
+        } else {
+            await ctx.reply('Пожалуйста, подпишись на канал @SCM_BLOG и нажми кнопку ещё раз.');
         }
-        try { await ctx.answerCbQuery(); } catch (cbError) { console.error('Не удалось ответить на callback-запрос:', cbError.message); }
-    });
+    } catch (e) {
+        await handleSendMessageError(e, ctx.from.id, ctx);
+    }
+    try { await ctx.answerCbQuery(); } catch (cbError) { console.error('Не удалось ответить на callback-запрос:', cbError.message); }
+});
+
 bot.hears(T('menu'), async (ctx) => {
     const user = await getUser(ctx.from.id);
     await ctx.replyWithMarkdown(formatMenuMessage(user, ctx), Markup.keyboard([[T('menu'), T('upgrade')], [T('mytracks'), T('help')]]).resize());
 });
 
+// >>>>>>>> ЭТОТ БЛОК БЫЛ ЗАМЕНЕН <<<<<<<<<<
 bot.hears(T('mytracks'), async (ctx) => {
-    const user = await getUser(ctx.from.id);
-    let tracks = [];
-    try { if (user.tracks_today) tracks = JSON.parse(user.tracks_today); } catch {}
-    if (!tracks || tracks.length === 0) return await ctx.reply(T('noTracks'));
-    for (let i = 0; i < tracks.length; i += 10) {
-        const chunk = tracks.slice(i, i + 10).filter(t => t.fileId);
-        if (chunk.length > 0) await ctx.replyWithMediaGroup(chunk.map(t => ({ type: 'audio', media: t.fileId })));
+    try {
+        const user = await getUser(ctx.from.id);
+        let tracks = [];
+        try {
+            if (user.tracks_today) tracks = JSON.parse(user.tracks_today);
+        } catch (parseError) {
+            console.error(`Ошибка парсинга JSON для user ${user.id}:`, parseError);
+            tracks = []; // В случае ошибки считаем, что треков нет
+        }
+
+        if (!tracks || tracks.length === 0) {
+            await ctx.reply(T('noTracks'));
+            return;
+        }
+
+        // Отправляем треки пачками по 10 штук
+        for (let i = 0; i < tracks.length; i += 10) {
+            const chunk = tracks.slice(i, i + 10).filter(t => t.fileId);
+            if (chunk.length > 0) {
+                await ctx.replyWithMediaGroup(chunk.map(t => ({ type: 'audio', media: t.fileId })));
+            }
+        }
+    } catch (e) {
+        // Используем нашу новую функцию для обработки любых ошибок в этом блоке
+        await handleSendMessageError(e, ctx.from.id, ctx);
     }
 });
+// >>>>>>>> КОНЕЦ ЗАМЕНЕННОГО БЛОКА <<<<<<<<<<
 
 bot.hears(T('help'), async (ctx) => await ctx.reply(T('helpInfo')));
 bot.hears(T('upgrade'), async (ctx) => await ctx.reply(T('upgradeInfo')));
-bot.action('check_subscription', async (ctx) => { /* ... */ });
 
 bot.on('text', async (ctx) => {
     const userText = ctx.message.text;
