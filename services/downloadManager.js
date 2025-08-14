@@ -14,12 +14,11 @@ import { TaskQueue } from '../lib/TaskQueue.js';
 import {
     getUser,
     resetDailyLimitIfNeeded,
-    saveTrackForUser,
     logEvent,
     updateUserField,
     findCachedTrack,
     cacheTrack,
-    incrementDownloads
+    incrementDownloadsAndSaveTrack // <-- Используем новую атомарную функцию
 } from '../db.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -28,10 +27,9 @@ const cacheDir = path.join(__dirname, 'cache');
 
 const YTDL_TIMEOUT = 60; // 60 секунд
 const TRACK_TITLE_LIMIT = 100;
-const UNLIMITED_PLAYLIST_LIMIT = 100; // Новое ограничение для безлимита
+const UNLIMITED_PLAYLIST_LIMIT = 100; // Ограничение для безлимитного тарифа
 
-// Ограничиваем ytdl для получения метаданных, чтобы не перегружать CPU
-const ytdlLimit = pLimit(1);
+const ytdlLimit = pLimit(1); // Ограничиваем ytdl для получения метаданных
 
 function sanitizeFilename(name) {
     return (name || 'track').replace(/[<>:"/\\|?*]+/g, '').trim();
@@ -72,14 +70,17 @@ async function trackDownloadProcessor(task) {
         
         if (statusMessage) await bot.telegram.editMessageText(userId, statusMessage.message_id, undefined, `✅ Скачал. Отправляю...`).catch(()=>{});
         
-        const sentMessage = await bot.telegram.sendAudio(userId, { source: fs.createReadStream(tempFilePath) }, { title: trackName, performer: uploader });
+        const sentMessage = await bot.telegram.sendAudio(userId, { source: fs.createReadStream(tempFilePath) }, { 
+            title: trackName, 
+            performer: uploader 
+        });
         
         if (statusMessage) await bot.telegram.deleteMessage(userId, statusMessage.message_id).catch(()=>{});
         
         if (sentMessage?.audio?.file_id) {
+            console.log(`[Worker] Трек "${trackName}" отправлен, обновляю данные...`);
             await cacheTrack(url, sentMessage.audio.file_id, trackName);
-            await saveTrackForUser(userId, trackName, sentMessage.audio.file_id);
-            await incrementDownloads(userId, trackName, url);
+            await incrementDownloadsAndSaveTrack(userId, trackName, sentMessage.audio.file_id, url);
         }
         
         if (playlistInfo) {
@@ -94,14 +95,12 @@ async function trackDownloadProcessor(task) {
     } catch (err) {
         let userErrorMessage = `❌ Не удалось обработать трек: "${trackName}"`;
         const errorDetails = err.stderr || err.message || '';
-
         if (err.name === 'TimeoutError' || errorDetails.includes('timed out')) {
-            userErrorMessage += '. Причина: слишком долгое скачивание (таймаут).';
-        } else {
-            console.error(`❌ Ошибка воркера при обработке "${trackName}":`, errorDetails, err);
+            userErrorMessage += '. Причина: таймаут.';
         }
+        console.error(`❌ Ошибка воркера при обработке "${trackName}":`, errorDetails);
         if (statusMessage) {
-            await bot.telegram.editMessageText(userId, statusMessage.message_id, undefined, userErrorMessage).catch(() => {});
+            await bot.telegram.editMessageText(userId, statusMessage.message_id, undefined, userErrorMessage).catch(()=>{});
         } else {
             await safeSendMessage(userId, userErrorMessage);
         }
@@ -154,18 +153,9 @@ export async function enqueue(ctx, userId, url) {
                 }));
 
             let maxTracksForPlaylist;
-            // Правило для Free тарифа
-            if (user.premium_limit <= 10) {
-                maxTracksForPlaylist = 5;
-            } 
-            // Правило для Unlimited тарифа
-            else if (user.premium_limit >= 10000) {
-                maxTracksForPlaylist = UNLIMITED_PLAYLIST_LIMIT;
-            } 
-            // Для всех остальных платных тарифов
-            else {
-                maxTracksForPlaylist = Infinity; // Ограничивается только дневным лимитом
-            }
+            if (user.premium_limit <= 10) maxTracksForPlaylist = 5;
+            else if (user.premium_limit >= 10000) maxTracksForPlaylist = UNLIMITED_PLAYLIST_LIMIT;
+            else maxTracksForPlaylist = Infinity;
             
             const originalCount = tracksToProcess.length;
             const limitToProcess = Math.min(originalCount, maxTracksForPlaylist, remainingLimit);
@@ -174,7 +164,6 @@ export async function enqueue(ctx, userId, url) {
                  await safeSendMessage(userId, `ℹ️ В плейлисте ${originalCount} треков. С учетом вашего тарифа и дневного лимита будет загружено: ${limitToProcess}.`);
             }
             tracksToProcess = tracksToProcess.slice(0, limitToProcess);
-
         } else {
             tracksToProcess.push({
                 url: info.webpage_url || url, trackId: info.id,
@@ -203,8 +192,8 @@ export async function enqueue(ctx, userId, url) {
             for (const track of tasksFromCache) {
                 try {
                     await bot.telegram.sendAudio(userId, track.fileId, { title: track.trackName, performer: track.uploader });
-                    await saveTrackForUser(userId, track.trackName, track.fileId);
-                    await incrementDownloads(userId, track.trackName, track.url);
+                    // <<< ИСПРАВЛЕНО: Используем одну атомарную функцию и здесь >>>
+                    await incrementDownloadsAndSaveTrack(userId, track.trackName, track.fileId, track.url);
                     sentFromCacheCount++;
                 } catch (err) {
                     if (err.response?.error_code === 403) { await updateUserField(userId, 'active', false); return; }
@@ -221,24 +210,30 @@ export async function enqueue(ctx, userId, url) {
         }
         
         if (tasksToDownload.length > 0) {
-            await safeSendMessage(userId, `⏳ ${tasksToDownload.length} трек(ов) добавлено в очередь. Вы получите их по мере готовности.`);
+            const userAfterCache = await getUser(userId);
+            const currentLimitAfterCache = userAfterCache.premium_limit - (userAfterCache.downloads_today || 0);
+            if (currentLimitAfterCache <= 0) return await safeSendMessage(userId, '🚫 Ваш лимит исчерпан треками из кэша.');
             
-            if (isPlaylist && playlistInfo) {
-                const redisClient = redisService.getClient();
-                const playlistKey = `playlist:${userId}:${playlistInfo.id}`;
-                await redisClient.setEx(playlistKey, 3600, tasksToDownload.length.toString());
-                await logEvent(userId, 'download_playlist');
-            }
-            
-            for (const track of tasksToDownload) {
-                downloadQueue.add({ userId, ...track, playlistInfo, priority: user.premium_limit });
-                if(!isPlaylist) await logEvent(userId, 'download');
+            const tasksToReallyDownload = tasksToDownload.slice(0, currentLimitAfterCache);
+
+            if (tasksToReallyDownload.length > 0) {
+                await safeSendMessage(userId, `⏳ ${tasksToReallyDownload.length} трек(ов) добавлено в очередь. Вы получите их по мере готовности.`);
+                
+                if (isPlaylist && playlistInfo) {
+                    const redisClient = redisService.getClient();
+                    const playlistKey = `playlist:${userId}:${playlistInfo.id}`;
+                    await redisClient.setEx(playlistKey, 3600, tasksToReallyDownload.length.toString());
+                    await logEvent(userId, 'download_playlist');
+                }
+                
+                for (const track of tasksToReallyDownload) {
+                    downloadQueue.add({ userId, ...track, playlistInfo, priority: user.premium_limit });
+                    if(!isPlaylist) await logEvent(userId, 'download');
+                }
             }
         }
     } catch (err) {
-        if (processingMessage) {
-            await bot.telegram.deleteMessage(userId, processingMessage.message_id).catch(() => {});
-        }
+        if (processingMessage) await bot.telegram.deleteMessage(userId, processingMessage.message_id).catch(() => {});
         const errorMessage = err.stderr || err.message || '';
         if (err.name === 'TimeoutError' || errorMessage.includes('timed out')) {
             console.error(`❌ Таймаут в enqueue для ${userId}:`, errorMessage);
