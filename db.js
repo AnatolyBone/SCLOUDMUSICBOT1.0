@@ -58,7 +58,16 @@ export async function findCachedTrack(trackUrl) {
     return null;
   }
 }
-
+export async function resetDailyLimitIfNeeded(userId) {
+  const { rows } = await query('SELECT last_reset_date FROM users WHERE id = $1', [userId]);
+  if (rows.length > 0) {
+      const lastReset = new Date(rows[0].last_reset_date);
+      const today = new Date();
+      if(lastReset.toDateString() !== today.toDateString()){
+          await query(`UPDATE users SET downloads_today = 0, tracks_today = '[]'::jsonb, last_reset_date = CURRENT_DATE WHERE id = $1`, [userId]);
+      }
+  }
+}
 export async function cacheTrack(trackUrl, fileId, title) {
   await pool.query(
     'INSERT INTO track_cache (url, file_id, track_name) VALUES ($1, $2, $3) ON CONFLICT (url) DO UPDATE SET file_id = $2, track_name = $3',
