@@ -1,22 +1,14 @@
 // db.js
-
 import { Pool } from 'pg';
 import { createClient } from '@supabase/supabase-js';
 import json2csv from 'json-2-csv';
-const { json2csvAsync } = json2csv;
-
-// <<< ИСПРАВЛЕНО: Импортируем переменные из центрального конфига >>>
 import { SUPABASE_URL, SUPABASE_KEY, DATABASE_URL } from './config.js';
 
-// --- Инициализация клиентов ---
 export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
-
 export const pool = new Pool({
   connectionString: DATABASE_URL,
   ssl: { rejectUnauthorized: false },
 });
-
-// ==================== Базовые функции ====================
 
 async function query(text, params) {
   try {
@@ -35,15 +27,17 @@ export async function getUserById(id) {
 export async function createUser(id, first_name = '', username = '', referral_source = null, referrer_id = null) {
   await query(`
     INSERT INTO users (id, username, first_name, downloads_today, premium_limit, total_downloads, has_reviewed, last_reset_date, referred_count, created_at, last_active, referral_source, referrer_id, active, tracks_today)
-    VALUES ($1, $2, $3, 0, 10, 0, false, CURRENT_DATE, 0, NOW(), NOW(), $4, $5, TRUE, '[]'::jsonb)
+    VALUES ($1, $2, $3, 0, 5, 0, false, CURRENT_DATE, 0, NOW(), NOW(), $4, $5, TRUE, '[]'::jsonb)
     ON CONFLICT (id) DO NOTHING;
   `, [id, username || '', first_name || '', referral_source, referrer_id]);
 }
 
 export async function getUser(id, first_name = '', username = '') {
-  const { rows } = await query('SELECT * FROM users WHERE id = $1 AND active = TRUE', [id]);
+  const { rows } = await query('SELECT * FROM users WHERE id = $1', [id]); // Не проверяем active, чтобы можно было работать с заблокированными
   if (rows.length > 0) {
-    query('UPDATE users SET last_active = NOW() WHERE id = $1', [id]).catch(e => console.error(e));
+    if (rows[0].active) {
+        query('UPDATE users SET last_active = NOW() WHERE id = $1', [id]).catch(e => console.error(e));
+    }
     return rows[0];
   }
   await createUser(id, first_name, username);
@@ -51,51 +45,17 @@ export async function getUser(id, first_name = '', username = '') {
   return newUserResult.rows[0];
 }
 
-export async function logUserActivity(userId) {
-  await query(
-    'INSERT INTO user_activity_logs (user_id, activity_time) VALUES ($1, NOW())',
-    [userId]
-  );
-}
-
 const allowedFields = new Set([
   'premium_limit', 'downloads_today', 'total_downloads', 'first_name', 'username',
   'premium_until', 'subscribed_bonus_used', 'tracks_today', 'last_reset_date',
-  'active', 'referred_count', 'referral_source', 'has_reviewed', 'referrer_id',
-  'promo_1plus1_used'
+  'active', 'referred_count', 'promo_1plus1_used'
 ]);
 
 export async function updateUserField(id, field, value) {
   if (!allowedFields.has(field)) {
     throw new Error(`Недопустимое поле для обновления: ${field}`);
   }
-  const sql = `UPDATE users SET ${field} = $1 WHERE id = $2`;
-  return (await query(sql, [value, id])).rowCount;
-}
-
-const funnelCache = new Map();
-
-export async function getFunnelData(from, to) {
-  const key = `${from}_${to}`;
-  if (funnelCache.has(key) && (Date.now() - funnelCache.get(key).timestamp < 60000)) {
-    return funnelCache.get(key).data;
-  }
-  const [registrations, firstDownloads, subscriptions] = await Promise.all([
-    supabase.from('users').select('id', { count: 'exact', head: true }).gte('created_at', from).lte('created_at', to),
-    supabase.from('users').select('id', { count: 'exact', head: true }).gt('total_downloads', 0).gte('created_at', from).lte('created_at', to),
-    supabase.from('users').select('id', { count: 'exact', head: true }).gte('premium_limit', 20).gte('created_at', from).lte('created_at', to)
-  ]);
-  if (registrations.error || firstDownloads.error || subscriptions.error) {
-    console.error('❌ Ошибка Supabase воронки');
-    throw new Error('Ошибка Supabase при получении данных воронки');
-  }
-  const result = {
-    registrationCount: registrations.count || 0,
-    firstDownloadCount: firstDownloads.count || 0,
-    subscriptionCount: subscriptions.count || 0,
-  };
-  funnelCache.set(key, { data: result, timestamp: Date.now() });
-  return result;
+  await query(`UPDATE users SET ${field} = $1 WHERE id = $2`, [value, id]);
 }
 
 export async function findCachedTrack(trackUrl) {
@@ -107,7 +67,6 @@ export async function findCachedTrack(trackUrl) {
       .single();
     if (error && error.code !== 'PGRST116') {
       console.error('Ошибка поиска в кэше Supabase:', error);
-      return null;
     }
     return data ? { fileId: data.file_id, trackName: data.track_name } : null;
   } catch (e) {
@@ -123,67 +82,40 @@ export async function cacheTrack(trackUrl, fileId, title) {
   );
 }
 
-export async function incrementDownloads(id, trackName = 'track', url = null) {
-  const res = await pool.query(`
-    UPDATE users 
-    SET 
-      downloads_today = downloads_today + 1,
-      total_downloads = total_downloads + 1
-    WHERE 
-      id = $1 AND downloads_today < premium_limit
-    RETURNING *
-  `, [id]);
-  
+export async function incrementDownloadsAndSaveTrack(userId, trackName, fileId, url) {
+  const newTrack = JSON.stringify({ title: trackName, fileId });
+  const res = await query(
+    `UPDATE users
+     SET 
+       downloads_today = downloads_today + 1,
+       total_downloads = total_downloads + 1,
+       tracks_today = COALESCE(tracks_today, '[]'::jsonb) || $1::jsonb
+     WHERE 
+       id = $2 AND downloads_today < premium_limit
+     RETURNING *`,
+    [newTrack, userId]
+  );
   if (res.rowCount > 0) {
-    await logDownload(id, trackName, url); 
+    await logDownload(userId, trackName, url);
     return res.rows[0];
   }
   return null;
 }
 
-// <<< ИСПРАВЛЕНО: Функция теперь работает атомарно и не подвержена гонке состояний >>>
-export async function saveTrackForUser(id, title, fileId) {
-  const newTrack = JSON.stringify({ title, fileId });
-  await query(
-    `UPDATE users 
-     SET tracks_today = COALESCE(tracks_today, '[]'::jsonb) || $1::jsonb 
-     WHERE id = $2`, 
-    [newTrack, id]
-  );
-}
-
-export async function setPremium(id, limit, days = null) {
-  const { rows } = await query('SELECT premium_until, promo_1plus1_used FROM users WHERE id = $1', [id]);
-  if (rows.length === 0) return false;
-  let extraDays = 0;
-  let bonusApplied = false;
-  if (days && !rows[0].promo_1plus1_used) {
-    extraDays = days;
-    bonusApplied = true;
-    await updateUserField(id, 'promo_1plus1_used', true);
-  }
-  const totalDays = (days || 0) + extraDays;
-  const until = new Date(Date.now() + totalDays * 86400000).toISOString();
+export async function setPremium(id, limit, days = 30) {
+  const until = new Date(Date.now() + days * 86400000).toISOString();
   await updateUserField(id, 'premium_limit', limit);
   await updateUserField(id, 'premium_until', until);
-  return bonusApplied;
-}
-
-export async function markSubscribedBonusUsed(userId) {
-  await updateUserField(userId, 'subscribed_bonus_used', true);
 }
 
 export async function resetDailyLimitIfNeeded(userId) {
   const { rows } = await query('SELECT last_reset_date FROM users WHERE id = $1', [userId]);
-  if (!rows.length) return;
-  const lastReset = rows[0].last_reset_date;
-  const today = new Date().toISOString().slice(0, 10);
-  if (!lastReset || new Date(lastReset).toISOString().slice(0, 10) !== today) {
-    await query(`
-      UPDATE users
-      SET downloads_today = 0, tracks_today = '[]'::jsonb, last_reset_date = CURRENT_DATE
-      WHERE id = $1
-    `, [userId]);
+  if (rows.length > 0) {
+      const lastReset = new Date(rows[0].last_reset_date);
+      const today = new Date();
+      if(lastReset.toDateString() !== today.toDateString()){
+          await query(`UPDATE users SET downloads_today = 0, tracks_today = '[]'::jsonb, last_reset_date = CURRENT_DATE WHERE id = $1`, [userId]);
+      }
   }
 }
 
@@ -192,34 +124,14 @@ export async function resetDailyStats() {
 }
 
 export async function getAllUsers(includeInactive = false) {
-  let sql = 'SELECT * FROM users';
-  if (!includeInactive) sql += ' WHERE active = TRUE';
-  sql += ' ORDER BY created_at DESC';
+  const sql = includeInactive ? 'SELECT * FROM users ORDER BY created_at DESC' : 'SELECT * FROM users WHERE active = TRUE ORDER BY created_at DESC';
   const { rows } = await query(sql);
   return rows;
 }
 
 export async function getReferralSourcesStats() {
-  const { rows } = await query(`
-    SELECT referral_source, COUNT(*) as count FROM users
-    WHERE referral_source IS NOT NULL GROUP BY referral_source ORDER BY count DESC
-    `);
+  const { rows } = await query(`SELECT referral_source, COUNT(*) as count FROM users WHERE referral_source IS NOT NULL GROUP BY referral_source ORDER BY count DESC`);
   return rows.map(row => ({ source: row.referral_source, count: parseInt(row.count, 10) }));
-}
-
-export async function addReview(userId, text) {
-  await supabase.from('reviews').insert([{ user_id: userId, text, time: new Date().toISOString() }]);
-  await updateUserField(userId, 'has_reviewed', true);
-}
-
-export async function hasLeftReview(userId) {
-  const user = await getUserById(userId);
-  return user?.has_reviewed;
-}
-
-export async function getLatestReviews(limit = 10) {
-  const { data } = await supabase.from('reviews').select('*').order('time', { ascending: false }).limit(limit);
-  return data || [];
 }
 
 export async function logDownload(userId, trackTitle, url) { 
@@ -228,32 +140,10 @@ export async function logDownload(userId, trackTitle, url) {
 
 export async function logEvent(userId, event) {
   try {
-    const { error } = await supabase
-      .from('events')
-      .insert([{ user_id: userId, event_type: event }]);
-    if (error) console.error(`❌ Ошибка логирования события "${event}":`, error.message);
+    await supabase.from('events').insert([{ user_id: userId, event_type: event }]);
   } catch (e) {
     console.error(`❌ Критическая ошибка вызова Supabase для logEvent:`, e.message);
   }
-}
-
-export async function getTrackMetadata(url) {
-  const res = await query('SELECT metadata, updated_at FROM track_metadata WHERE url = $1', [url]);
-  if (!res.rows.length) return null;
-  const row = res.rows[0];
-  const ageMs = Date.now() - new Date(row.updated_at).getTime();
-  if (ageMs > 7 * 86400000) return null;
-  return row.metadata;
-}
-
-export async function saveTrackMetadata(url, metadata) {
-  await query(`
-    INSERT INTO track_metadata (url, metadata, updated_at)
-    VALUES ($1, $2, NOW())
-    ON CONFLICT (url) DO UPDATE
-    SET metadata = EXCLUDED.metadata,
-        updated_at = NOW()
-  `, [url, JSON.stringify(metadata)]);
 }
 
 export async function getRegistrationsByDate() {
@@ -269,42 +159,4 @@ export async function getDownloadsByDate() {
 export async function getActiveUsersByDate() {
   const { rows } = await query(`SELECT TO_CHAR(last_active, 'YYYY-MM-DD') as date, COUNT(DISTINCT id) as count FROM users WHERE last_active IS NOT NULL GROUP BY date ORDER BY date`);
   return rows.reduce((acc, row) => ({ ...acc, [row.date]: parseInt(row.count, 10) }), {});
-}
-
-export async function getUserActivityByDayHour(days = 30) {
-  const { rows } = await query(`
-    SELECT TO_CHAR(activity_time, 'YYYY-MM-DD') AS day, EXTRACT(HOUR FROM activity_time) AS hour, COUNT(*) AS count
-    FROM user_activity_logs WHERE activity_time >= CURRENT_DATE - INTERVAL '${days} days'
-    GROUP BY day, hour ORDER BY day, hour
-    `);
-  const activity = {};
-  rows.forEach(row => {
-    if (!activity[row.day]) activity[row.day] = Array(24).fill(0);
-    activity[row.day][parseInt(row.hour, 10)] = parseInt(row.count, 10);
-  });
-  return activity;
-}
-
-export async function getExpiringUsersPaginated(limit = 10, offset = 0) {
-  const { rows } = await query(`
-    SELECT id, username, first_name, premium_until FROM users
-    WHERE premium_until IS NOT NULL AND premium_until BETWEEN NOW() AND NOW() + INTERVAL '3 days'
-    ORDER BY premium_until ASC LIMIT $1 OFFSET $2
-    `, [limit, offset]);
-  return rows;
-}
-
-export const getExpiringUsers = getExpiringUsersPaginated;
-
-export async function getExpiringUsersCount() {
-  const { rows } = await query(`
-    SELECT COUNT(*) AS count FROM users
-    WHERE premium_until IS NOT NULL AND premium_until BETWEEN NOW() AND NOW() + INTERVAL '3 days'
-    `);
-  return parseInt(rows[0].count, 10);
-}
-
-export async function exportUsersToCSV() {
-  const users = await getAllUsers(true);
-  return json2csvAsync(users, { keys: ['id', 'username', 'first_name', 'total_downloads', 'premium_limit', 'premium_until', 'created_at', 'last_active', 'active', 'referral_source', 'referrer_id'] });
 }
