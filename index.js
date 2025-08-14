@@ -1,4 +1,4 @@
-// index.js (ФИНАЛЬНАЯ ВЕРСИЯ v13)
+// index.js (ФИНАЛЬНАЯ ВЕРСИЯ v14)
 
 // === Встроенные и сторонние библиотеки ===
 import express from 'express';
@@ -184,9 +184,9 @@ function setupExpress() {
         try {
             const searchQuery = req.query.q || '';
             const statusFilter = req.query.status || '';
-            const page = parseInt(req.query.page) || 1;
+            const pageNum = parseInt(req.query.page) || 1;
             const limit = parseInt(req.query.limit) || 25;
-            const offset = (page - 1) * limit;
+            const offset = (pageNum - 1) * limit;
 
             let queryText = 'SELECT id, username, first_name, total_downloads, premium_limit, created_at, last_active, active FROM users';
             const whereClauses = [];
@@ -225,7 +225,7 @@ function setupExpress() {
                 user: req.user,
                 users: users,
                 totalPages: totalPages,
-                currentPage: page,
+                currentPage: pageNum,
                 limit: limit,
                 searchQuery: searchQuery,
                 statusFilter: statusFilter,
@@ -285,7 +285,7 @@ function setupExpress() {
         let errorCount = 0;
         
         try {
-            const users = await getAllUsers(false); // Берем только активных
+            const users = await getAllUsers(false);
             console.log(`[Admin] Начинаю рассылку для ${users.length} пользователей...`);
 
             for (const u of users) {
