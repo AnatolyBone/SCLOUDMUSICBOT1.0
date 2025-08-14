@@ -101,9 +101,8 @@ export async function incrementDownloadsAndSaveTrack(userId, trackName, fileId, 
   );
   if (res.rowCount > 0) {
     await logDownload(userId, trackName, url);
-    return res.rows[0];
   }
-  return null;
+  return res.rowCount > 0 ? res.rows[0] : null;
 }
 
 export async function setPremium(id, limit, days = 30) {
@@ -165,6 +164,11 @@ export async function getActiveUsersByDate() {
   return rows.reduce((acc, row) => ({ ...acc, [row.date]: parseInt(row.count, 10) }), {});
 }
 
+export async function getLatestReviews(limit = 10) {
+  const { data } = await supabase.from('reviews').select('*').order('time', { ascending: false }).limit(limit);
+  return data || [];
+}
+
 export async function getExpiringUsersPaginated(limit = 10, offset = 0) {
   const { rows } = await query(`
     SELECT id, username, first_name, premium_until, premium_limit FROM users
@@ -183,4 +187,19 @@ export async function getExpiringUsersCount() {
     WHERE premium_until IS NOT NULL AND premium_until BETWEEN NOW() AND NOW() + INTERVAL '3 days'
     `);
   return parseInt(rows[0].count, 10);
+}
+
+// Эти функции были в вашем оригинальном коде, восстанавливаем их
+export async function addReview(userId, text) {
+  await supabase.from('reviews').insert([{ user_id: userId, text, time: new Date().toISOString() }]);
+  await updateUserField(userId, 'has_reviewed', true);
+}
+
+export async function hasLeftReview(userId) {
+  const user = await getUserById(userId);
+  return user?.has_reviewed;
+}
+
+export async function markSubscribedBonusUsed(userId) {
+  await updateUserField(userId, 'subscribed_bonus_used', true);
 }
