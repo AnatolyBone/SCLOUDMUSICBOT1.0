@@ -18,18 +18,18 @@ import {
     updateUserField,
     findCachedTrack,
     cacheTrack,
-    incrementDownloadsAndSaveTrack // <-- Используем новую атомарную функцию
+    incrementDownloadsAndSaveTrack
 } from '../db.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(path.dirname(__filename));
 const cacheDir = path.join(__dirname, 'cache');
 
-const YTDL_TIMEOUT = 60; // 60 секунд
+const YTDL_TIMEOUT = 60;
 const TRACK_TITLE_LIMIT = 100;
-const UNLIMITED_PLAYLIST_LIMIT = 100; // Ограничение для безлимитного тарифа
+const UNLIMITED_PLAYLIST_LIMIT = 100;
 
-const ytdlLimit = pLimit(1); // Ограничиваем ytdl для получения метаданных
+const ytdlLimit = pLimit(1);
 
 function sanitizeFilename(name) {
     return (name || 'track').replace(/[<>:"/\\|?*]+/g, '').trim();
@@ -72,13 +72,12 @@ async function trackDownloadProcessor(task) {
         
         const sentMessage = await bot.telegram.sendAudio(userId, { source: fs.createReadStream(tempFilePath) }, { 
             title: trackName, 
-            performer: uploader 
+            performer: uploader || 'SoundCloud' 
         });
         
         if (statusMessage) await bot.telegram.deleteMessage(userId, statusMessage.message_id).catch(()=>{});
         
         if (sentMessage?.audio?.file_id) {
-            console.log(`[Worker] Трек "${trackName}" отправлен, обновляю данные...`);
             await cacheTrack(url, sentMessage.audio.file_id, trackName);
             await incrementDownloadsAndSaveTrack(userId, trackName, sentMessage.audio.file_id, url);
         }
@@ -112,7 +111,7 @@ async function trackDownloadProcessor(task) {
 }
 
 export const downloadQueue = new TaskQueue({
-    maxConcurrent: 2, // Оптимально для бесплатного тарифа
+    maxConcurrent: 2,
     taskProcessor: trackDownloadProcessor
 });
 
@@ -189,19 +188,20 @@ export async function enqueue(ctx, userId, url) {
         
         if (tasksFromCache.length > 0) {
             let sentFromCacheCount = 0;
+            const userForCache = await getUser(userId);
+            let remainingLimitForCache = userForCache.premium_limit - (userForCache.downloads_today || 0);
+
             for (const track of tasksFromCache) {
+                if (remainingLimitForCache <= 0) break;
                 try {
                     await bot.telegram.sendAudio(userId, track.fileId, { title: track.trackName, performer: track.uploader });
-                    // <<< ИСПРАВЛЕНО: Используем одну атомарную функцию и здесь >>>
                     await incrementDownloadsAndSaveTrack(userId, track.trackName, track.fileId, track.url);
                     sentFromCacheCount++;
+                    remainingLimitForCache--;
                 } catch (err) {
                     if (err.response?.error_code === 403) { await updateUserField(userId, 'active', false); return; }
-                    else if (err.description?.includes('FILE_REFERENCE_EXPIRED')) {
-                        tasksToDownload.push(track);
-                    } else {
-                        console.error(`⚠️ Ошибка отправки из кэша для ${userId}: ${err.message}`);
-                    }
+                    else if (err.description?.includes('FILE_REFERENCE_EXPIRED')) tasksToDownload.push(track);
+                    else console.error(`⚠️ Ошибка отправки из кэша для ${userId}: ${err.message}`);
                 }
             }
             if (sentFromCacheCount > 0) {
