@@ -1,13 +1,10 @@
-// bot.js (ФИНАЛЬНАЯ ВЕРСИЯ v16)
-
+// bot.js
 import { Telegraf, Markup, TelegramError } from 'telegraf';
 import { ADMIN_ID, BOT_TOKEN, WEBHOOK_URL } from './config.js';
-// <<< ИСПРАВЛЕНО: Убран ненужный импорт saveTrackForUser >>>
 import { updateUserField, getUser, createUser, setPremium, getAllUsers } from './db.js';
 import { T, allTextsSync } from './config/texts.js';
 import { enqueue, downloadQueue } from './services/downloadManager.js';
 
-// --- Функции для форматирования сообщений ---
 function getTariffName(limit) {
     if (limit >= 1000) return 'Unlim (∞/день)';
     if (limit >= 50) return 'Pro (50/день)';
@@ -30,133 +27,70 @@ function formatMenuMessage(user, ctx) {
 
     return `
 👋 Привет, ${user.first_name || 'пользователь'}!
-
 Твой профиль:
 💼 Тариф: *${tariffLabel}*
 ⏳ Осталось дней подписки: *${daysLeft}*
 🎧 Сегодня скачано: *${downloadsToday}* из *${user.premium_limit}*
-
 👫 Приглашено друзей: *${invited}*
-
 🔗 Твоя реферальная ссылка для друзей:
 \`${refLink}\`
-
-Просто отправь мне ссылку на трек или плейлист с SoundCloud, и я его скачаю!
+Просто отправь мне ссылку, и я скачаю трек!
 `.trim();
 }
 
-
-export const bot = new Telegraf(BOT_TOKEN, {
-    handlerTimeout: 300_000 // 5 минут
-});
+export const bot = new Telegraf(BOT_TOKEN, { handlerTimeout: 300_000 });
 
 bot.catch(async (err, ctx) => {
     console.error(`🔴 [Telegraf Catch] Глобальная ошибка для update ${ctx.update.update_id}:`, err);
     if (err instanceof TelegramError && err.response?.error_code === 403) {
-        const userId = ctx.from?.id;
-        if (userId) {
-            console.warn(`[Telegraf Catch] Пользователь ${userId} заблокировал бота. Отключаем.`);
-            await updateUserField(userId, 'active', false).catch(dbError => {
-                console.error(`[Telegraf Catch] Ошибка при отключении пользователя ${userId}:`, dbError);
-            });
-        }
+        if (ctx.from?.id) await updateUserField(ctx.from.id, 'active', false);
     }
 });
 
 bot.use(async (ctx, next) => {
-    const userId = ctx.from?.id;
-    if (!userId) return next();
-    try {
-        ctx.state.user = await getUser(userId, ctx.from.first_name, ctx.from.username);
-    } catch (error) { 
-        console.error(`Ошибка в мидлваре для ${userId}:`, error);
-    }
+    if (ctx.from) ctx.state.user = await getUser(ctx.from.id, ctx.from.first_name, ctx.from.username);
     return next();
 });
 
 bot.start(async (ctx) => {
-    console.log(`[Bot] /start от ${ctx.from.id}`);
-    try {
-        await createUser(ctx.from.id, ctx.from.first_name, ctx.from.username, ctx.startPayload || null);
-        await ctx.reply(T('start'), Markup.keyboard([[T('menu'), T('upgrade')], [T('mytracks'), T('help')]]).resize());
-    } catch (e) { console.error(e); }
+    await createUser(ctx.from.id, ctx.from.first_name, ctx.from.username, ctx.startPayload || null);
+    await ctx.reply(T('start'), Markup.keyboard([[T('menu'), T('upgrade')], [T('mytracks'), T('help')]]).resize());
 });
 
 bot.command('admin', async (ctx) => {
     if (ctx.from.id !== ADMIN_ID) return;
-    console.log(`[Bot] /admin от админа`);
-    try {
-        const users = await getAllUsers(true);
-        const statsMessage = `
-📊 *Статистика Бота*
-👤 Всего пользователей: *${users.length}*
-✅ Активных: *${users.filter(u => u.active).length}*
-📥 Всего загрузок: *${users.reduce((s, u) => s + (u.total_downloads || 0), 0)}*
-⚙️ Очередь: *${downloadQueue.activeTasks}* в работе, *${downloadQueue.size}* в ожидании.
-[Открыть админ-панель](${WEBHOOK_URL.replace(/\/$/, '')}/dashboard)
-        `.trim();
-        await ctx.replyWithMarkdown(statsMessage, { disable_web_page_preview: true });
-    } catch (e) {
-        console.error('Ошибка в команде /admin:', e);
-    }
+    const users = await getAllUsers(true);
+    const statsMessage = `*Статистика:*\nВсего: ${users.length}\nАктивных: ${users.filter(u => u.active).length}`;
+    await ctx.replyWithMarkdown(statsMessage);
 });
 
 bot.hears(T('menu'), async (ctx) => {
-    console.log(`[Bot] "Меню" от ${ctx.from.id}`);
-    try {
-        const user = await getUser(ctx.from.id);
-        await ctx.replyWithMarkdown(formatMenuMessage(user, ctx), Markup.keyboard([[T('menu'), T('upgrade')], [T('mytracks'), T('help')]]).resize());
-    } catch (e) { console.error(e); }
+    const user = await getUser(ctx.from.id);
+    await ctx.replyWithMarkdown(formatMenuMessage(user, ctx), Markup.keyboard([[T('menu'), T('upgrade')], [T('mytracks'), T('help')]]).resize());
 });
 
 bot.hears(T('mytracks'), async (ctx) => {
-    console.log(`[Bot] "Мои треки" от ${ctx.from.id}`);
-    try {
-        const user = await getUser(ctx.from.id);
-        let tracks = [];
-        try { if (user.tracks_today) tracks = JSON.parse(user.tracks_today); } catch {}
-        if (!tracks || tracks.length === 0) return await ctx.reply(T('noTracks'));
-        
-        for (let i = 0; i < tracks.length; i += 10) {
-            const chunk = tracks.slice(i, i + 10).filter(t => t.fileId);
-            if (chunk.length > 0) {
-                await ctx.replyWithMediaGroup(chunk.map(t => ({ type: 'audio', media: t.fileId })));
-            }
-        }
-    } catch (e) { console.error(e); }
+    const user = await getUser(ctx.from.id);
+    let tracks = [];
+    try { if (user.tracks_today) tracks = JSON.parse(user.tracks_today); } catch {}
+    if (!tracks || tracks.length === 0) return await ctx.reply(T('noTracks'));
+    for (let i = 0; i < tracks.length; i += 10) {
+        const chunk = tracks.slice(i, i + 10).filter(t => t.fileId);
+        if (chunk.length > 0) await ctx.replyWithMediaGroup(chunk.map(t => ({ type: 'audio', media: t.fileId })));
+    }
 });
 
-bot.hears(T('help'), async (ctx) => {
-    console.log(`[Bot] "Помощь" от ${ctx.from.id}`);
-    await ctx.reply(T('helpInfo'));
-});
-
-bot.hears(T('upgrade'), async (ctx) => {
-    console.log(`[Bot] "Расширить лимит" от ${ctx.from.id}`);
-    await ctx.reply(T('upgradeInfo'));
-});
-
-bot.action('check_subscription', async (ctx) => {
-    // Ваша логика
-});
+bot.hears(T('help'), async (ctx) => await ctx.reply(T('helpInfo')));
+bot.hears(T('upgrade'), async (ctx) => await ctx.reply(T('upgradeInfo')));
+bot.action('check_subscription', async (ctx) => { /* ... */ });
 
 bot.on('text', async (ctx) => {
-    const userId = ctx.from.id;
     const userText = ctx.message.text;
-
-    if (Object.values(allTextsSync()).includes(userText)) {
-        return;
-    }
-
-    try {
-        const url = userText.match(/(https?:\/\/[^\s]+)/g)?.find(u => u.includes('soundcloud.com'));
-        if (url) {
-            console.log(`[Bot] Найдена SoundCloud ссылка от ${userId}`);
-            await enqueue(ctx, userId, url);
-        } else {
-            await ctx.reply('Я не понял. Пожалуйста, пришлите ссылку или используйте кнопки меню.');
-        }
-    } catch (e) {
-        console.error(`[Bot] Ошибка в общем обработчике текста для ${userId}:`, e);
+    if (Object.values(allTextsSync()).includes(userText)) return;
+    const url = userText.match(/(https?:\/\/[^\s]+)/g)?.find(u => u.includes('soundcloud.com'));
+    if (url) {
+        await enqueue(ctx, ctx.from.id, url);
+    } else {
+        await ctx.reply('Я не понял. Пришлите ссылку или используйте меню.');
     }
 });
