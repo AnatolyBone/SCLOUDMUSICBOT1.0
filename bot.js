@@ -1,7 +1,7 @@
 // bot.js
 import { Telegraf, Markup, TelegramError } from 'telegraf';
 import { ADMIN_ID, BOT_TOKEN, WEBHOOK_URL } from './config.js';
-import { updateUserField, getUser, createUser, setPremium, getAllUsers } from './db.js';
+import { updateUserField, getUser, createUser, setPremium, getAllUsers, resetDailyLimitIfNeeded } from './db.js';
 import { T, allTextsSync } from './config/texts.js';
 import { enqueue, downloadQueue } from './services/downloadManager.js';
 
@@ -38,7 +38,6 @@ function formatMenuMessage(user, ctx) {
 `.trim();
 }
 
-// Вспомогательная функция для обработки ошибок отправки сообщений
 async function handleSendMessageError(e, userId, ctx = null) {
     console.error(`🔴 Ошибка при работе с пользователем ${userId}:`, e.message);
     if (e instanceof TelegramError && e.response?.error_code === 403) {
@@ -53,7 +52,6 @@ async function handleSendMessageError(e, userId, ctx = null) {
     }
 }
 
-
 export const bot = new Telegraf(BOT_TOKEN, { handlerTimeout: 300_000 });
 
 bot.catch(async (err, ctx) => {
@@ -64,7 +62,10 @@ bot.catch(async (err, ctx) => {
 });
 
 bot.use(async (ctx, next) => {
-    if (ctx.from) ctx.state.user = await getUser(ctx.from.id, ctx.from.first_name, ctx.from.username);
+    if (ctx.from) {
+        await resetDailyLimitIfNeeded(ctx.from.id);
+        ctx.state.user = await getUser(ctx.from.id, ctx.from.first_name, ctx.from.username);
+    }
     return next();
 });
 
@@ -113,6 +114,7 @@ bot.command('admin', async (ctx) => {
 
 bot.action('check_subscription', async (ctx) => {
     try {
+        // Убедитесь, что функция isSubscribed определена где-то
         if (await isSubscribed(ctx.from.id)) {
             await setPremium(ctx.from.id, 50, 7);
             await updateUserField(ctx.from.id, 'subscribed_bonus_used', true);
@@ -131,36 +133,29 @@ bot.hears(T('menu'), async (ctx) => {
     await ctx.replyWithMarkdown(formatMenuMessage(user, ctx), Markup.keyboard([[T('menu'), T('upgrade')], [T('mytracks'), T('help')]]).resize());
 });
 
-// >>>>>>>> ЭТОТ БЛОК БЫЛ ЗАМЕНЕН <<<<<<<<<<
+// >>>>>>> ИСПРАВЛЕННЫЙ КОД ПОЛЬЗОВАТЕЛЯ <<<<<<<<<
 bot.hears(T('mytracks'), async (ctx) => {
     try {
         const user = await getUser(ctx.from.id);
-        let tracks = [];
-        try {
-            if (user.tracks_today) tracks = JSON.parse(user.tracks_today);
-        } catch (parseError) {
-            console.error(`Ошибка парсинга JSON для user ${user.id}:`, parseError);
-            tracks = []; // В случае ошибки считаем, что треков нет
-        }
+        // Поле tracks_today из PostgreSQL уже является объектом (массивом), парсинг не нужен.
+        const tracks = user.tracks_today;
 
-        if (!tracks || tracks.length === 0) {
+        if (!tracks || !Array.isArray(tracks) || tracks.length === 0) {
             await ctx.reply(T('noTracks'));
             return;
         }
 
-        // Отправляем треки пачками по 10 штук
         for (let i = 0; i < tracks.length; i += 10) {
-            const chunk = tracks.slice(i, i + 10).filter(t => t.fileId);
+            const chunk = tracks.slice(i, i + 10).filter(t => t && t.fileId);
             if (chunk.length > 0) {
                 await ctx.replyWithMediaGroup(chunk.map(t => ({ type: 'audio', media: t.fileId })));
             }
         }
     } catch (e) {
-        // Используем нашу новую функцию для обработки любых ошибок в этом блоке
         await handleSendMessageError(e, ctx.from.id, ctx);
     }
 });
-// >>>>>>>> КОНЕЦ ЗАМЕНЕННОГО БЛОКА <<<<<<<<<<
+// >>>>>>> КОНЕЦ ИСПРАВЛЕННОГО КОДА <<<<<<<<<
 
 bot.hears(T('help'), async (ctx) => await ctx.reply(T('helpInfo')));
 bot.hears(T('upgrade'), async (ctx) => await ctx.reply(T('upgradeInfo')));
