@@ -47,7 +47,7 @@
               <td>@<%= u.username || '-' %></td>
               <td><%= u.downloads_today %></td>
               <td><%= u.premium_limit %></td>
-              <td><%= u.premium_until ? u.premium_until.split('T')[0] : '-' %></td>
+              <td><%= u.premium_until ? new Date(u.premium_until).toLocaleDateString('ru-RU') : '-' %></td>
               <td>
                 <form class="inline" method="post" action="/admin/set-plan">
                   <input type="hidden" name="id" value="<%= u.id %>">
