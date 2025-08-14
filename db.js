@@ -1,10 +1,14 @@
 // db.js
+
 import { Pool } from 'pg';
 import { createClient } from '@supabase/supabase-js';
 import json2csv from 'json-2-csv';
+const { json2csvAsync } = json2csv;
+
 import { SUPABASE_URL, SUPABASE_KEY, DATABASE_URL } from './config.js';
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+
 export const pool = new Pool({
   connectionString: DATABASE_URL,
   ssl: { rejectUnauthorized: false },
@@ -33,7 +37,7 @@ export async function createUser(id, first_name = '', username = '', referral_so
 }
 
 export async function getUser(id, first_name = '', username = '') {
-  const { rows } = await query('SELECT * FROM users WHERE id = $1', [id]); // Не проверяем active, чтобы можно было работать с заблокированными
+  const { rows } = await query('SELECT * FROM users WHERE id = $1', [id]);
   if (rows.length > 0) {
     if (rows[0].active) {
         query('UPDATE users SET last_active = NOW() WHERE id = $1', [id]).catch(e => console.error(e));
@@ -159,4 +163,24 @@ export async function getDownloadsByDate() {
 export async function getActiveUsersByDate() {
   const { rows } = await query(`SELECT TO_CHAR(last_active, 'YYYY-MM-DD') as date, COUNT(DISTINCT id) as count FROM users WHERE last_active IS NOT NULL GROUP BY date ORDER BY date`);
   return rows.reduce((acc, row) => ({ ...acc, [row.date]: parseInt(row.count, 10) }), {});
+}
+
+export async function getExpiringUsersPaginated(limit = 10, offset = 0) {
+  const { rows } = await query(`
+    SELECT id, username, first_name, premium_until, premium_limit FROM users
+    WHERE premium_until IS NOT NULL AND premium_until BETWEEN NOW() AND NOW() + INTERVAL '3 days'
+    ORDER BY premium_until ASC LIMIT $1 OFFSET $2
+    `, [limit, offset]);
+  return rows;
+}
+
+// <<< ИСПРАВЛЕНО: Возвращен недостающий экспорт >>>
+export const getExpiringUsers = getExpiringUsersPaginated;
+
+export async function getExpiringUsersCount() {
+  const { rows } = await query(`
+    SELECT COUNT(*) AS count FROM users
+    WHERE premium_until IS NOT NULL AND premium_until BETWEEN NOW() AND NOW() + INTERVAL '3 days'
+    `);
+  return parseInt(rows[0].count, 10);
 }
