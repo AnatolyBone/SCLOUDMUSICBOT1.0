@@ -4,7 +4,7 @@
 <style>
   .card-metric { transition: transform 0.2s; }
   .card-metric:hover { transform: translateY(-5px); }
-  .chart-wrap { position: relative; }
+  .chart-wrap { position: relative; height: 100%; }
 </style>
 
 <%- contentFor('body') %>
@@ -16,6 +16,7 @@
   </div>
 </div>
 
+<!-- ИСПРАВЛЕНО: Добавлена проверка на существование query -->
 <% if (typeof query !== 'undefined' && query.ping) { %>
   <div class="alert <%= query.ping === 'ok' ? 'alert-success' : 'alert-danger' %>">
     <%= query.ping === 'ok' ? 'Канал доступен' : 'Ошибка отправки в канал' %>
@@ -25,34 +26,35 @@
 <!-- Метрики -->
 <div class="row g-4 mb-4">
   <div class="col-md-3 col-sm-6">
-    <div class="card card-metric shadow-sm">
+    <div class="card card-metric shadow-sm text-center">
       <div class="card-body">
-        <div class="text-muted">Пользователей</div>
-        <div class="h3 mb-0"><%= stats.total_users %></div>
+        <h5 class="card-title text-muted">Пользователей</h5>
+        <!-- ИСПРАВЛЕНО: Добавлена проверка на существование stats -->
+        <p class="h2 mb-0"><%= (typeof stats !== 'undefined' && stats.total_users) ? stats.total_users : '0' %></p>
       </div>
     </div>
   </div>
   <div class="col-md-3 col-sm-6">
-    <div class="card card-metric shadow-sm">
+    <div class="card card-metric shadow-sm text-center">
       <div class="card-body">
-        <div class="text-muted">Активных сегодня</div>
-        <div class="h3 mb-0"><%= stats.active_today %></div>
+        <h5 class="card-title text-muted">Активных сегодня</h5>
+        <p class="h2 mb-0"><%= (typeof stats !== 'undefined' && stats.active_today) ? stats.active_today : '0' %></p>
       </div>
     </div>
   </div>
   <div class="col-md-3 col-sm-6">
-    <div class="card card-metric shadow-sm">
+    <div class="card card-metric shadow-sm text-center">
       <div class="card-body">
-        <div class="text-muted">Загрузки (всего)</div>
-        <div class="h3 mb-0"><%= stats.total_downloads %></div>
+        <h5 class="card-title text-muted">Загрузки (всего)</h5>
+        <p class="h2 mb-0"><%= (typeof stats !== 'undefined' && stats.total_downloads) ? stats.total_downloads : '0' %></p>
       </div>
     </div>
   </div>
     <div class="col-md-3 col-sm-6">
-    <div class="card card-metric shadow-sm">
+    <div class="card card-metric shadow-sm text-center">
       <div class="card-body">
-        <div class="text-muted">Активных / Всего</div>
-        <div class="h3 mb-0"><%= stats.active_users %> / <%= stats.total_users %></div>
+        <h5 class="card-title text-muted">Активных / Всего</h5>
+        <p class="h2 mb-0"><%= (typeof stats !== 'undefined' && stats.active_users) ? stats.active_users : '0' %> / <%= (typeof stats !== 'undefined') ? stats.total_users : '0' %></p>
       </div>
     </div>
   </div>
@@ -90,9 +92,10 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
   document.addEventListener('DOMContentLoaded', () => {
-    const combinedData = <%- JSON.stringify(chartDataCombined || {}) %>;
-    const hourData = <%- JSON.stringify(chartDataHourActivity || {}) %>;
-    const weekData = <%- JSON.stringify(chartDataWeekdayActivity || {}) %>;
+    // ИСПРАВЛЕНО: JSON.stringify теперь обернут в <%- ... %> для правильного вывода JSON
+    const combinedData = <%- JSON.stringify(typeof chartDataCombined !== 'undefined' ? chartDataCombined : {}) %>;
+    const hourData = <%- JSON.stringify(typeof chartDataHourActivity !== 'undefined' ? chartDataHourActivity : {}) %>;
+    const weekData = <%- JSON.stringify(typeof chartDataWeekdayActivity !== 'undefined' ? chartDataWeekdayActivity : {}) %>;
 
     const commonOptions = {
         responsive: true,
