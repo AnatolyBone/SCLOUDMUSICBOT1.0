@@ -1,5 +1,4 @@
 // db.js
-
 import { Pool } from 'pg';
 import { createClient } from '@supabase/supabase-js';
 import json2csv from 'json-2-csv';
@@ -83,8 +82,9 @@ export async function cacheTrack(trackUrl, fileId, title) {
   );
 }
 
+// >>>>>>>> ИСПРАВЛЕННАЯ ФУНКЦИЯ <<<<<<<<<<
 export async function incrementDownloadsAndSaveTrack(userId, trackName, fileId, url) {
-  const newTrack = JSON.stringify({ title: trackName, fileId });
+  const newTrack = { title: trackName, fileId: fileId, url: url };
   const res = await query(
     `UPDATE users
      SET 
@@ -101,6 +101,7 @@ export async function incrementDownloadsAndSaveTrack(userId, trackName, fileId, 
   }
   return res.rowCount > 0 ? res.rows[0] : null;
 }
+// >>>>>>>> КОНЕЦ ИСПРАВЛЕННОЙ ФУНКЦИИ <<<<<<<<<<
 
 export async function setPremium(id, limit, days = 30) {
   const until = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
@@ -191,7 +192,6 @@ export async function getUserActivityByDayHour(days = 30) {
     return activity;
 }
 
-// Восстановленные функции
 export async function addReview(userId, text) {
   await supabase.from('reviews').insert([{ user_id: userId, text, time: new Date().toISOString() }]);
   await updateUserField(userId, 'has_reviewed', true);
