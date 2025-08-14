@@ -1,24 +1,16 @@
 // db.js
-
 import { Pool } from 'pg';
 import { createClient } from '@supabase/supabase-js';
-import json2csv from 'json-2-csv';
-const { json2csvAsync } = json2csv;
-
 import { SUPABASE_URL, SUPABASE_KEY, DATABASE_URL } from './config.js';
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
-
-export const pool = new Pool({
-  connectionString: DATABASE_URL,
-  ssl: { rejectUnauthorized: false },
-});
+export const pool = new Pool({ connectionString: DATABASE_URL, ssl: { rejectUnauthorized: false } });
 
 async function query(text, params) {
   try {
     return await pool.query(text, params);
   } catch (e) {
-    console.error('❌ Ошибка запроса к БД:', e.message, { query: text });
+    console.error('❌ Ошибка запроса к БД:', e.message);
     throw e;
   }
 }
@@ -29,18 +21,19 @@ export async function getUserById(id) {
 }
 
 export async function createUser(id, first_name = '', username = '', referral_source = null, referrer_id = null) {
-  await query(`
-    INSERT INTO users (id, username, first_name, downloads_today, premium_limit, total_downloads, has_reviewed, last_reset_date, referred_count, created_at, last_active, referral_source, referrer_id, active, tracks_today)
-    VALUES ($1, $2, $3, 0, 5, 0, false, CURRENT_DATE, 0, NOW(), NOW(), $4, $5, TRUE, '[]'::jsonb)
-    ON CONFLICT (id) DO NOTHING;
-  `, [id, username || '', first_name || '', referral_source, referrer_id]);
+  await query(
+    `INSERT INTO users (id, username, first_name, downloads_today, premium_limit, total_downloads, tracks_today, created_at, last_active, referral_source, referrer_id, active)
+     VALUES ($1, $2, $3, 0, 5, 0, '[]'::jsonb, NOW(), NOW(), $4, $5, TRUE)
+     ON CONFLICT (id) DO NOTHING`,
+    [id, username || '', first_name || '', referral_source, referrer_id]
+  );
 }
 
 export async function getUser(id, first_name = '', username = '') {
   const { rows } = await query('SELECT * FROM users WHERE id = $1', [id]);
   if (rows.length > 0) {
     if (rows[0].active) {
-        query('UPDATE users SET last_active = NOW() WHERE id = $1', [id]).catch(e => console.error(e));
+        await query('UPDATE users SET last_active = NOW() WHERE id = $1', [id]);
     }
     return rows[0];
   }
@@ -49,29 +42,16 @@ export async function getUser(id, first_name = '', username = '') {
   return newUserResult.rows[0];
 }
 
-const allowedFields = new Set([
-  'premium_limit', 'downloads_today', 'total_downloads', 'first_name', 'username',
-  'premium_until', 'subscribed_bonus_used', 'tracks_today', 'last_reset_date',
-  'active', 'referred_count', 'promo_1plus1_used'
-]);
-
+const allowedFields = new Set(['premium_limit', 'downloads_today', 'total_downloads', 'first_name', 'username', 'premium_until', 'tracks_today', 'active']);
 export async function updateUserField(id, field, value) {
-  if (!allowedFields.has(field)) {
-    throw new Error(`Недопустимое поле для обновления: ${field}`);
-  }
+  if (!allowedFields.has(field)) throw new Error(`Недопустимое поле: ${field}`);
   await query(`UPDATE users SET ${field} = $1 WHERE id = $2`, [value, id]);
 }
 
 export async function findCachedTrack(trackUrl) {
   try {
-    const { data, error } = await supabase
-      .from('track_cache')
-      .select('file_id, track_name')
-      .eq('url', trackUrl)
-      .single();
-    if (error && error.code !== 'PGRST116') {
-      console.error('Ошибка поиска в кэше Supabase:', error);
-    }
+    const { data, error } = await supabase.from('track_cache').select('file_id, track_name').eq('url', trackUrl).single();
+    if (error && error.code !== 'PGRST116') console.error('Ошибка поиска в кэше:', error);
     return data ? { fileId: data.file_id, trackName: data.track_name } : null;
   } catch (e) {
     console.error('Критическая ошибка в findCachedTrack:', e);
@@ -89,44 +69,24 @@ export async function cacheTrack(trackUrl, fileId, title) {
 export async function incrementDownloadsAndSaveTrack(userId, trackName, fileId, url) {
   const newTrack = JSON.stringify({ title: trackName, fileId });
   const res = await query(
-    `UPDATE users
-     SET 
-       downloads_today = downloads_today + 1,
-       total_downloads = total_downloads + 1,
-       tracks_today = COALESCE(tracks_today, '[]'::jsonb) || $1::jsonb
-     WHERE 
-       id = $2 AND downloads_today < premium_limit
-     RETURNING *`,
+    `UPDATE users SET downloads_today = downloads_today + 1, total_downloads = total_downloads + 1, tracks_today = COALESCE(tracks_today, '[]'::jsonb) || $1::jsonb WHERE id = $2 AND downloads_today < premium_limit RETURNING *`,
     [newTrack, userId]
   );
-  if (res.rowCount > 0) {
-    await logDownload(userId, trackName, url);
-  }
+  if (res.rowCount > 0) await logDownload(userId, trackName, url);
   return res.rowCount > 0 ? res.rows[0] : null;
 }
 
 export async function setPremium(id, limit, days = 30) {
-  const until = new Date(Date.now() + days * 86400000).toISOString();
+  const until = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
   await updateUserField(id, 'premium_limit', limit);
   await updateUserField(id, 'premium_until', until);
-}
-
-export async function resetDailyLimitIfNeeded(userId) {
-  const { rows } = await query('SELECT last_reset_date FROM users WHERE id = $1', [userId]);
-  if (rows.length > 0) {
-      const lastReset = new Date(rows[0].last_reset_date);
-      const today = new Date();
-      if(lastReset.toDateString() !== today.toDateString()){
-          await query(`UPDATE users SET downloads_today = 0, tracks_today = '[]'::jsonb, last_reset_date = CURRENT_DATE WHERE id = $1`, [userId]);
-      }
-  }
 }
 
 export async function resetDailyStats() {
   await query(`UPDATE users SET downloads_today = 0, tracks_today = '[]'::jsonb, last_reset_date = CURRENT_DATE`);
 }
 
-export async function getAllUsers(includeInactive = false) {
+export async function getAllUsers(includeInactive = true) {
   const sql = includeInactive ? 'SELECT * FROM users ORDER BY created_at DESC' : 'SELECT * FROM users WHERE active = TRUE ORDER BY created_at DESC';
   const { rows } = await query(sql);
   return rows;
@@ -138,15 +98,13 @@ export async function getReferralSourcesStats() {
 }
 
 export async function logDownload(userId, trackTitle, url) { 
-    await supabase.from('downloads_log').insert([{ user_id: userId, track_title: trackTitle, url: url }]);
+  await supabase.from('downloads_log').insert([{ user_id: userId, track_title: trackTitle, url: url }]);
 }
 
 export async function logEvent(userId, event) {
   try {
     await supabase.from('events').insert([{ user_id: userId, event_type: event }]);
-  } catch (e) {
-    console.error(`❌ Критическая ошибка вызова Supabase для logEvent:`, e.message);
-  }
+  } catch (e) { console.error(`❌ Ошибка logEvent:`, e.message); }
 }
 
 export async function getRegistrationsByDate() {
@@ -169,37 +127,7 @@ export async function getLatestReviews(limit = 10) {
   return data || [];
 }
 
-export async function getExpiringUsersPaginated(limit = 10, offset = 0) {
-  const { rows } = await query(`
-    SELECT id, username, first_name, premium_until, premium_limit FROM users
-    WHERE premium_until IS NOT NULL AND premium_until BETWEEN NOW() AND NOW() + INTERVAL '3 days'
-    ORDER BY premium_until ASC LIMIT $1 OFFSET $2
-    `, [limit, offset]);
+export async function getExpiringUsers(limit = 10, offset = 0) {
+  const { rows } = await query( `SELECT * FROM users WHERE premium_until IS NOT NULL AND premium_until BETWEEN NOW() AND NOW() + INTERVAL '3 days' ORDER BY premium_until ASC LIMIT $1 OFFSET $2`, [limit, offset]);
   return rows;
-}
-
-// <<< ИСПРАВЛЕНО: Возвращен недостающий экспорт >>>
-export const getExpiringUsers = getExpiringUsersPaginated;
-
-export async function getExpiringUsersCount() {
-  const { rows } = await query(`
-    SELECT COUNT(*) AS count FROM users
-    WHERE premium_until IS NOT NULL AND premium_until BETWEEN NOW() AND NOW() + INTERVAL '3 days'
-    `);
-  return parseInt(rows[0].count, 10);
-}
-
-// Эти функции были в вашем оригинальном коде, восстанавливаем их
-export async function addReview(userId, text) {
-  await supabase.from('reviews').insert([{ user_id: userId, text, time: new Date().toISOString() }]);
-  await updateUserField(userId, 'has_reviewed', true);
-}
-
-export async function hasLeftReview(userId) {
-  const user = await getUserById(userId);
-  return user?.has_reviewed;
-}
-
-export async function markSubscribedBonusUsed(userId) {
-  await updateUserField(userId, 'subscribed_bonus_used', true);
 }
