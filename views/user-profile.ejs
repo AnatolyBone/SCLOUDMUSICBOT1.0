@@ -1,69 +1,100 @@
-<div class="mb-3">
-  <a href="/users" class="btn btn-sm btn-outline-secondary"><i class="bi bi-arrow-left"></i> Назад</a>
-</div>
+<% // views/user-profile.ejs %>
 
-<div class="card shadow-sm mb-4">
-  <div class="card-header">Информация о пользователе</div>
-  <div class="card-body">
-    <dl class="row mb-0">
-      <dt class="col-sm-3">ID</dt>
-      <dd class="col-sm-9"><%= user.id %></dd>
+<%
+// Хелпер: безопасно форматируем дату из БД
+function formatDate(s) {
+  if (!s) return '—';
+  try {
+    const d = new Date(s);
+    if (isNaN(d.getTime())) return '—';
+    return d.toLocaleString('ru-RU', {
+      year: 'numeric', month: 'numeric', day: 'numeric',
+      hour: '2-digit', minute: '2-digit'
+    });
+  } catch (e) {
+    return '—';
+  }
+}
+%>
 
-      <dt class="col-sm-3">Имя</dt>
-      <dd class="col-sm-9"><%= user.first_name || '-' %></dd>
+<%- contentFor('styles') %>
+<style>
+  /* Стили, специфичные для этой страницы */
+</style>
 
-      <dt class="col-sm-3">Username</dt>
-      <dd class="col-sm-9"><%= user.username ? '@'+user.username : '-' %></dd>
+<%- contentFor('body') %>
 
-      <dt class="col-sm-3">Лимит</dt>
-      <dd class="col-sm-9"><%= user.premium_limit %></dd>
-
-      <dt class="col-sm-3">Подписка до</dt>
-      <dd class="col-sm-9">
-        <% if (user.premium_until) { %>
-          <%= new Date(String(user.premium_until).replace(' ','T')+'Z').toLocaleString('ru-RU') %>
-        <% } else { %>
-          -
-        <% } %>
-      </dd>
-
-      <dt class="col-sm-3">Активен</dt>
-      <dd class="col-sm-9">
-        <% if (user.last_active) { %>
-          <%= new Date(String(user.last_active).replace(' ','T')+'Z').toLocaleString('ru-RU') %>
-        <% } else { %>
-          -
-        <% } %>
-      </dd>
-
-      <dt class="col-sm-3">Скачано всего</dt>
-      <dd class="col-sm-9"><%= user.total_downloads || 0 %></dd>
-    </dl>
+<div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+  <!-- ИСПРАВЛЕНО: Используем userProfile.first_name -->
+  <h1 class="h2">Профиль: <%= userProfile.first_name || userProfile.username || userProfile.id %></h1>
+  <div class="btn-toolbar mb-2 mb-md-0">
+    <a href="/users" class="btn btn-sm btn-outline-secondary">
+      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-arrow-left" viewBox="0 0 16 16"><path fill-rule="evenodd" d="M15 8a.5.5 0 0 0-.5-.5H2.707l3.147-3.146a.5.5 0 1 0-.708-.708l-4 4a.5.5 0 0 0 0 .708l4 4a.5.5 0 0 0 .708-.708L2.707 8.5H14.5A.5.5 0 0 0 15 8"/></svg>
+      Назад к списку
+    </a>
   </div>
 </div>
 
-<div class="mb-4">
-  <form class="row g-2" method="post" action="/user/<%= user.id %>/set-tariff">
-    <div class="col-auto">
-      <input type="number" class="form-control form-control-sm" name="premium_limit" placeholder="Новый лимит" required>
-    </div>
-    <div class="col-auto">
-      <button class="btn btn-sm btn-outline-primary">Сменить тариф</button>
-    </div>
-  </form>
-</div>
-
-<!-- Треки пользователя и приглашённые пользователи -->
 <div class="row g-4">
-  <!-- Скачанные треки -->
-  <div class="col-md-6">
+  <!-- Основная информация -->
+  <div class="col-lg-5">
     <div class="card shadow-sm">
-      <div class="card-header">Скачанные треки</div>
-      <div class="card-body p-0">
+      <div class="card-header">Информация о пользователе</div>
+      <div class="card-body">
+        <!-- ИСПРАВЛЕНО: Везде используется `userProfile`, а не `user` -->
+        <dl class="row mb-0">
+          <dt class="col-sm-4">ID</dt>
+          <dd class="col-sm-8"><%= userProfile.id %></dd>
+
+          <dt class="col-sm-4">Имя</dt>
+          <dd class="col-sm-8"><%= userProfile.first_name || '-' %></dd>
+
+          <dt class="col-sm-4">Username</dt>
+          <dd class="col-sm-8"><%= userProfile.username ? '@'+userProfile.username : '-' %></dd>
+
+          <dt class="col-sm-4">Лимит/день</dt>
+          <dd class="col-sm-8"><%= userProfile.premium_limit %></dd>
+
+          <dt class="col-sm-4">Подписка до</dt>
+          <dd class="col-sm-8"><%= formatDate(userProfile.premium_until) %></dd>
+
+          <dt class="col-sm-4">Последняя активность</dt>
+          <dd class="col-sm-8"><%= formatDate(userProfile.last_active) %></dd>
+
+          <dt class="col-sm-4">Скачано всего</dt>
+          <dd class="col-sm-8"><%= userProfile.total_downloads || 0 %></dd>
+        </dl>
+      </div>
+    </div>
+    
+    <div class="card shadow-sm mt-4">
+        <div class="card-header">Смена тарифа</div>
+        <div class="card-body">
+            <!-- ИСПРАВЛЕНО: action ведет на /set-tariff -->
+            <form class="d-flex gap-2" method="post" action="/set-tariff">
+              <input type="hidden" name="userId" value="<%= userProfile.id %>">
+              <select name="limit" class="form-select form-select-sm">
+                <option value="5" <%= userProfile.premium_limit == 5 ? 'selected' : '' %>>Free (5)</option>
+                <option value="30" <%= userProfile.premium_limit == 30 ? 'selected' : '' %>>Plus (30)</option>
+                <option value="100" <%= userProfile.premium_limit == 100 ? 'selected' : '' %>>Pro (100)</option>
+                <option value="10000" <%= userProfile.premium_limit >= 10000 ? 'selected' : '' %>>Unlim</option>
+              </select>
+              <input type="number" name="days" class="form-control form-control-sm" value="30" style="width: 80px;">
+              <button type="submit" class="btn btn-sm btn-primary">Применить</button>
+            </form>
+        </div>
+    </div>
+
+  </div>
+
+  <!-- Скачанные треки -->
+  <div class="col-lg-7">
+    <div class="card shadow-sm">
+      <div class="card-header">Последние скачанные треки</div>
+      <div class="table-responsive">
         <% if (!downloads || downloads.length === 0) { %>
-          <div class="text-center text-muted py-4">Нет данных</div>
+          <div class="text-center text-muted py-5">Нет данных о скачиваниях</div>
         <% } else { %>
-          <div class="table-responsive">
             <table class="table table-hover mb-0 align-middle">
               <thead class="table-light">
                 <tr>
@@ -75,98 +106,42 @@
                 <% downloads.forEach(d => { %>
                   <tr>
                     <td><%= d.track_title || '-' %></td>
-                    <td>
-                      <% if (d.created_at) { %>
-                        <%= new Date(String(d.created_at).replace(' ','T')+'Z').toLocaleString('ru-RU') %>
-                      <% } else { %>
-                        -
-                      <% } %>
-                    </td>
+                    <td><%= formatDate(d.downloaded_at) %></td>
                   </tr>
                 <% }) %>
               </tbody>
             </table>
-          </div>
-        <% } %>
-      </div>
-    </div>
-  </div>
-
-  <!-- Приглашённые пользователи -->
-  <div class="col-md-6">
-    <div class="card shadow-sm">
-      <div class="card-header">Приглашённые пользователи</div>
-      <div class="card-body p-0">
-        <% if (!referrals || referrals.length === 0) { %>
-          <div class="text-center text-muted py-4">Нет приглашённых</div>
-        <% } else { %>
-          <div class="table-responsive">
-            <table class="table table-hover mb-0 align-middle">
-              <thead class="table-light">
-                <tr>
-                  <th>ID</th>
-                  <th>Имя</th>
-                  <th>Username</th>
-                  <th>Дата регистрации</th>
-                </tr>
-              </thead>
-              <tbody>
-                <% referrals.forEach(r => { %>
-                  <tr>
-                    <td><%= r.id %></td>
-                    <td><%= r.first_name || '-' %></td>
-                    <td><%= r.username ? '@'+r.username : '-' %></td>
-                    <td>
-                      <% if (r.created_at) { %>
-                        <%= new Date(String(r.created_at).replace(' ','T')+'Z').toLocaleString('ru-RU') %>
-                      <% } else { %>
-                        -
-                      <% } %>
-                    </td>
-                  </tr>
-                <% }) %>
-              </tbody>
-            </table>
-          </div>
         <% } %>
       </div>
     </div>
   </div>
 </div>
 
-<!-- Стили для улучшения интерфейса -->
-<style>
-  .card {
-    border-radius: 10px;
-    box-shadow: 0 0 15px rgba(0, 0, 0, 0.1);
-  }
-
-  .card-header {
-    background-color: #007bff;
-    color: white;
-  }
-
-  .table thead th {
-    background-color: #f8f9fa;
-    color: #343a40;
-  }
-
-  .table tbody tr:hover {
-    background-color: #f1f1f1;
-  }
-
-  .btn-outline-primary {
-    border: 1px solid #007bff;
-    color: #007bff;
-    background-color: transparent;
-  }
-
-  .btn-outline-primary:hover {
-    background-color: #007bff;
-    color: white;
-  }
-
-  .form-control-sm {
-    max-width: 150px;
-  }
-</style>
+<!-- Приглашённые пользователи (если есть) -->
+<% if (referrals && referrals.length > 0) { %>
+<div class="card shadow-sm mt-4">
+    <div class="card-header">Приглашённые пользователи (<%= referrals.length %>)</div>
+    <div class="table-responsive">
+        <table class="table table-hover mb-0 align-middle">
+          <thead class="table-light">
+            <tr>
+              <th>ID</th>
+              <th>Имя</th>
+              <th>Username</th>
+              <th>Дата регистрации</th>
+            </tr>
+          </thead>
+          <tbody>
+            <% referrals.forEach(r => { %>
+              <tr>
+                <td><a href="/user/<%= r.id %>"><%= r.id %></a></td>
+                <td><%= r.first_name || '-' %></td>
+                <td><%= r.username ? '@'+r.username : '-' %></td>
+                <td><%= formatDate(r.created_at) %></td>
+              </tr>
+            <% }) %>
+          </tbody>
+        </table>
+    </div>
+</div>
+<% } %>
