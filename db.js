@@ -5,19 +5,14 @@ import { createClient } from '@supabase/supabase-js';
 import json2csv from 'json-2-csv';
 const { json2csvAsync } = json2csv;
 
+// <<< ИСПРАВЛЕНО: Импортируем переменные из центрального конфига >>>
+import { SUPABASE_URL, SUPABASE_KEY, DATABASE_URL } from './config.js';
+
 // --- Инициализация клиентов ---
-const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_KEY;
-
-if (!supabaseUrl || !supabaseKey) {
-  console.error('❌ Ошибка: SUPABASE_URL или SUPABASE_KEY не заданы. Проверь конфигурацию окружения.');
-  process.exit(1);
-}
-
-export const supabase = createClient(supabaseUrl, supabaseKey);
+export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 export const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
+  connectionString: DATABASE_URL,
   ssl: { rejectUnauthorized: false },
 });
 
@@ -39,8 +34,8 @@ export async function getUserById(id) {
 
 export async function createUser(id, first_name = '', username = '', referral_source = null, referrer_id = null) {
   await query(`
-    INSERT INTO users (id, username, first_name, downloads_today, premium_limit, total_downloads, has_reviewed, last_reset_date, referred_count, created_at, last_active, referral_source, referrer_id, active)
-    VALUES ($1, $2, $3, 0, 10, 0, false, CURRENT_DATE, 0, NOW(), NOW(), $4, $5, TRUE)
+    INSERT INTO users (id, username, first_name, downloads_today, premium_limit, total_downloads, has_reviewed, last_reset_date, referred_count, created_at, last_active, referral_source, referrer_id, active, tracks_today)
+    VALUES ($1, $2, $3, 0, 10, 0, false, CURRENT_DATE, 0, NOW(), NOW(), $4, $5, TRUE, '[]'::jsonb)
     ON CONFLICT (id) DO NOTHING;
   `, [id, username || '', first_name || '', referral_source, referrer_id]);
 }
@@ -103,48 +98,30 @@ export async function getFunnelData(from, to) {
   return result;
 }
 
-// ==================== Функции кэширования треков ====================
-// ИЗМЕНЕНИЯ ЗДЕСЬ
-
 export async function findCachedTrack(trackUrl) {
   try {
     const { data, error } = await supabase
       .from('track_cache')
       .select('file_id, track_name')
-      .eq('url', trackUrl) // ИСПРАВЛЕНО с 'soundcloud_url' на 'url'
+      .eq('url', trackUrl)
       .single();
-    
-    if (error && error.code !== 'PGRST116') { // PGRST116 - "not found", это не ошибка
+    if (error && error.code !== 'PGRST116') {
       console.error('Ошибка поиска в кэше Supabase:', error);
       return null;
     }
-    
-    if (data) {
-      return {
-        fileId: data.file_id,
-        trackName: data.track_name
-      };
-    }
-    
-    return null;
-    
+    return data ? { fileId: data.file_id, trackName: data.track_name } : null;
   } catch (e) {
     console.error('Критическая ошибка в findCachedTrack:', e);
     return null;
   }
 }
 
-// db.js
-
 export async function cacheTrack(trackUrl, fileId, title) {
-  // <<< ИСПРАВЛЕНО: Используем правильные имена колонок: 'file_id' и 'track_name' >>>
   await pool.query(
     'INSERT INTO track_cache (url, file_id, track_name) VALUES ($1, $2, $3) ON CONFLICT (url) DO UPDATE SET file_id = $2, track_name = $3',
     [trackUrl, fileId, title]
   );
 }
-
-// ==================== Остальные функции ====================
 
 export async function incrementDownloads(id, trackName = 'track', url = null) {
   const res = await pool.query(`
@@ -163,16 +140,16 @@ export async function incrementDownloads(id, trackName = 'track', url = null) {
   }
   return null;
 }
+
+// <<< ИСПРАВЛЕНО: Функция теперь работает атомарно и не подвержена гонке состояний >>>
 export async function saveTrackForUser(id, title, fileId) {
-  const user = await getUser(id);
-  let current = [];
-  try {
-    if (user.tracks_today) current = JSON.parse(user.tracks_today);
-  } catch {
-    current = [];
-  }
-  current.push({ title, fileId });
-  await query('UPDATE users SET tracks_today = $1 WHERE id = $2', [JSON.stringify(current), id]);
+  const newTrack = JSON.stringify({ title, fileId });
+  await query(
+    `UPDATE users 
+     SET tracks_today = COALESCE(tracks_today, '[]'::jsonb) || $1::jsonb 
+     WHERE id = $2`, 
+    [newTrack, id]
+  );
 }
 
 export async function setPremium(id, limit, days = null) {
@@ -204,14 +181,14 @@ export async function resetDailyLimitIfNeeded(userId) {
   if (!lastReset || new Date(lastReset).toISOString().slice(0, 10) !== today) {
     await query(`
       UPDATE users
-      SET downloads_today = 0, tracks_today = '[]', last_reset_date = CURRENT_DATE
+      SET downloads_today = 0, tracks_today = '[]'::jsonb, last_reset_date = CURRENT_DATE
       WHERE id = $1
     `, [userId]);
   }
 }
 
 export async function resetDailyStats() {
-  await query(`UPDATE users SET downloads_today = 0, tracks_today = '[]', last_reset_date = CURRENT_DATE`);
+  await query(`UPDATE users SET downloads_today = 0, tracks_today = '[]'::jsonb, last_reset_date = CURRENT_DATE`);
 }
 
 export async function getAllUsers(includeInactive = false) {
@@ -249,12 +226,11 @@ export async function logDownload(userId, trackTitle, url) {
     await supabase.from('downloads_log').insert([{ user_id: userId, track_title: trackTitle, url: url }]);
 }
 
-// db.js (правильно)
 export async function logEvent(userId, event) {
   try {
     const { error } = await supabase
       .from('events')
-      .insert([{ user_id: userId, event_type: event }]); // <-- ИСПРАВЛЕНО
+      .insert([{ user_id: userId, event_type: event }]);
     if (error) console.error(`❌ Ошибка логирования события "${event}":`, error.message);
   } catch (e) {
     console.error(`❌ Критическая ошибка вызова Supabase для logEvent:`, e.message);
@@ -264,11 +240,9 @@ export async function logEvent(userId, event) {
 export async function getTrackMetadata(url) {
   const res = await query('SELECT metadata, updated_at FROM track_metadata WHERE url = $1', [url]);
   if (!res.rows.length) return null;
-  
   const row = res.rows[0];
   const ageMs = Date.now() - new Date(row.updated_at).getTime();
-  if (ageMs > 7 * 86400000) return null; // Кэш на 7 дней
-  
+  if (ageMs > 7 * 86400000) return null;
   return row.metadata;
 }
 
@@ -288,19 +262,19 @@ export async function getRegistrationsByDate() {
 }
 
 export async function getDownloadsByDate() {
-  const { rows } = await query(`SELECT TO_CHAR(last_reset_date, 'YYYY-MM-DD') as date, SUM(downloads_today) as count FROM users WHERE last_reset_date >= CURRENT_DATE - INTERVAL '30 days' GROUP BY date ORDER BY date`);
+  const { rows } = await query(`SELECT TO_CHAR(downloaded_at, 'YYYY-MM-DD') as date, COUNT(*) as count FROM downloads_log GROUP BY date ORDER BY date`);
   return rows.reduce((acc, row) => ({ ...acc, [row.date]: parseInt(row.count, 10) }), {});
 }
 
 export async function getActiveUsersByDate() {
-  const { rows } = await query(`SELECT TO_CHAR(last_active, 'YYYY-MM-DD') as date, COUNT(*) as count FROM users WHERE last_active >= CURRENT_DATE - INTERVAL '30 days' GROUP BY date ORDER BY date`);
+  const { rows } = await query(`SELECT TO_CHAR(last_active, 'YYYY-MM-DD') as date, COUNT(DISTINCT id) as count FROM users WHERE last_active IS NOT NULL GROUP BY date ORDER BY date`);
   return rows.reduce((acc, row) => ({ ...acc, [row.date]: parseInt(row.count, 10) }), {});
 }
 
 export async function getUserActivityByDayHour(days = 30) {
   const { rows } = await query(`
-    SELECT TO_CHAR(last_active, 'YYYY-MM-DD') AS day, EXTRACT(HOUR FROM last_active) AS hour, COUNT(*) AS count
-    FROM users WHERE last_active >= CURRENT_DATE - INTERVAL '${days} days'
+    SELECT TO_CHAR(activity_time, 'YYYY-MM-DD') AS day, EXTRACT(HOUR FROM activity_time) AS hour, COUNT(*) AS count
+    FROM user_activity_logs WHERE activity_time >= CURRENT_DATE - INTERVAL '${days} days'
     GROUP BY day, hour ORDER BY day, hour
     `);
   const activity = {};
