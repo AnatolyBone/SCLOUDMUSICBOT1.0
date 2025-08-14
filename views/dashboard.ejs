@@ -1,10 +1,9 @@
-<% // views/dashboard.ejs (ФИНАЛЬНАЯ ВЕРСИЯ) %>
+<% // views/dashboard.ejs %>
 
 <%- contentFor('styles') %>
 <style>
   .card-metric { transition: transform 0.2s; }
   .card-metric:hover { transform: translateY(-5px); }
-  .chart-wrap { position: relative; }
 </style>
 
 <%- contentFor('body') %>
@@ -12,7 +11,14 @@
 <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
   <h1 class="h2">Дашборд</h1>
   <div class="btn-toolbar mb-2 mb-md-0">
-    <a class="btn btn-sm btn-outline-success" href="/export">Экспорт пользователей</a>
+    <!-- ВОССТАНОВЛЕНО: Фильтр по периоду -->
+    <form id="filterForm" class="d-flex gap-2">
+      <select id="rangeSelect" class="form-select form-select-sm" onchange="this.form.submit()">
+        <option value="7" <%= (typeof period !== 'undefined' && period == '7') ? 'selected' : '' %>>7 дней</option>
+        <option value="30" <%= (typeof period !== 'undefined' && period == '30') ? 'selected' : '' %>>30 дней</option>
+        <option value="90" <%= (typeof period !== 'undefined' && period == '90') ? 'selected' : '' %>>90 дней</option>
+      </select>
+    </form>
   </div>
 </div>
 
@@ -22,7 +28,7 @@
     <div class="card card-metric shadow-sm text-center">
       <div class="card-body">
         <h5 class="card-title text-muted">Пользователей</h5>
-        <p class="h2 mb-0"><%= locals.stats ? stats.total_users : '0' %></p>
+        <p class="h2 mb-0"><%= (locals.stats && stats.total_users) ? stats.total_users : '0' %></p>
       </div>
     </div>
   </div>
@@ -30,96 +36,52 @@
     <div class="card card-metric shadow-sm text-center">
       <div class="card-body">
         <h5 class="card-title text-muted">Активных сегодня</h5>
-        <p class="h2 mb-0"><%= locals.stats ? stats.active_today : '0' %></p>
+        <p class="h2 mb-0"><%= (locals.stats && stats.active_today) ? stats.active_today : '0' %></p>
       </div>
     </div>
   </div>
   <div class="col-md-3 col-sm-6">
     <div class="card card-metric shadow-sm text-center">
       <div class="card-body">
-        <h5 class="card-title text-muted">Загрузки (всего)</h5>
-        <p class="h2 mb-0"><%= locals.stats ? stats.total_downloads : '0' %></p>
+        <h5 class="card-title text-muted">Загрузок (всего)</h5>
+        <p class="h2 mb-0"><%= (locals.stats && stats.total_downloads) ? stats.total_downloads : '0' %></p>
       </div>
     </div>
   </div>
-  <div class="col-md-3 col-sm-6">
+    <div class="col-md-3 col-sm-6">
     <div class="card card-metric shadow-sm text-center">
       <div class="card-body">
         <h5 class="card-title text-muted">Активных / Всего</h5>
-        <p class="h2 mb-0"><%= locals.stats ? stats.active_users : '0' %> / <%= locals.stats ? stats.total_users : '0' %></p>
+        <p class="h2 mb-0"><%= (locals.stats && stats.active_users) ? stats.active_users : '0' %> / <%= (locals.stats && stats.total_users) ? stats.total_users : '0' %></p>
       </div>
     </div>
   </div>
 </div>
 
 <!-- Графики -->
-<div class="row g-4">
-  <div class="col-12 col-xl-8">
-    <div class="card shadow-sm">
-      <div class="card-header">Регистрации / Загрузки / Активные</div>
-      <div class="card-body chart-wrap" style="height:320px">
-        <canvas id="chartCombined"></canvas>
-      </div>
-    </div>
-  </div>
-  
-  <div class="col-12 col-xl-4">
-    <div class="card shadow-sm mb-4">
-      <div class="card-header">Активность по часам</div>
-      <div class="card-body chart-wrap" style="height:145px">
-        <canvas id="chartHours"></canvas>
-      </div>
-    </div>
-    <div class="card shadow-sm">
-      <div class="card-header">Активность по дням недели</div>
-      <div class="card-body chart-wrap" style="height:145px">
-        <canvas id="chartWeek"></canvas>
-      </div>
-    </div>
+<div class="card shadow-sm mb-4">
+  <div class="card-header">Активность</div>
+  <div class="card-body" style="height: 350px;">
+    <canvas id="mainChart"></canvas>
   </div>
 </div>
-
 
 <%- contentFor('scripts') %>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
   document.addEventListener('DOMContentLoaded', () => {
-    // <<< ИСПРАВЛЕНО: Упрощены проверки для EJS >>>
-    const combinedData = <%- JSON.stringify(locals.chartDataCombined || {}) %>;
-    const hourData = <%- JSON.stringify(locals.chartDataHourActivity || {}) %>;
-    const weekData = <%- JSON.stringify(locals.chartDataWeekdayActivity || {}) %>;
-
-    const commonOptions = {
-        responsive: true,
-        maintainAspectRatio: false,
-        interaction: { mode: 'index', intersect: false },
-        plugins: { legend: { display: true, position: 'top' } },
-        scales: { y: { beginAtZero: true } }
-    };
-
-    // Главный график
-    const combinedCtx = document.getElementById('chartCombined');
-    if (combinedCtx && combinedData.labels && combinedData.labels.length) {
-        new Chart(combinedCtx, {
-            type: 'line',
-            data: {
-                labels: combinedData.labels,
-                datasets: combinedData.datasets.map(ds => ({ ...ds, tension: 0.2, borderWidth: 2, pointRadius: 1 }))
-            },
-            options: commonOptions
-        });
-    }
-
-    // График по часам
-    const hoursCtx = document.getElementById('chartHours');
-    if (hoursCtx && hourData.labels && hourData.labels.length) {
-        new Chart(hoursCtx, { type: 'bar', data: hourData, options: commonOptions });
-    }
-
-    // График по дням недели
-    const weekCtx = document.getElementById('chartWeek');
-    if (weekCtx && weekData.labels && weekData.labels.length) {
-        new Chart(weekCtx, { type: 'bar', data: weekData, options: commonOptions });
+    const chartData = <%- JSON.stringify(locals.chartDataCombined || {}) %>;
+    if (chartData && chartData.labels && chartData.labels.length) {
+      const ctx = document.getElementById('mainChart').getContext('2d');
+      new Chart(ctx, {
+        type: 'line',
+        data: chartData,
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: { y: { beginAtZero: true } },
+        }
+      });
     }
   });
 </script>
