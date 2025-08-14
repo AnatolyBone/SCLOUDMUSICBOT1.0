@@ -58,12 +58,57 @@ bot.start(async (ctx) => {
 });
 
 bot.command('admin', async (ctx) => {
-    if (ctx.from.id !== ADMIN_ID) return;
-    const users = await getAllUsers(true);
-    const statsMessage = `*Статистика:*\nВсего: ${users.length}\nАктивных: ${users.filter(u => u.active).length}`;
-    await ctx.replyWithMarkdown(statsMessage);
-});
+        if (ctx.from.id !== ADMIN_ID) {
+            return;
+        }
+        try {
+            const users = await getAllUsers(true);
+            const totalUsers = users.length;
+            const activeUsers = users.filter(u => u.active).length;
+            const totalDownloads = users.reduce((sum, u) => sum + (u.total_downloads || 0), 0);
+            const now = new Date();
+            const activeToday = users.filter(u => u.last_active && new Date(u.last_active).toDateString() === now.toDateString()).length;
+            
+            const statsMessage = `
+📊 **Статистика Бота**
 
+👤 **Пользователи:**
+   - Всего: *${totalUsers}*
+   - Активных (в целом): *${activeUsers}*
+   - Активных сегодня: *${activeToday}*
+
+📥 **Загрузки:**
+   - Всего за все время: *${totalDownloads}*
+
+⚙️ **Очередь сейчас:**
+   - В работе: *${downloadQueue.active}*
+   - В ожидании: *${downloadQueue.size}*
+
+🔗 **Админ-панель:**
+[Открыть дашборд](${WEBHOOK_URL.replace(/\/$/, '')}/dashboard)
+            `.trim();
+            
+            await ctx.reply(statsMessage, { parse_mode: 'Markdown' });
+        } catch (e) {
+            console.error('❌ Ошибка в команде /admin:', e);
+            try { await ctx.reply('⚠️ Произошла ошибка при получении статистики.'); } catch (adminBlockError) { console.log('Админ заблокировал бота.'); }
+        }
+    });
+
+bot.action('check_subscription', async (ctx) => {
+        try {
+            if (await isSubscribed(ctx.from.id)) {
+                await setPremium(ctx.from.id, 50, 7);
+                await updateUserField(ctx.from.id, 'subscribed_bonus_used', true);
+                await ctx.reply('Поздравляю! Тебе начислен бонус: 7 дней Plus.');
+            } else {
+                await ctx.reply('Пожалуйста, подпишись на канал @SCM_BLOG и нажми кнопку ещё раз.');
+            }
+        } catch (e) {
+            await handleSendMessageError(e, ctx.from.id);
+        }
+        try { await ctx.answerCbQuery(); } catch (cbError) { console.error('Не удалось ответить на callback-запрос:', cbError.message); }
+    });
 bot.hears(T('menu'), async (ctx) => {
     const user = await getUser(ctx.from.id);
     await ctx.replyWithMarkdown(formatMenuMessage(user, ctx), Markup.keyboard([[T('menu'), T('upgrade')], [T('mytracks'), T('help')]]).resize());
