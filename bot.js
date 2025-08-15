@@ -89,15 +89,50 @@ bot.start(async (ctx) => {
 });
 
 bot.command('admin', async (ctx) => {
-    if (ctx.from.id !== ADMIN_ID) return;
+    if (ctx.from.id !== ADMIN_ID) {
+        return;
+    }
     try {
+        // --- НАЧАЛО НОВОГО КОДА ПРОВЕРКИ ---
+        let storageStatusText = '';
+        if (STORAGE_CHANNEL_ID) {
+            try {
+                await bot.telegram.getChat(STORAGE_CHANNEL_ID);
+                storageStatusText = '✅ Доступен';
+            } catch (e) {
+                storageStatusText = '❌ Ошибка';
+            }
+        } else {
+            storageStatusText = '⚠️ Не настроен';
+        }
+        // --- КОНЕЦ НОВОГО КОДА ПРОВЕРКИ ---
+        
         const users = await getAllUsers(true);
         const totalUsers = users.length;
         const activeUsers = users.filter(u => u.active).length;
         const totalDownloads = users.reduce((sum, u) => sum + (u.total_downloads || 0), 0);
         const now = new Date();
         const activeToday = users.filter(u => u.last_active && new Date(u.last_active).toDateString() === now.toDateString()).length;
-        const statsMessage = `📊 **Статистика Бота**\n\n👤 **Пользователи:**\n   - Всего: *${totalUsers}*\n   - Активных (в целом): *${activeUsers}*\n   - Активных сегодня: *${activeToday}*\n\n📥 **Загрузки:**\n   - Всего за все время: *${totalDownloads}*\n\n⚙️ **Очередь сейчас:**\n   - В работе: *${downloadQueue.active}*\n   - В ожидании: *${downloadQueue.size}*\n\n🔗 **Админ-панель:**\n[Открыть дашборд](${WEBHOOK_URL.replace(/\/$/, '')}/dashboard)`;
+        
+        const statsMessage = `
+📊 **Статистика Бота**
+
+👤 **Пользователи:**
+   - Всего: *${totalUsers}*
+   - Активных (в целом): *${activeUsers}*
+   - Активных сегодня: *${activeToday}*
+
+📥 **Загрузки:**
+   - Всего за все время: *${totalDownloads}*
+
+⚙️ **Система:**
+   - Очередь: *${downloadQueue.size}* в ож. / *${downloadQueue.active}* в раб.
+   - Канал-хранилище: *${storageStatusText}*
+
+🔗 **Админ-панель:**
+[Открыть дашборд](${WEBHOOK_URL.replace(/\/$/, '')}/dashboard)
+        `.trim();
+        
         await ctx.reply(statsMessage, { parse_mode: 'Markdown' });
     } catch (e) {
         console.error('❌ Ошибка в команде /admin:', e);
