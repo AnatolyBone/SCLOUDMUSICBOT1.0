@@ -1,73 +1,56 @@
-<% // views/users.ejs (ФИНАЛЬНАЯ ВЕРСИЯ) %>
+<% // views/users.ejs (ФИНАЛЬНАЯ ВЕРСИЯ 2.0) %>
 
 <%- contentFor('body') %>
 
-<!-- Улучшенные стили для адаптивности -->
+<!-- Стили для адаптивности и компактности -->
 <style>
-  .table-container {
-    opacity: 1;
-    transition: opacity 0.3s ease-in-out;
+  /* Уменьшаем отступы для более компактного вида */
+  .table-compact th, .table-compact td {
+    padding: 0.5rem;
+    vertical-align: middle;
   }
-  .htmx-request .table-container {
-    opacity: 0.5; /* Делаем таблицу полупрозрачной во время загрузки */
-  }
-
-  @media (max-width: 992px) { /* Адаптивность для планшетов и мобильных */
+  .table-container { transition: opacity 0.2s ease-in-out; }
+  .htmx-request .table-container { opacity: 0.6; }
+  @media (max-width: 992px) {
     .adaptive-table thead { display: none; }
     .adaptive-table tr {
-      display: block;
-      border: 1px solid #dee2e6;
-      margin-bottom: 1rem;
-      border-radius: .375rem;
-      background-color: #fff;
+      display: block; border: 1px solid #dee2e6;
+      margin-bottom: 1rem; border-radius: .375rem;
     }
     .adaptive-table td {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: .75rem 1rem;
-      border-top: 1px solid #f1f1f1;
+      display: flex; justify-content: space-between; align-items: center;
+      padding: .6rem 1rem; border-top: 1px solid #f1f1f1;
     }
     .adaptive-table tr td:first-child { border-top: none; }
-    .adaptive-table td::before {
-      content: attr(data-label);
-      font-weight: 600;
-      padding-right: 1rem;
-      flex-shrink: 0;
-    }
-    .adaptive-table .tariff-form {
-      flex-direction: column !important;
-      align-items: stretch !important;
-      width: 100%;
-    }
+    .adaptive-table td::before { content: attr(data-label); font-weight: 600; padding-right: 1rem; }
+    .adaptive-table .tariff-form { flex-direction: column !important; align-items: stretch !important; width: 100%; }
     .adaptive-table .tariff-form > * { width: 100% !important; }
   }
 </style>
 
-<!-- Подключаем HTMX для "живого" поиска -->
-<script src="https://unpkg.com/htmx.org@1.9.10" integrity="sha384-D1Kt99CQMDuVetoL1lrYwg5t+9QdHe7NLX/SoJYkXDFfX37iInKRy5xLSi8RM/K9" crossorigin="anonymous"></script>
+<!-- Подключаем HTMX (если еще не подключен в главном шаблоне) -->
+<script src="https://unpkg.com/htmx.org@1.9.10"></script>
 
 <h1 class="h3 mb-3">Пользователи (<%= totalUsers %>)</h1>
 
-<!-- Фильтры с атрибутами HTMX -->
+<!-- Фильтры с правильными атрибутами HTMX -->
 <form class="row g-3 align-items-center mb-4" 
       hx-get="/users-table" 
       hx-target="#users-table-container" 
       hx-trigger="keyup changed delay:300ms from:#searchInput, change from:.form-select"
       hx-swap="innerHTML">
-  
   <div class="col-md-5 col-sm-12">
     <input type="text" class="form-control" id="searchInput" name="q" placeholder="Поиск по ID, имени, @username..." value="<%= searchQuery %>">
   </div>
   <div class="col-md-3 col-sm-6">
-    <select class="form-select" id="statusSelect" name="status">
+    <select class="form-select" name="status">
       <option value="" <%= statusFilter === '' ? 'selected' : '' %>>Все статусы</option>
       <option value="active" <%= statusFilter === 'active' ? 'selected' : '' %>>Активные</option>
       <option value="inactive" <%= statusFilter === 'inactive' ? 'selected' : '' %>>Неактивные</option>
     </select>
   </div>
   <div class="col-md-2 col-sm-6">
-    <select class="form-select" id="limitSelect" name="limit">
+    <select class="form-select" name="limit">
       <option value="25" <%= limit == 25 ? 'selected' : '' %>>25</option>
       <option value="50" <%= limit == 50 ? 'selected' : '' %>>50</option>
       <option value="100" <%= limit == 100 ? 'selected' : '' %>>100</option>
@@ -75,7 +58,7 @@
   </div>
 </form>
 
-<!-- Контейнер, который будет обновляться через HTMX -->
-<div id="users-table-container" class="table-container">
+<!-- Контейнер для "живой" перезагрузки -->
+<div id="users-table-container">
   <%- include('partials/users-table', { users, totalPages, currentPage, queryParams }) %>
 </div>
