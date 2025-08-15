@@ -1,5 +1,7 @@
 // services/downloadManager.js
-
+// В НАЧАЛО ФАЙЛА services/downloadManager.js
+import { Markup } from 'telegraf';
+import { CHANNEL_USERNAME } from '../config.js';
 import path from 'path';
 import fs from 'fs';
 import ytdl from 'youtube-dl-exec';
@@ -141,12 +143,34 @@ export async function enqueue(ctx, userId, url) {
         }
 
         const isPlaylist = Array.isArray(info.entries) && info.entries.length > 0;
-        const user = await getUser(userId);
-        const remainingLimit = user.premium_limit - (user.downloads_today || 0);
+        // ЗАМЕНИТЕ СТАРЫЙ БЛОК НА ЭТОТ
+const user = await getUser(userId);
+const remainingLimit = user.premium_limit - (user.downloads_today || 0);
 
-        if (remainingLimit <= 0) {
-            return await safeSendMessage(userId, T('limitReached'));
-        }
+if (remainingLimit <= 0) {
+    let message = T('limitReached');
+    let bonusMessage = '';
+
+    // Если бонус еще не использован, формируем сообщение о нем
+    if (!user.subscribed_bonus_used) {
+        // Создаем красивую ссылку, как в bot.js
+        const cleanUsername = CHANNEL_USERNAME.replace('@', '');
+        const channelLink = `[${CHANNEL_USERNAME}](https://t.me/${cleanUsername})`;
+        bonusMessage = `🎁 У тебя есть доступный бонус! Подпишись на ${channelLink} и получи *7 дней тарифа Plus*.\n\n`;
+    }
+
+    // Заменяем нашу "заглушку" на сформированное сообщение (или на пустую строку, если бонус использован)
+    message = message.replace('{bonus_message}', bonusMessage);
+
+    const extra = {};
+    if (!user.subscribed_bonus_used) {
+        extra.reply_markup = {
+            inline_keyboard: [[ Markup.button.callback('✅ Я подписался, забрать бонус', 'check_subscription') ]]
+        };
+    }
+
+    return await safeSendMessage(userId, message, { ...extra, parse_mode: 'Markdown' });
+}
 
         let tracksToProcess = [];
         let playlistInfo = null;
