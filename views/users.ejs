@@ -1,55 +1,59 @@
-<% // views/users.ejs %>
+<% // views/users.ejs (ФИНАЛЬНАЯ ВЕРСИЯ) %>
 
 <%- contentFor('body') %>
 
-<!-- Стили для адаптивной таблицы -->
+<!-- Улучшенные стили для адаптивности -->
 <style>
-  @media (max-width: 768px) {
-    .adaptive-table thead {
-      display: none; /* Скрываем заголовки на мобильных */
-    }
+  .table-container {
+    opacity: 1;
+    transition: opacity 0.3s ease-in-out;
+  }
+  .htmx-request .table-container {
+    opacity: 0.5; /* Делаем таблицу полупрозрачной во время загрузки */
+  }
+
+  @media (max-width: 992px) { /* Адаптивность для планшетов и мобильных */
+    .adaptive-table thead { display: none; }
     .adaptive-table tr {
       display: block;
-      border: 1px solid #ddd;
+      border: 1px solid #dee2e6;
       margin-bottom: 1rem;
       border-radius: .375rem;
+      background-color: #fff;
     }
     .adaptive-table td {
       display: flex;
       justify-content: space-between;
       align-items: center;
       padding: .75rem 1rem;
-      border: none;
-      border-bottom: 1px solid #eee;
+      border-top: 1px solid #f1f1f1;
     }
-    .adaptive-table td:last-child {
-      border-bottom: none;
-    }
+    .adaptive-table tr td:first-child { border-top: none; }
     .adaptive-table td::before {
-      content: attr(data-label); /* Используем data-label как заголовок */
-      font-weight: bold;
-      margin-right: 1rem;
+      content: attr(data-label);
+      font-weight: 600;
+      padding-right: 1rem;
+      flex-shrink: 0;
     }
-    /* Стили для формы смены тарифа */
     .adaptive-table .tariff-form {
-      width: 100%;
       flex-direction: column !important;
-      align-items: stretch;
+      align-items: stretch !important;
+      width: 100%;
     }
-    .adaptive-table .tariff-form .form-select,
-    .adaptive-table .tariff-form .form-control {
-      width: 100% !important;
-    }
+    .adaptive-table .tariff-form > * { width: 100% !important; }
   }
 </style>
 
+<!-- Подключаем HTMX для "живого" поиска -->
+<script src="https://unpkg.com/htmx.org@1.9.10" integrity="sha384-D1Kt99CQMDuVetoL1lrYwg5t+9QdHe7NLX/SoJYkXDFfX37iInKRy5xLSi8RM/K9" crossorigin="anonymous"></script>
+
 <h1 class="h3 mb-3">Пользователи (<%= totalUsers %>)</h1>
 
-<!-- УЛУЧШЕНИЕ: Форма с фильтрами теперь работает с HTMX для "живого" обновления -->
+<!-- Фильтры с атрибутами HTMX -->
 <form class="row g-3 align-items-center mb-4" 
-      hx-get="/users" 
+      hx-get="/users-table" 
       hx-target="#users-table-container" 
-      hx-trigger="input from:#searchInput, change from:.form-select"
+      hx-trigger="keyup changed delay:300ms from:#searchInput, change from:.form-select"
       hx-swap="innerHTML">
   
   <div class="col-md-5 col-sm-12">
@@ -58,8 +62,8 @@
   <div class="col-md-3 col-sm-6">
     <select class="form-select" id="statusSelect" name="status">
       <option value="" <%= statusFilter === '' ? 'selected' : '' %>>Все статусы</option>
-      <option value="active" <%= statusFilter === 'active' ? 'selected' : '' %>>Только активные</option>
-      <option value="inactive" <%= statusFilter === 'inactive' ? 'selected' : '' %>>Только неактивные</option>
+      <option value="active" <%= statusFilter === 'active' ? 'selected' : '' %>>Активные</option>
+      <option value="inactive" <%= statusFilter === 'inactive' ? 'selected' : '' %>>Неактивные</option>
     </select>
   </div>
   <div class="col-md-2 col-sm-6">
@@ -71,118 +75,7 @@
   </div>
 </form>
 
-<!-- Контейнер для таблицы, который будет обновляться через HTMX -->
-<div id="users-table-container">
-  
-  <!-- УЛУЧШЕНИЕ: Таблица стала адаптивной и с сортируемыми колонками -->
-  <div class="table-responsive">
-    <table class="table table-striped table-hover align-middle adaptive-table">
-      <thead>
-        <tr>
-          <!-- Функция для генерации ссылок сортировки -->
-          <% function sortLink(field, title) { %>
-            <a href="/users?<%= new URLSearchParams({ ...queryParams, sort: field, order: queryParams.sort === field && queryParams.order === 'asc' ? 'desc' : 'asc' }).toString() %>" 
-               class="text-decoration-none text-dark fw-bold">
-              <%= title %>
-              <% if (queryParams.sort === field) { %>
-                <i class="bi bi-arrow-<%= queryParams.order === 'asc' ? 'up' : 'down' %>"></i>
-              <% } %>
-            </a>
-          <% } %>
-          <th><%= sortLink('id', 'ID') %></th>
-          <th>Пользователь</th>
-          <th>Статус</th>
-          <th><%= sortLink('total_downloads', 'Загрузок') %></th>
-          <th>Лимит</th>
-          <th><%= sortLink('created_at', 'Регистрация') %></th>
-          <th><%= sortLink('last_active', 'Активность') %></th>
-          <th>Смена тарифа</th>
-          <th>Действия</th>
-        </tr>
-      </thead>
-      <tbody>
-        <% if (users && users.length > 0) { %>
-          <% users.forEach(u => { %>
-            <tr>
-              <td data-label="ID"><a href="/user/<%= u.id %>"><%= u.id %></a></td>
-              <td data-label="Пользователь">
-                <div><%= u.first_name || 'Без имени' %></div>
-                <div class="text-muted small"><%= u.username ? '@' + u.username : '' %></div>
-              </td>
-              <td data-label="Статус">
-                <% if (u.active) { %>
-                  <span class="badge bg-success">Активен</span>
-                <% } else { %>
-                  <span class="badge bg-secondary">Неактивен</span>
-                <% } %>
-              </td>
-              <td data-label="Загрузок" class="text-center"><%= u.total_downloads || 0 %></td>
-              <td data-label="Лимит" class="text-center">
-                  <span class="badge bg-info"><%= u.premium_limit %></span>
-              </td>
-              <td data-label="Регистрация"><%= u.created_at ? new Date(u.created_at).toLocaleDateString('ru-RU') : '-' %></td>
-              <td data-label="Активность"><%= u.last_active ? new Date(u.last_active).toLocaleString('ru-RU') : '-' %></td>
-              <td data-label="Смена тарифа">
-                <form class="d-flex flex-wrap gap-2 tariff-form" action="/set-tariff" method="post">
-                  <input type="hidden" name="userId" value="<%= u.id %>">
-                  <select name="limit" class="form-select form-select-sm" style="min-width: 120px;">
-                    <option value="5" <%= u.premium_limit == 5 ? 'selected' : '' %>>Free (5)</option>
-                    <option value="30" <%= u.premium_limit == 30 ? 'selected' : '' %>>Plus (30)</option>
-                    <option value="100" <%= u.premium_limit == 100 ? 'selected' : '' %>>Pro (100)</option>
-                    <option value="10000" <%= u.premium_limit >= 10000 ? 'selected' : '' %>>Unlim</option>
-                  </select>
-                  <input type="number" name="days" class="form-control form-control-sm" value="30" style="width: 80px;" placeholder="Дни">
-                  <button type="submit" class="btn btn-sm btn-primary">✓</button>
-                </form>
-              </td>
-              <!-- УЛУЧШЕНИЕ: Блок "Быстрые действия" -->
-              <td data-label="Действия">
-                <div class="dropdown">
-                  <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
-                    <i class="bi bi-three-dots"></i>
-                  </button>
-                  <ul class="dropdown-menu">
-                    <li>
-                      <form action="/reset-bonus" method="post" class="d-inline">
-                          <input type="hidden" name="userId" value="<%= u.id %>">
-                          <button type="submit" class="dropdown-item" onclick="return confirm('Сбросить бонус за подписку для этого пользователя?')">Сбросить бонус</button>
-                      </form>
-                    </li>
-                    <li>
-                      <form action="/reset-daily-limit" method="post" class="d-inline">
-                          <input type="hidden" name="userId" value="<%= u.id %>">
-                          <button type="submit" class="dropdown-item" onclick="return confirm('Сбросить дневной лимит для этого пользователя?')">Сбросить лимит</button>
-                      </form>
-                    </li>
-                  </ul>
-                </div>
-              </td>
-            </tr>
-          <% }) %>
-        <% } else { %>
-          <tr>
-            <td colspan="9" class="text-center text-muted py-4">Пользователи не найдены.</td>
-          </tr>
-        <% } %>
-      </tbody>
-    </table>
-  </div>
-
-  <!-- УЛУЧШЕНИЕ: Пагинация теперь тоже работает с HTMX -->
-  <% if (totalPages > 1) { %>
-  <nav aria-label="Пагинация">
-    <ul class="pagination justify-content-center"
-        hx-get="/users"
-        hx-target="#users-table-container"
-        hx-swap="innerHTML">
-      <% for (let i = 1; i <= totalPages; i++) { %>
-        <li class="page-item <%= i === currentPage ? 'active' : '' %>">
-          <!-- Генерируем ссылку со всеми текущими фильтрами, меняя только страницу -->
-          <a class="page-link" href="/users?<%= new URLSearchParams({ ...queryParams, page: i }).toString() %>"><%= i %></a>
-        </li>
-      <% } %>
-    </ul>
-  </nav>
-  <% } %>
-
-</div> <!-- Конец #users-table-container -->
+<!-- Контейнер, который будет обновляться через HTMX -->
+<div id="users-table-container" class="table-container">
+  <%- include('partials/users-table', { users, totalPages, currentPage, queryParams }) %>
+</div>
