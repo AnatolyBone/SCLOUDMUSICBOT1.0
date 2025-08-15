@@ -1,0 +1,114 @@
+<% // views/partials/users-table.ejs %>
+
+<div class="table-responsive">
+  <table class="table table-striped table-hover align-middle adaptive-table">
+    <thead>
+      <tr>
+        <% function sortLink(field, title) { 
+          const params = new URLSearchParams(queryParams);
+          params.set('sort', field);
+          params.set('order', queryParams.sort === field && queryParams.order === 'asc' ? 'desc' : 'asc');
+        %>
+          <th scope="col">
+            <a href="/users-table?<%= params.toString() %>" 
+               hx-get="/users-table?<%= params.toString() %>" 
+               hx-target="#users-table-container"
+               class="text-decoration-none text-dark fw-bold">
+              <%= title %>
+              <% if (queryParams.sort === field) { %>
+                <i class="bi bi-arrow-<%= queryParams.order === 'asc' ? 'up' : 'down' %>"></i>
+              <% } %>
+            </a>
+          </th>
+        <% } %>
+        <%- sortLink('id', 'ID') %>
+        <th>Пользователь</th>
+        <%- sortLink('active', 'Статус') %>
+        <%- sortLink('total_downloads', 'Загрузок') %>
+        <%- sortLink('premium_limit', 'Лимит') %>
+        <%- sortLink('created_at', 'Регистрация') %>
+        <%- sortLink('last_active', 'Активность') %>
+        <th>Смена тарифа</th>
+        <th>Действия</th>
+      </tr>
+    </thead>
+    <tbody>
+      <% if (users && users.length > 0) { %>
+        <% users.forEach(u => { %>
+          <tr>
+            <td data-label="ID"><a href="/user/<%= u.id %>"><%= u.id %></a></td>
+            <td data-label="Пользователь">
+              <div><%= u.first_name || 'Без имени' %></div>
+              <div class="text-muted small"><%= u.username ? '@' + u.username : '' %></div>
+            </td>
+            <td data-label="Статус">
+              <% if (u.active) { %><span class="badge bg-success">Активен</span><% } else { %><span class="badge bg-secondary">Неактивен</span><% } %>
+            </td>
+            <td data-label="Загрузок" class="text-center"><%= u.total_downloads || 0 %></td>
+            <td data-label="Лимит" class="text-center"><span class="badge bg-info"><%= u.premium_limit %></span></td>
+            <td data-label="Регистрация"><%= u.created_at ? new Date(u.created_at).toLocaleDateString('ru-RU') : '-' %></td>
+            <td data-label="Активность"><%= u.last_active ? new Date(u.last_active).toLocaleString('ru-RU', {day:'2-digit',month:'2-digit',year:'numeric', hour:'2-digit', minute:'2-digit'}) : '-' %></td>
+            <td data-label="Смена тарифа">
+              <form class="d-flex flex-wrap gap-2 tariff-form" action="/set-tariff" method="post">
+                <input type="hidden" name="userId" value="<%= u.id %>">
+                <select name="limit" class="form-select form-select-sm" style="min-width: 120px;">
+                  <option value="5" <%= u.premium_limit == 5 ? 'selected' : '' %>>Free (5)</option>
+                  <option value="30" <%= u.premium_limit == 30 ? 'selected' : '' %>>Plus (30)</option>
+                  <option value="100" <%= u.premium_limit == 100 ? 'selected' : '' %>>Pro (100)</option>
+                  <option value="10000" <%= u.premium_limit >= 10000 ? 'selected' : '' %>>Unlim</option>
+                </select>
+                <input type="number" name="days" class="form-control form-control-sm" value="30" style="width: 80px;" placeholder="Дни">
+                <button type="submit" class="btn btn-sm btn-primary">✓</button>
+              </form>
+            </td>
+            <td data-label="Действия">
+              <div class="dropdown">
+                <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown">...</button>
+                <ul class="dropdown-menu">
+                  <li><form action="/reset-bonus" method="post"><input type="hidden" name="userId" value="<%= u.id %>"><button type="submit" class="dropdown-item" onclick="return confirm('Сбросить бонус?')">Сбросить бонус</button></form></li>
+                  <li><form action="/reset-daily-limit" method="post"><input type="hidden" name="userId" value="<%= u.id %>"><button type="submit" class="dropdown-item" onclick="return confirm('Сбросить лимит?')">Сбросить лимит</button></form></li>
+                </ul>
+              </div>
+            </td>
+          </tr>
+        <% }) %>
+      <% } else { %>
+        <tr><td colspan="9" class="text-center text-muted py-4">Пользователи не найдены.</td></tr>
+      <% } %>
+    </tbody>
+  </table>
+</div>
+
+<!-- "Умная" пагинация -->
+<% if (totalPages > 1) { 
+  const maxPagesToShow = 5;
+  let startPage = Math.max(1, currentPage - Math.floor(maxPagesToShow / 2));
+  let endPage = Math.min(totalPages, startPage + maxPagesToShow - 1);
+  if (endPage - startPage + 1 < maxPagesToShow) {
+    startPage = Math.max(1, endPage - maxPagesToShow + 1);
+  }
+%>
+<nav>
+  <ul class="pagination justify-content-center">
+    <% if (currentPage > 1) { %>
+      <li class="page-item"><a class="page-link" href="/users-table?<%= new URLSearchParams({ ...queryParams, page: currentPage - 1 }).toString() %>" hx-get="/users-table?<%= new URLSearchParams({ ...queryParams, page: currentPage - 1 }).toString() %>" hx-target="#users-table-container">«</a></li>
+    <% } %>
+    <% if (startPage > 1) { %>
+      <li class="page-item"><a class="page-link" href="/users-table?<%= new URLSearchParams({ ...queryParams, page: 1 }).toString() %>" hx-get="/users-table?<%= new URLSearchParams({ ...queryParams, page: 1 }).toString() %>" hx-target="#users-table-container">1</a></li>
+      <% if (startPage > 2) { %><li class="page-item disabled"><span class="page-link">...</span></li><% } %>
+    <% } %>
+
+    <% for (let i = startPage; i <= endPage; i++) { %>
+      <li class="page-item <%= i === currentPage ? 'active' : '' %>"><a class="page-link" href="/users-table?<%= new URLSearchParams({ ...queryParams, page: i }).toString() %>" hx-get="/users-table?<%= new URLSearchParams({ ...queryParams, page: i }).toString() %>" hx-target="#users-table-container"><%= i %></a></li>
+    <% } %>
+
+    <% if (endPage < totalPages) { %>
+      <% if (endPage < totalPages - 1) { %><li class="page-item disabled"><span class="page-link">...</span></li><% } %>
+      <li class="page-item"><a class="page-link" href="/users-table?<%= new URLSearchParams({ ...queryParams, page: totalPages }).toString() %>" hx-get="/users-table?<%= new URLSearchParams({ ...queryParams, page: totalPages }).toString() %>" hx-target="#users-table-container"><%= totalPages %></a></li>
+    <% } %>
+    <% if (currentPage < totalPages) { %>
+      <li class="page-item"><a class="page-link" href="/users-table?<%= new URLSearchParams({ ...queryParams, page: currentPage + 1 }).toString() %>" hx-get="/users-table?<%= new URLSearchParams({ ...queryParams, page: currentPage + 1 }).toString() %>" hx-target="#users-table-container">»</a></li>
+    <% } %>
+  </ul>
+</nav>
+<% } %>
