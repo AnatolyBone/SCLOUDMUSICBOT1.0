@@ -1,5 +1,6 @@
 // index.js (ФИНАЛЬНАЯ ВЕРСИЯ С ПРАВИЛЬНОЙ СТРУКТУРОЙ)
 
+
 import express from 'express';
 import session from 'express-session';
 import compression from 'compression';
@@ -20,7 +21,7 @@ import {
 } from './db.js';
 import { bot } from './bot.js';
 import redisService from './services/redisClient.js';
-import { WEBHOOK_URL, PORT, SESSION_SECRET, ADMIN_ID, ADMIN_LOGIN, ADMIN_PASSWORD, WEBHOOK_PATH } from './config.js';
+import { WEBHOOK_URL, PORT, SESSION_SECRET, ADMIN_ID, ADMIN_LOGIN, ADMIN_PASSWORD, WEBHOOK_PATH, STORAGE_CHANNEL_ID } from './config.js';
 import { loadTexts } from './config/texts.js';
 import { downloadQueue } from './services/downloadManager.js';
 
@@ -107,7 +108,18 @@ function setupExpress() {
     
     app.get('/dashboard', requireAuth, async (req, res) => {
         try {
-            const [users, referralStats, downloadsRaw, registrationsRaw, activeRaw] = await Promise.all([
+            let storageStatus = { available: false, error: '' };
+            if (STORAGE_CHANNEL_ID) {
+                try {
+                    // Пытаемся получить информацию о канале. Если получится - он доступен.
+                    await bot.telegram.getChat(STORAGE_CHANNEL_ID);
+                    storageStatus.available = true;
+                } catch (e) {
+                    storageStatus.error = e.message;
+                    console.error("[Dashboard] Ошибка проверки канала-хранилища:", e.message);
+                }
+            }
+            const [users, referralStats, downloadsRaw, registrationsRaw, activeRaw, activityByHourRaw] = await Promise.all([
                 getAllUsers(true), getReferralSourcesStats(), getDownloadsByDate(),
                 getRegistrationsByDate(), getActiveUsersByDate()
             ]);
@@ -121,7 +133,7 @@ function setupExpress() {
                 labels: [...new Set([...Object.keys(registrations), ...Object.keys(downloads), ...Object.keys(active)])].sort(),
                 datasets: [ { label: 'Регистрации', data: Object.values(registrations), borderColor: '#198754' }, { label: 'Загрузки', data: Object.values(downloads), borderColor: '#fd7e14' }, { label: 'Активные', data: Object.values(active), borderColor: '#0d6efd' } ]
             });
-            res.render('dashboard', { title: 'Дашборд', page: 'dashboard', stats, query: req.query, chartDataCombined: prepareChartData(registrationsRaw, downloadsRaw, activeRaw) });
+            res.render('dashboard', { title: 'Дашборд', page: 'dashboard', stats, query: req.query,storageStatus, chartDataCombined: prepareChartData(registrationsRaw, downloadsRaw, activeRaw) });
         } catch (error) {
             console.error("Ошибка дашборда:", error);
             res.status(500).send("Ошибка сервера");
