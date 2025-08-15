@@ -97,7 +97,15 @@ async function trackDownloadProcessor(task) {
                 try {
                     console.log(`[Cache] Отправляю "${trackName}" в канал-хранилище...`);
                     // Отправляем копию в канал-хранилище
-                    const sentToStorageMessage = await bot.telegram.sendAudio(STORAGE_CHANNEL_ID, { source: tempFilePath });
+                    const sentToStorageMessage = await bot.telegram.sendAudio(
+    STORAGE_CHANNEL_ID,
+    { source: tempFilePath },
+    // >>>>> ДОБАВЬТЕ ЭТИ ПАРАМЕТРЫ <<<<<
+    {
+        title: trackName,
+        performer: uploader || 'SoundCloud'
+    }
+);
                     
                     // Если успешно, сохраняем file_id из хранилища в базу кэша
                     if (sentToStorageMessage?.audio?.file_id) {
