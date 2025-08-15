@@ -1,5 +1,5 @@
-// services/downloadManager.js
-// В НАЧАЛО ФАЙЛА services/downloadManager.js
+// services/downloadManager.js (ФИНАЛЬНАЯ КОРРЕКТНАЯ ВЕРСЯ)
+
 import { Markup } from 'telegraf';
 import { CHANNEL_USERNAME } from '../config.js';
 import path from 'path';
@@ -66,7 +66,7 @@ async function trackDownloadProcessor(task) {
             output: tempFilePath,
             extractAudio: true, audioFormat: 'mp3',
             retries: 3, "socket-timeout": YTDL_TIMEOUT,
-            'user-agent': FAKE_USER_AGENT // <--- ИЗМЕНЕНИЕ ЗДЕСЬ
+            'user-agent': FAKE_USER_AGENT
         });
         
         if (!fs.existsSync(tempFilePath)) throw new Error(`Файл не был создан`);
@@ -84,20 +84,6 @@ async function trackDownloadProcessor(task) {
             await cacheTrack(url, sentMessage.audio.file_id, trackName);
             await incrementDownloadsAndSaveTrack(userId, trackName, sentMessage.audio.file_id, url);
         }
-        
-        // Логика для плейлистов с Redis была в старом коде, но ваша БД - Postgres. 
-        // Если вам нужна эта логика, ее надо адаптировать. Пока что оставляю закомментированной.
-        /* 
-        if (playlistInfo) {
-            const redisClient = redisService.getClient();
-            const playlistKey = `playlist:${userId}:${playlistInfo.id}`;
-            const remaining = await redisClient.decr(playlistKey);
-            if (remaining <= 0) {
-                await safeSendMessage(userId, `✅ Все треки из плейлиста "${playlistInfo.title}" загружены.`);
-                await redisClient.del(playlistKey);
-            }
-        }
-        */
     } catch (err) {
         let userErrorMessage = `❌ Не удалось обработать трек: "${trackName}"`;
         const errorDetails = err.stderr || err.message || '';
@@ -118,60 +104,48 @@ async function trackDownloadProcessor(task) {
 }
 
 export const downloadQueue = new TaskQueue({
-    maxConcurrent: 1,
+    maxConcurrent: 1, // Важное значение для стабильности
     taskProcessor: trackDownloadProcessor
 });
 
 export async function enqueue(ctx, userId, url) {
-    let processingMessage = null;
+    // В этой функции больше нет переменной processingMessage, т.к. мы убрали её обработку
     try {
         await resetDailyLimitIfNeeded(userId);
-        //processingMessage = await safeSendMessage(userId, '🔍 Анализирую ссылку...');
         
+        const user = await getUser(userId);
+        const remainingLimit = user.premium_limit - (user.downloads_today || 0);
+
+        // >>>>> НАЧАЛО ИЗМЕНЕНИЙ <<<<<
+        if (remainingLimit <= 0) {
+            let message = T('limitReached');
+            let bonusMessageText = '';
+            if (!user.subscribed_bonus_used) {
+                const cleanUsername = CHANNEL_USERNAME.replace('@', '');
+                const channelLink = `[${CHANNEL_USERNAME}](https://t.me/${cleanUsername})`;
+                bonusMessageText = `🎁 У тебя есть доступный бонус! Подпишись на ${channelLink} и получи *7 дней тарифа Plus*.\n\n`;
+            }
+            message = message.replace('{bonus_message}', bonusMessageText);
+            const extra = { parse_mode: 'Markdown' };
+            if (!user.subscribed_bonus_used) {
+                extra.reply_markup = {
+                    inline_keyboard: [[ Markup.button.callback('✅ Я подписался, забрать бонус', 'check_subscription') ]]
+                };
+            }
+            return await safeSendMessage(userId, message, extra);
+        }
+        // >>>>> КОНЕЦ ИЗМЕНЕНИЙ <<<<<
+
         const info = await ytdlLimit(() => ytdl(url, {
             dumpSingleJson: true,
             retries: 2,
             "socket-timeout": YTDL_TIMEOUT,
-            'user-agent': FAKE_USER_AGENT // <--- ИЗМЕНЕНИЕ ЗДЕСЬ
+            'user-agent': FAKE_USER_AGENT
         }));
         
         if (!info) throw new Error('Не удалось получить метаданные');
 
-       // if (processingMessage) {
-            a//wait bot.telegram.deleteMessage(userId, processingMessage.message_id).catch(() => {});
-            //processingMessage = null;
-        //}
-
         const isPlaylist = Array.isArray(info.entries) && info.entries.length > 0;
-        // ЗАМЕНИТЕ СТАРЫЙ БЛОК НА ЭТОТ
-const user = await getUser(userId);
-const remainingLimit = user.premium_limit - (user.downloads_today || 0);
-
-if (remainingLimit <= 0) {
-    let message = T('limitReached');
-    let bonusMessage = '';
-
-    // Если бонус еще не использован, формируем сообщение о нем
-    if (!user.subscribed_bonus_used) {
-        // Создаем красивую ссылку, как в bot.js
-        const cleanUsername = CHANNEL_USERNAME.replace('@', '');
-        const channelLink = `[${CHANNEL_USERNAME}](https://t.me/${cleanUsername})`;
-        bonusMessage = `🎁 У тебя есть доступный бонус! Подпишись на ${channelLink} и получи *7 дней тарифа Plus*.\n\n`;
-    }
-
-    // Заменяем нашу "заглушку" на сформированное сообщение (или на пустую строку, если бонус использован)
-    message = message.replace('{bonus_message}', bonusMessage);
-
-    const extra = {};
-    if (!user.subscribed_bonus_used) {
-        extra.reply_markup = {
-            inline_keyboard: [[ Markup.button.callback('✅ Я подписался, забрать бонус', 'check_subscription') ]]
-        };
-    }
-
-    return await safeSendMessage(userId, message, { ...extra, parse_mode: 'Markdown' });
-}
-
         let tracksToProcess = [];
         let playlistInfo = null;
 
@@ -265,7 +239,7 @@ if (remainingLimit <= 0) {
             }
         }
     } catch (err) {
-        if (processingMessage) await bot.telegram.deleteMessage(userId, processingMessage.message_id).catch(() => {});
+        // Мы убрали processingMessage, поэтому его не нужно удалять
         const errorMessage = err.stderr || err.message || '';
         if (err.name === 'TimeoutError' || errorMessage.includes('timed out')) {
             console.error(`❌ Таймаут в enqueue для ${userId}:`, errorMessage);
