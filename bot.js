@@ -22,11 +22,12 @@ async function isSubscribed(userId) {
     }
 }
 
+// ВСТАВЬТЕ ЭТОТ НОВЫЙ КОД:
 function getTariffName(limit) {
-    if (limit >= 1000) return 'Unlim (∞/день)';
-    if (limit >= 50) return 'Pro (50/день)';
-    if (limit >= 30) return 'Plus (30/день)';
-    return 'Free (5/день)';
+    if (limit >= 10000) return 'Unlimited — 💎'; // Для консистентности с админкой
+    if (limit >= 100) return 'Pro — 100 💪';
+    if (limit >= 30) return 'Plus — 30 🎯';
+    return '🆓 Free — 5 🟢';
 }
 
 function getDaysLeft(premiumUntil) {
