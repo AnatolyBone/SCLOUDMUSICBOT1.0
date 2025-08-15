@@ -1,4 +1,4 @@
-// index.js (ИСПРАВЛЕННАЯ ВЕРСИЯ)
+// index.js (ФИНАЛЬНАЯ ПРОВЕРЕННАЯ ВЕРСИЯ)
 
 import express from 'express';
 import session from 'express-session';
@@ -13,21 +13,10 @@ import json2csv from 'json-2-csv';
 import fs from 'fs';
 
 import { 
-    pool, 
-    supabase,
-    getUserById, 
-    resetDailyStats, 
-    getAllUsers, 
-    getPaginatedUsers, // <--- Убедитесь, что эта функция добавлена в db.js
-    getReferralSourcesStats, 
-    getDownloadsByDate, 
-    getRegistrationsByDate, 
-    getActiveUsersByDate, 
-    getExpiringUsers,
-    setPremium,
-    updateUserField,
-    getLatestReviews,
-    getUserActivityByDayHour
+    pool, supabase, getUserById, resetDailyStats, getAllUsers, getPaginatedUsers, 
+    getReferralSourcesStats, getDownloadsByDate, getRegistrationsByDate, 
+    getActiveUsersByDate, getExpiringUsers, setPremium, updateUserField, 
+    getLatestReviews, getUserActivityByDayHour
 } from './db.js';
 import { bot } from './bot.js';
 import redisService from './services/redisClient.js';
@@ -46,35 +35,29 @@ async function startApp() {
     try {
         await loadTexts(true);
         await redisService.connect();
-        
         setupExpress();
-        
         bot.on('message', (ctx, next) => limit(() => next()));
-
         if (process.env.NODE_ENV === 'production') {
             const fullWebhookUrl = (WEBHOOK_URL.endsWith('/') ? WEBHOOK_URL.slice(0, -1) : WEBHOOK_URL) + WEBHOOK_PATH;
             const webhookInfo = await bot.telegram.getWebhookInfo();
             if (webhookInfo.url !== fullWebhookUrl) {
                 await bot.telegram.setWebhook(fullWebhookUrl, { drop_pending_updates: true });
-                console.log('[App] Вебхук установлен, старые сообщения пропущены.');
+                console.log('[App] Вебхук установлен.');
             } else {
                 console.log('[App] Вебхук уже установлен.');
             }
             app.use(bot.webhookCallback(WEBHOOK_PATH));
             app.listen(PORT, () => console.log(`✅ [App] Сервер запущен на порту ${PORT}.`));
         } else {
-            console.log('[App] Запуск бота в режиме long-polling для разработки...');
+            console.log('[App] Запуск бота в режиме long-polling...');
             await bot.telegram.deleteWebhook({ drop_pending_updates: true });
             await bot.launch();
         }
-
-        console.log('[App] Настройка фоновых задач (таймеров)...');
+        console.log('[App] Настройка фоновых задач...');
         setInterval(() => resetDailyStats(), 24 * 3600 * 1000);
-        // Исправлено: activeTasks -> active
         setInterval(() => console.log(`[Monitor] Очередь: ${downloadQueue.size} в ожидании, ${downloadQueue.active} в работе.`), 60000);
-        
     } catch (err) {
-        console.error('🔴 Критическая ошибка при запуске приложения:', err);
+        console.error('🔴 Критическая ошибка при запуске:', err);
         process.exit(1);
     }
 }
@@ -88,35 +71,26 @@ function setupExpress() {
     app.use(expressLayouts);
     app.set('view engine', 'ejs');
     app.set('views', path.join(__dirname, 'views'));
-    app.set('layout', 'layout'); // Используется layout.ejs по умолчанию
-    
+    app.set('layout', 'layout');
     const pgSession = pgSessionFactory(session);
     app.use(session({ store: new pgSession({ pool, tableName: 'session' }), secret: SESSION_SECRET, resave: false, saveUninitialized: false, cookie: { maxAge: 30 * 24 * 60 * 60 * 1000 } }));
-    
     app.use(async (req, res, next) => {
         res.locals.user = null;
         res.locals.page = '';
         if (req.session.authenticated && req.session.userId === ADMIN_ID) {
-            try {
-                res.locals.user = await getUserById(req.session.userId);
-            } catch {}
+            try { res.locals.user = await getUserById(req.session.userId); } catch {}
         }
         next();
     });
-
     const requireAuth = (req, res, next) => {
         if (req.session.authenticated && req.session.userId === ADMIN_ID) return next();
         res.redirect('/admin');
     };
-    
-    // ВАЖНО: ВОЗВРАЩАЕМ HEALTH CHECK, который я мог случайно удалить
     app.get('/health', (req, res) => res.status(200).send('OK'));
-    
     app.get('/admin', (req, res) => {
         if (req.session.authenticated) return res.redirect('/dashboard');
         res.render('login', { title: 'Вход', page: 'login', layout: false, error: null });
     });
-
     app.post('/admin', (req, res) => {
         if (req.body.username === ADMIN_LOGIN && req.body.password === ADMIN_PASSWORD) {
             req.session.authenticated = true;
@@ -126,24 +100,19 @@ function setupExpress() {
             res.render('login', { title: 'Вход', error: 'Неверные данные', page: 'login', layout: false });
         }
     });
-
     app.get('/logout', (req, res) => req.session.destroy(() => res.redirect('/admin')));
-
     app.get('/dashboard', requireAuth, async (req, res) => {
-        // ... (этот роут остается без изменений, как в вашем оригинале)
         try {
-            const [users, referralStats, downloadsRaw, registrationsRaw, activeRaw, activityByHourRaw] = await Promise.all([
+            const [users, referralStats, downloadsRaw, registrationsRaw, activeRaw] = await Promise.all([
                 getAllUsers(true), getReferralSourcesStats(), getDownloadsByDate(),
-                getRegistrationsByDate(), getActiveUsersByDate(), getUserActivityByDayHour()
+                getRegistrationsByDate(), getActiveUsersByDate()
             ]);
-            
             const stats = {
                 total_users: users.length,
                 active_users: users.filter(u => u.active).length,
                 total_downloads: users.reduce((sum, u) => sum + (u.total_downloads || 0), 0),
                 active_today: users.filter(u => u.last_active && new Date(u.last_active).toDateString() === new Date().toDateString()).length
             };
-            
             const prepareChartData = (registrations, downloads, active) => ({
                 labels: [...new Set([...Object.keys(registrations), ...Object.keys(downloads), ...Object.keys(active)])].sort(),
                 datasets: [
@@ -152,13 +121,9 @@ function setupExpress() {
                     { label: 'Активные', data: Object.values(active), borderColor: '#0d6efd' }
                 ]
             });
-            
             res.render('dashboard', { 
-                title: 'Дашборд', page: 'dashboard', 
-                stats, query: req.query,
-                chartDataCombined: prepareChartData(registrationsRaw, downloadsRaw, activeRaw),
-                chartDataHourActivity: { labels: [], datasets: [] },
-                chartDataWeekdayActivity: { labels: [], datasets: [] }
+                title: 'Дашборд', page: 'dashboard', stats, query: req.query,
+                chartDataCombined: prepareChartData(registrationsRaw, downloadsRaw, activeRaw)
             });
         } catch (error) {
             console.error("Ошибка дашборда:", error);
@@ -166,64 +131,56 @@ function setupExpress() {
         }
     });
 
-   // ЗАМЕНИТЕ СТАРЫЙ app.get('/users', ...) НА ЭТИ ДВА РОУТА
+    // --- НАЧАЛО ИЗМЕНЕНИЙ ---
+    // Роут для первоначальной загрузки страницы /users
+    app.get('/users', requireAuth, async (req, res) => {
+        try {
+            const { q = '', status = '', page = 1, limit = 25, sort = 'created_at', order = 'desc' } = req.query;
+            // Получаем общее количество всех пользователей один раз для заголовка
+            const totalUsersCount = (await pool.query('SELECT COUNT(*) FROM users')).rows[0].count;
+            
+            res.render('users', {
+                title: 'Пользователи', page: 'users',
+                totalUsers: totalUsersCount,
+                limit: parseInt(limit),
+                searchQuery: q,
+                statusFilter: status,
+                // Передаем queryParams, чтобы первый рендер таблицы был правильным
+                queryParams: { q, status, page, limit, sort, order } 
+            });
+        } catch (error) {
+            console.error("Ошибка на странице пользователей:", error);
+            res.status(500).send("Ошибка сервера");
+        }
+    });
 
-// Роут для первоначальной загрузки страницы
-app.get('/users', requireAuth, async (req, res) => {
-    try {
-        const { q = '', status = '', page = 1, limit = 25, sort = 'created_at', order = 'desc' } = req.query;
-        
-        const { users, totalPages, totalUsers } = await getPaginatedUsers({
-            searchQuery: q, statusFilter: status, page: 1, limit: parseInt(limit), sortBy: sort, sortOrder: order
-        });
-        
-        res.render('users', {
-            title: 'Пользователи', page: 'users',
-            users, // Данные для первой загрузки
-            totalUsers,
-            totalPages,
-            currentPage: 1,
-            limit: parseInt(limit),
-            searchQuery: q,
-            statusFilter: status,
-            queryParams: { q, status, page: 1, limit, sort, order }
-        });
-    } catch (error) {
-        console.error("Ошибка на странице пользователей:", error);
-        res.status(500).send("Ошибка сервера");
-    }
-});
-
-// Роут, который будет обрабатывать "живые" запросы от HTMX
-app.get('/users-table', requireAuth, async (req, res) => {
-    try {
-        const { q = '', status = '', page = 1, limit = 25, sort = 'created_at', order = 'desc' } = req.query;
-
-        const { users, totalPages } = await getPaginatedUsers({
-            searchQuery: q, statusFilter: status,
-            page: parseInt(page), limit: parseInt(limit),
-            sortBy: sort, sortOrder: order
-        });
-        
-        const queryParams = { q, status, page, limit, sort, order };
-
-        // Рендерим только частичный шаблон, без layout
-        res.render('partials/users-table', {
-            users, totalPages,
-            currentPage: parseInt(page),
-            queryParams,
-            layout: false // Важно!
-        });
-    } catch (error) {
-        console.error("Ошибка при обновлении таблицы пользователей:", error);
-        res.status(500).send("Ошибка сервера при обновлении таблицы");
-    }
-});
+    // Роут, который обрабатывает "живые" запросы от HTMX для обновления только таблицы
+    app.get('/users-table', requireAuth, async (req, res) => {
+        try {
+            const { q = '', status = '', page = 1, limit = 25, sort = 'created_at', order = 'desc' } = req.query;
+            const { users, totalPages } = await getPaginatedUsers({
+                searchQuery: q, statusFilter: status,
+                page: parseInt(page), limit: parseInt(limit),
+                sortBy: sort, sortOrder: order
+            });
+            const queryParams = { q, status, page, limit, sort, order };
+            // Рендерим только частичный шаблон, без основного layout
+            res.render('partials/users-table', {
+                users, totalPages,
+                currentPage: parseInt(page),
+                queryParams,
+                layout: false // Это важно!
+            });
+        } catch (error) {
+            console.error("Ошибка при обновлении таблицы:", error);
+            res.status(500).send("Ошибка сервера");
+        }
+    });
+    // --- КОНЕЦ ИЗМЕНЕНИЙ ---
     
     app.get('/broadcast', requireAuth, (req, res) => { 
         res.render('broadcast-form', { title: 'Рассылка', page: 'broadcast', error: null, success: null }); 
     });
-    
     app.get('/expiring-users', requireAuth, async (req, res) => {
         try {
             const users = await getExpiringUsers();
@@ -232,9 +189,7 @@ app.get('/users-table', requireAuth, async (req, res) => {
             res.status(500).send("Ошибка сервера");
         }
     });
-
     app.post('/set-tariff', requireAuth, async (req, res) => {
-        // ... (этот роут остается без изменений, как в вашем оригинале)
         const { userId, limit, days } = req.body;
         try {
             await setPremium(userId, parseInt(limit), parseInt(days) || 30);
@@ -251,16 +206,11 @@ app.get('/users-table', requireAuth, async (req, res) => {
         }
         res.redirect(req.get('referer') || '/dashboard');
     });
-    
-    // >>>>>>>> НОВЫЕ РОУТЫ <<<<<<<<<<
     app.post('/reset-bonus', requireAuth, async (req, res) => {
         const { userId } = req.body;
-        if (userId) {
-            await updateUserField(userId, 'subscribed_bonus_used', false);
-        }
+        if (userId) { await updateUserField(userId, 'subscribed_bonus_used', false); }
         res.redirect('back');
     });
-
     app.post('/reset-daily-limit', requireAuth, async (req, res) => {
         const { userId } = req.body;
         if (userId) {
