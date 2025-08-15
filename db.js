@@ -205,7 +205,25 @@ export async function hasLeftReview(userId) {
 export async function markSubscribedBonusUsed(userId) {
   await updateUserField(userId, 'subscribed_bonus_used', true);
 }
+// ДОБАВЬТЕ ЭТОТ КОД В КОНЕЦ ФАЙЛА db.js
 
+// Получает историю загрузок для конкретного пользователя
+export async function getDownloadsByUserId(userId, limit = 50) {
+  const { rows } = await query(
+    `SELECT track_title, downloaded_at FROM downloads_log WHERE user_id = $1 ORDER BY downloaded_at DESC LIMIT $2`,
+    [userId, limit]
+  );
+  return rows;
+}
+
+// Получает список пользователей, приглашенных данным юзером
+export async function getReferralsByUserId(userId) {
+  const { rows } = await query(
+    `SELECT id, first_name, username, created_at FROM users WHERE referrer_id = $1 ORDER BY created_at DESC`,
+    [userId]
+  );
+  return rows;
+}
 // >>>>>>>> НОВАЯ ФУНКЦИЯ ДЛЯ АДМИН-ПАНЕЛИ <<<<<<<<<<
 export async function getPaginatedUsers(options) {
     const {
