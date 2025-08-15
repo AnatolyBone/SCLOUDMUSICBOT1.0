@@ -1,4 +1,4 @@
-// index.js (ИСПРАВЛЕННАЯ И ФИНАЛЬНАЯ ВЕРСИЯ)
+// index.js (ФИНАЛЬНАЯ ВЕРСИЯ - ВСЕ ИСПРАВЛЕНО)
 
 import express from 'express';
 import session from 'express-session';
@@ -16,9 +16,7 @@ import {
     pool, supabase, getUserById, resetDailyStats, getAllUsers, getPaginatedUsers, 
     getReferralSourcesStats, getDownloadsByDate, getRegistrationsByDate, 
     getActiveUsersByDate, getExpiringUsers, setPremium, updateUserField, 
-    getLatestReviews, getUserActivityByDayHour,
-    getDownloadsByUserId,    // <<< ДОБАВЬТЕ ЭТУ СТРОКУ
-    getReferralsByUserId
+    getLatestReviews, getUserActivityByDayHour, getDownloadsByUserId, getReferralsByUserId
 } from './db.js';
 import { bot } from './bot.js';
 import redisService from './services/redisClient.js';
@@ -88,6 +86,7 @@ function setupExpress() {
         if (req.session.authenticated && req.session.userId === ADMIN_ID) return next();
         res.redirect('/admin');
     };
+    
     app.get('/health', (req, res) => res.status(200).send('OK'));
     app.get('/admin', (req, res) => {
         if (req.session.authenticated) return res.redirect('/dashboard');
@@ -103,6 +102,7 @@ function setupExpress() {
         }
     });
     app.get('/logout', (req, res) => req.session.destroy(() => res.redirect('/admin')));
+    
     app.get('/dashboard', requireAuth, async (req, res) => {
         try {
             const [users, referralStats, downloadsRaw, registrationsRaw, activeRaw] = await Promise.all([
@@ -117,179 +117,96 @@ function setupExpress() {
             };
             const prepareChartData = (registrations, downloads, active) => ({
                 labels: [...new Set([...Object.keys(registrations), ...Object.keys(downloads), ...Object.keys(active)])].sort(),
-                datasets: [
-                    { label: 'Регистрации', data: Object.values(registrations), borderColor: '#198754' },
-                    { label: 'Загрузки', data: Object.values(downloads), borderColor: '#fd7e14' },
-                    { label: 'Активные', data: Object.values(active), borderColor: '#0d6efd' }
-                ]
+                datasets: [ { label: 'Регистрации', data: Object.values(registrations), borderColor: '#198754' }, { label: 'Загрузки', data: Object.values(downloads), borderColor: '#fd7e14' }, { label: 'Активные', data: Object.values(active), borderColor: '#0d6efd' } ]
             });
-            res.render('dashboard', { 
-                title: 'Дашборд', page: 'dashboard', stats, query: req.query,
-                chartDataCombined: prepareChartData(registrationsRaw, downloadsRaw, activeRaw)
-            });
+            res.render('dashboard', { title: 'Дашборд', page: 'dashboard', stats, query: req.query, chartDataCombined: prepareChartData(registrationsRaw, downloadsRaw, activeRaw) });
         } catch (error) {
             console.error("Ошибка дашборда:", error);
             res.status(500).send("Ошибка сервера");
         }
     });
 
-    // --- НАЧАЛО ИЗМЕНЕНИЙ ---
     app.get('/users', requireAuth, async (req, res) => {
         try {
             const { q = '', status = '', page = 1, limit = 25, sort = 'created_at', order = 'desc' } = req.query;
-            
-            // ИСПРАВЛЕНИЕ: Делаем запрос к БД, чтобы получить данные для первой загрузки
             const { users, totalPages, totalUsers } = await getPaginatedUsers({
-                searchQuery: q, statusFilter: status,
-                page: parseInt(page), limit: parseInt(limit),
-                sortBy: sort, sortOrder: order
+                searchQuery: q, statusFilter: status, page: parseInt(page), limit: parseInt(limit), sortBy: sort, sortOrder: order
             });
-            
             const queryParams = { q, status, page, limit, sort, order };
-
-            res.render('users', {
-                title: 'Пользователи', page: 'users',
-                users, // <-- Теперь эта переменная существует
-                totalUsers,
-                totalPages,
-                currentPage: parseInt(page),
-                limit: parseInt(limit),
-                searchQuery: q,
-                statusFilter: status,
-                queryParams
-            });
+            res.render('users', { title: 'Пользователи', page: 'users', users, totalUsers, totalPages, currentPage: parseInt(page), limit: parseInt(limit), searchQuery: q, statusFilter: status, queryParams });
         } catch (error) {
             console.error("Ошибка на странице пользователей:", error);
             res.status(500).send("Ошибка сервера");
         }
     });
-    // ЗАМЕНИТЕ СУЩЕСТВУЮЩИЙ РОУТ /user/:id НА ЭТОТ
 
-app.get('/user/:id', requireAuth, async (req, res) => {
-    try {
-        const userId = req.params.id;
-
-        // Делаем три запроса параллельно для скорости
-        const [userProfile, downloads, referrals] = await Promise.all([
-            getUserById(userId),
-            getDownloadsByUserId(userId),
-            getReferralsByUserId(userId)
-        ]);
-
-        // Если пользователь не найден, показываем ошибку
-        if (!userProfile) {
-            return res.status(404).render('user-profile', {
-                title: 'Пользователь не найден',
-                page: 'users',
-                userProfile: null,
-                downloads: [],
-                referrals: []
-            });
-        }
-        
-        // Рендерим ваш шаблон со всеми необходимыми данными
-        res.render('user-profile', {
-            title: `Профиль: ${userProfile.first_name || userId}`,
-            page: 'users',
-            userProfile, // Данные самого пользователя
-            downloads,   // Его история загрузок
-            referrals    // Кого он пригласил
-        });
-    } catch (error) {
-        console.error(`Ошибка при получении профиля пользователя ${req.params.id}:`, error);
-        res.status(500).send("Ошибка сервера");
-    }
-});
-
-
-    // Этот роут остается для обработки AJAX-запросов от HTMX
     app.get('/users-table', requireAuth, async (req, res) => {
         try {
             const { q = '', status = '', page = 1, limit = 25, sort = 'created_at', order = 'desc' } = req.query;
             const { users, totalPages } = await getPaginatedUsers({
-                searchQuery: q, statusFilter: status,
-                page: parseInt(page), limit: parseInt(limit),
-                sortBy: sort, sortOrder: order
+                searchQuery: q, statusFilter: status, page: parseInt(page), limit: parseInt(limit), sortBy: sort, sortOrder: order
             });
             const queryParams = { q, status, page, limit, sort, order };
-            res.render('partials/users-table', {
-                users, totalPages,
-                currentPage: parseInt(page),
-                queryParams,
-                layout: false
-            });
+            res.render('partials/users-table', { users, totalPages, currentPage: parseInt(page), queryParams, layout: false });
         } catch (error) {
             console.error("Ошибка при обновлении таблицы:", error);
             res.status(500).send("Ошибка сервера");
         }
     });
-    // --- КОНЕЦ ИЗМЕНЕНИЙ ---
+    
+    app.get('/user/:id', requireAuth, async (req, res) => {
+        try {
+            const userId = req.params.id;
+            const [userProfile, downloads, referrals] = await Promise.all([ getUserById(userId), getDownloadsByUserId(userId), getReferralsByUserId(userId) ]);
+            if (!userProfile) {
+                return res.status(404).render('user-profile', { title: 'Пользователь не найден', page: 'users', userProfile: null, downloads: [], referrals: [] });
+            }
+            res.render('user-profile', { title: `Профиль: ${userProfile.first_name || userId}`, page: 'users', userProfile, downloads, referrals });
+        } catch (error) {
+            console.error(`Ошибка при получении профиля пользователя ${req.params.id}:`, error);
+            res.status(500).send("Ошибка сервера");
+        }
+    });
     
     app.get('/broadcast', requireAuth, (req, res) => { 
         res.render('broadcast-form', { title: 'Рассылка', page: 'broadcast', error: null, success: null }); 
     });
-    // ДОБАВЬТЕ ЭТОТ КОД В index.js ПОСЛЕ app.get('/broadcast', ...)
 
-// Обработчик для приёма и запуска рассылки
-app.post('/broadcast', requireAuth, upload.single('audio'), async (req, res) => {
-    const { message } = req.body;
-    const audioFile = req.file; // Информация о загруженном файле
-
-    if (!message) {
-        return res.render('broadcast-form', { title: 'Рассылка', page: 'broadcast', error: 'Текст сообщения не может быть пустым.', success: null });
-    }
-
-    try {
-        const users = await getAllUsers(true); // Получаем только активных пользователей
-
-        // Сразу отвечаем админу, что всё началось, чтобы страница не "висела"
-        res.render('broadcast-form', { 
-            title: 'Рассылка', 
-            page: 'broadcast', 
-            error: null, 
-            success: `Рассылка запущена для ${users.length} активных пользователей. Это может занять некоторое время.`
-        });
-
-        // Асинхронно запускаем саму рассылку в фоне
-        (async () => {
-            console.log(`[Broadcast] Начинаю рассылку для ${users.length} пользователей.`);
-            let successCount = 0;
-            let errorCount = 0;
-
-            for (const user of users) {
-                try {
-                    // Если был загружен аудиофайл
-                    if (audioFile) {
-                        await bot.telegram.sendAudio(user.id, { source: audioFile.path }, { caption: message, parse_mode: 'Markdown' });
-                    } else { // Если только текст
-                        await bot.telegram.sendMessage(user.id, message, { parse_mode: 'Markdown' });
+    app.post('/broadcast', requireAuth, upload.single('audio'), async (req, res) => {
+        const { message } = req.body;
+        const audioFile = req.file;
+        if (!message) {
+            return res.render('broadcast-form', { title: 'Рассылка', page: 'broadcast', error: 'Текст сообщения не может быть пустым.', success: null });
+        }
+        try {
+            const users = await getAllUsers(true);
+            res.render('broadcast-form', { title: 'Рассылка', page: 'broadcast', error: null, success: `Рассылка запущена для ${users.length} активных пользователей...` });
+            (async () => {
+                console.log(`[Broadcast] Начинаю рассылку для ${users.length} пользователей.`);
+                let successCount = 0, errorCount = 0;
+                for (const user of users) {
+                    try {
+                        if (audioFile) {
+                            await bot.telegram.sendAudio(user.id, { source: audioFile.path }, { caption: message, parse_mode: 'Markdown' });
+                        } else {
+                            await bot.telegram.sendMessage(user.id, message, { parse_mode: 'Markdown' });
+                        }
+                        successCount++;
+                    } catch (e) {
+                        errorCount++;
+                        if (e.response?.error_code === 403) { await updateUserField(user.id, 'active', false); }
                     }
-                    successCount++;
-                } catch (e) {
-                    errorCount++;
-                    if (e.response?.error_code === 403) {
-                        await updateUserField(user.id, 'active', false);
-                    }
+                    await new Promise(resolve => setTimeout(resolve, 50));
                 }
-                // Пауза, чтобы не превысить лимиты Telegram
-                await new Promise(resolve => setTimeout(resolve, 50)); 
-            }
-            console.log(`[Broadcast] Рассылка завершена. Успешно: ${successCount}, Ошибки: ${errorCount}`);
+                console.log(`[Broadcast] Рассылка завершена. Успешно: ${successCount}, Ошибки: ${errorCount}`);
+                if (audioFile) { fs.unlink(audioFile.path, (err) => { if (err) console.error("Не удалось удалить временный файл рассылки:", err); }); }
+            })();
+        } catch (e) {
+            console.error('Ошибка при запуске рассылки:', e);
+            res.render('broadcast-form', { title: 'Рассылка', page: 'broadcast', error: 'Критическая ошибка при запуске рассылки.', success: null });
+        }
+    });
 
-            // После завершения рассылки удаляем временный аудиофайл
-            if (audioFile) {
-                fs.unlink(audioFile.path, (err) => {
-                    if (err) console.error("Не удалось удалить временный файл рассылки:", err);
-                });
-            }
-        })();
-
-    } catch (e) {
-        console.error('Ошибка при запуске рассылки:', e);
-        // В случае критической ошибки до начала рассылки
-        res.render('broadcast-form', { title: 'Рассылка', page: 'broadcast', error: 'Произошла критическая ошибка при запуске рассылки.', success: null });
-    }
-});
     app.get('/expiring-users', requireAuth, async (req, res) => {
         try {
             const users = await getExpiringUsers();
@@ -298,6 +215,7 @@ app.post('/broadcast', requireAuth, upload.single('audio'), async (req, res) => 
             res.status(500).send("Ошибка сервера");
         }
     });
+
     app.post('/set-tariff', requireAuth, async (req, res) => {
         const { userId, limit, days } = req.body;
         try {
@@ -313,20 +231,22 @@ app.post('/broadcast', requireAuth, upload.single('audio'), async (req, res) => 
         } catch (error) {
             console.error(`[Admin] Ошибка при смене тарифа для ${userId}:`, error.message);
         }
-        res.redirect(req.get('referer') || '/dashboard');
+        res.redirect(req.get('Referrer') || '/users');
     });
+
     app.post('/reset-bonus', requireAuth, async (req, res) => {
         const { userId } = req.body;
         if (userId) { await updateUserField(userId, 'subscribed_bonus_used', false); }
-        res.redirect('back');
+        res.redirect(req.get('Referrer') || '/users');
     });
+
     app.post('/reset-daily-limit', requireAuth, async (req, res) => {
         const { userId } = req.body;
         if (userId) {
             await updateUserField(userId, 'downloads_today', 0);
             await updateUserField(userId, 'tracks_today', '[]');
         }
-        res.redirect('back');
+        res.redirect(req.get('Referrer') || '/users');
     });
 }
 
