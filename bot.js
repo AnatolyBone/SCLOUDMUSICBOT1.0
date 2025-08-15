@@ -1,4 +1,4 @@
-// bot.js (ФИНАЛЬНАЯ ВЕРСИЯ 4.0)
+// bot.js (ФИНАЛЬНАЯ ВЕРСИЯ 5.0 - CRASH FIX)
 
 import { Telegraf, Markup, TelegramError } from 'telegraf';
 import { ADMIN_ID, BOT_TOKEN, WEBHOOK_URL, CHANNEL_USERNAME } from './config.js';
@@ -33,14 +33,11 @@ function getDaysLeft(premiumUntil) {
     return Math.max(Math.ceil(diff / 86400000), 0);
 }
 
-// В ФАЙЛЕ bot.js
-
-// >>>>> ЗАМЕНИТЕ ВСЮ ФУНКЦИЮ formatMenuMessage НА ЭТУ:
 function formatMenuMessage(user, ctx) {
     const tariffLabel = getTariffName(user.premium_limit);
     const downloadsToday = user.downloads_today || 0;
     const daysLeft = getDaysLeft(user.premium_until);
-    
+
     let message = `
 👋 Привет, ${user.first_name || 'пользователь'}!
 Твой профиль:
@@ -48,14 +45,13 @@ function formatMenuMessage(user, ctx) {
 ⏳ Осталось дней подписки: *${daysLeft}*
 🎧 Сегодня скачано: *${downloadsToday}* из *${user.premium_limit}*
     `.trim();
-    
+
     if (!user.subscribed_bonus_used) {
-        // ИСПРАВЛЕНО: Создаем красивую кликабельную ссылку в формате Markdown
         const cleanUsername = CHANNEL_USERNAME.replace('@', '');
         const channelLink = `[наш канал](https://t.me/${cleanUsername})`;
         message += `\n\n🎁 *Бонус!* Подпишись на ${channelLink} и получи *7 дней тарифа Plus* бесплатно!`;
     }
-    
+
     message += '\n\nПросто отправь мне ссылку, и я скачаю трек!';
     return message;
 }
@@ -126,15 +122,12 @@ bot.action('check_subscription', async (ctx) => {
     }
 });
 
-// ИСПРАВЛЕНА ЛОГИКА ОТОБРАЖЕНИЯ КНОПКИ
 bot.hears(T('menu'), async (ctx) => {
     const user = await getUser(ctx.from.id);
     const message = formatMenuMessage(user, ctx);
     
-    // Показываем обычную клавиатуру
     await ctx.reply(T('menu'), Markup.keyboard([[T('menu'), T('upgrade')], [T('mytracks'), T('help')]]).resize());
 
-    // Отправляем сообщение меню ОТДЕЛЬНО, чтобы можно было прикрепить инлайн-кнопку
     const extraOptions = { parse_mode: 'Markdown' };
     if (!user.subscribed_bonus_used) {
         extraOptions.reply_markup = {
@@ -165,35 +158,36 @@ bot.hears(T('mytracks'), async (ctx) => {
 bot.hears(T('help'), async (ctx) => await ctx.reply(T('helpInfo')));
 
 bot.hears(T('upgrade'), async (ctx) => {
-    // Используем parse_mode: 'Markdown' для совместимости
     await ctx.reply(T('upgradeInfo'), { parse_mode: 'Markdown' });
 });
 
-// В ФАЙЛЕ bot.js
-
-// >>>>> ЗАМЕНИТЕ ВЕСЬ БЛОК bot.on('text', ...) НА ЭТОТ <<<<<
-
-bot.on('text', (ctx) => { // Убрали async, чтобы было понятнее
+// >>>>>>>> ИСПРАВЛЕННЫЙ БЛОК <<<<<<<<<<
+bot.on('text', async (ctx) => {
     const userText = ctx.message.text;
     if (Object.values(allTextsSync()).includes(userText)) {
-        return; // Если это команда из меню, ничего не делаем
+        return;
     }
-    
+
     const url = userText.match(/(https?:\/\/[^\s]+)/g)?.find(u => u.includes('soundcloud.com'));
     
     if (url) {
-        // 1. Мгновенно отвечаем пользователю
-        ctx.reply('🔍 Анализирую ссылку...');
+        try {
+            // 1. "Безопасно" отвечаем пользователю. Если он нас заблокировал,
+            // .catch() перехватит ошибку и не даст приложению упасть.
+            await ctx.reply('🔍 Анализирую ссылку...');
+        } catch (e) {
+            console.warn(`[Pre-send] Не удалось отправить 'Анализирую' пользователю ${ctx.from.id}. Вероятно, бот заблокирован.`);
+            // Если мы не можем даже отправить это сообщение, нет смысла продолжать.
+            return;
+        }
         
-        // 2. Запускаем тяжелую задачу в фоне, не дожидаясь её завершения.
-        // Это позволяет Telegraf сразу отправить Telegram'у ответ 200 OK.
+        // 2. Запускаем тяжелую задачу в фоне.
         enqueue(ctx, ctx.from.id, url).catch(err => {
             console.error(`[Background Enqueue Error] Ошибка для user ${ctx.from.id}:`, err.message);
-            // Если что-то пошло не так на этапе анализа, сообщаем пользователю
             ctx.reply('❌ Не удалось обработать вашу ссылку. Попробуйте другую.').catch(() => {});
         });
-        
+
     } else {
-        ctx.reply('Я не понял. Пришлите ссылку или используйте меню.');
+        await ctx.reply('Я не понял. Пришлите ссылку или используйте меню.');
     }
 });
