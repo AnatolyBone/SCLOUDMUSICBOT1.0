@@ -1,5 +1,6 @@
 // services/downloadManager.js (ФИНАЛЬНАЯ КОРРЕКТНАЯ ВЕРСЯ)
-
+// services/downloadManager.js (вверху)
+import { STORAGE_CHANNEL_ID } from '../config.js';
 import { Markup } from 'telegraf';
 import { CHANNEL_USERNAME } from '../config.js';
 import path from 'path';
