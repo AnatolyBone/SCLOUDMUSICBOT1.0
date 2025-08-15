@@ -1,4 +1,5 @@
 // db.js
+
 import { Pool } from 'pg';
 import { createClient } from '@supabase/supabase-js';
 import json2csv from 'json-2-csv';
@@ -59,6 +60,7 @@ export async function updateUserField(id, field, value) {
   if (!allowedFields.has(field)) {
     throw new Error(`Недопустимое поле для обновления: ${field}`);
   }
+  // PostgreSQL может сам обработать boolean, поэтому String() не всегда нужен, но так безопаснее
   await query(`UPDATE users SET ${field} = $1 WHERE id = $2`, [value, id]);
 }
 
@@ -82,7 +84,6 @@ export async function cacheTrack(trackUrl, fileId, title) {
   );
 }
 
-// >>>>>>>> ИСПРАВЛЕННАЯ ФУНКЦИЯ <<<<<<<<<<
 export async function incrementDownloadsAndSaveTrack(userId, trackName, fileId, url) {
   const newTrack = { title: trackName, fileId: fileId, url: url };
   const res = await query(
@@ -101,7 +102,6 @@ export async function incrementDownloadsAndSaveTrack(userId, trackName, fileId, 
   }
   return res.rowCount > 0 ? res.rows[0] : null;
 }
-// >>>>>>>> КОНЕЦ ИСПРАВЛЕННОЙ ФУНКЦИИ <<<<<<<<<<
 
 export async function setPremium(id, limit, days = 30) {
   const until = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
@@ -205,3 +205,62 @@ export async function hasLeftReview(userId) {
 export async function markSubscribedBonusUsed(userId) {
   await updateUserField(userId, 'subscribed_bonus_used', true);
 }
+
+// >>>>>>>> НОВАЯ ФУНКЦИЯ ДЛЯ АДМИН-ПАНЕЛИ <<<<<<<<<<
+export async function getPaginatedUsers(options) {
+    const {
+        searchQuery = '',
+        statusFilter = '',
+        page = 1,
+        limit = 25,
+        sortBy = 'created_at',
+        sortOrder = 'desc'
+    } = options;
+
+    const allowedSortFields = ['id', 'total_downloads', 'created_at', 'last_active', 'premium_limit'];
+    const safeSortBy = allowedSortFields.includes(sortBy) ? `"${sortBy}"` : '"created_at"'; // Обертываем в кавычки для безопасности
+    const safeSortOrder = sortOrder.toLowerCase() === 'asc' ? 'ASC' : 'DESC';
+
+    const offset = (page - 1) * limit;
+    let whereClauses = [];
+    let queryParams = [];
+    let paramIndex = 1;
+
+    if (statusFilter === 'active') {
+        whereClauses.push('active = TRUE');
+    } else if (statusFilter === 'inactive') {
+        whereClauses.push('active = FALSE');
+    }
+
+    if (searchQuery) {
+        queryParams.push(`%${searchQuery}%`);
+        whereClauses.push(`(CAST(id AS TEXT) ILIKE $${paramIndex} OR first_name ILIKE $${paramIndex} OR username ILIKE $${paramIndex})`);
+        paramIndex++;
+    }
+
+    const whereString = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+
+    const totalQuery = `SELECT COUNT(*) FROM users ${whereString}`;
+    const totalResult = await query(totalQuery, queryParams);
+    const totalUsers = parseInt(totalResult.rows[0].count, 10);
+    const totalPages = Math.ceil(totalUsers / limit);
+
+    queryParams.push(limit);
+    queryParams.push(offset);
+    
+    const usersQuery = `
+        SELECT * FROM users
+        ${whereString}
+        ORDER BY ${safeSortBy} ${safeSortOrder}
+        LIMIT $${paramIndex++} OFFSET $${paramIndex++}
+    `;
+    const usersResult = await query(usersQuery, queryParams);
+
+    return {
+        users: usersResult.rows,
+        totalPages,
+        currentPage: page,
+        totalUsers
+    };
+}
+// >>>>>>>> КОНЕЦ НОВОЙ ФУНКЦИИ <<<<<<<<<<
