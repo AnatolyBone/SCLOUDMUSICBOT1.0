@@ -1,4 +1,4 @@
-// index.js (ФИНАЛЬНАЯ ПРОВЕРЕННАЯ ВЕРСИЯ)
+// index.js (ИСПРАВЛЕННАЯ И ФИНАЛЬНАЯ ВЕРСИЯ)
 
 import express from 'express';
 import session from 'express-session';
@@ -132,21 +132,29 @@ function setupExpress() {
     });
 
     // --- НАЧАЛО ИЗМЕНЕНИЙ ---
-    // Роут для первоначальной загрузки страницы /users
     app.get('/users', requireAuth, async (req, res) => {
         try {
             const { q = '', status = '', page = 1, limit = 25, sort = 'created_at', order = 'desc' } = req.query;
-            // Получаем общее количество всех пользователей один раз для заголовка
-            const totalUsersCount = (await pool.query('SELECT COUNT(*) FROM users')).rows[0].count;
             
+            // ИСПРАВЛЕНИЕ: Делаем запрос к БД, чтобы получить данные для первой загрузки
+            const { users, totalPages, totalUsers } = await getPaginatedUsers({
+                searchQuery: q, statusFilter: status,
+                page: parseInt(page), limit: parseInt(limit),
+                sortBy: sort, sortOrder: order
+            });
+            
+            const queryParams = { q, status, page, limit, sort, order };
+
             res.render('users', {
                 title: 'Пользователи', page: 'users',
-                totalUsers: totalUsersCount,
+                users, // <-- Теперь эта переменная существует
+                totalUsers,
+                totalPages,
+                currentPage: parseInt(page),
                 limit: parseInt(limit),
                 searchQuery: q,
                 statusFilter: status,
-                // Передаем queryParams, чтобы первый рендер таблицы был правильным
-                queryParams: { q, status, page, limit, sort, order } 
+                queryParams
             });
         } catch (error) {
             console.error("Ошибка на странице пользователей:", error);
@@ -154,7 +162,7 @@ function setupExpress() {
         }
     });
 
-    // Роут, который обрабатывает "живые" запросы от HTMX для обновления только таблицы
+    // Этот роут остается для обработки AJAX-запросов от HTMX
     app.get('/users-table', requireAuth, async (req, res) => {
         try {
             const { q = '', status = '', page = 1, limit = 25, sort = 'created_at', order = 'desc' } = req.query;
@@ -164,12 +172,11 @@ function setupExpress() {
                 sortBy: sort, sortOrder: order
             });
             const queryParams = { q, status, page, limit, sort, order };
-            // Рендерим только частичный шаблон, без основного layout
             res.render('partials/users-table', {
                 users, totalPages,
                 currentPage: parseInt(page),
                 queryParams,
-                layout: false // Это важно!
+                layout: false
             });
         } catch (error) {
             console.error("Ошибка при обновлении таблицы:", error);
