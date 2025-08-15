@@ -228,6 +228,68 @@ app.get('/user/:id', requireAuth, async (req, res) => {
     app.get('/broadcast', requireAuth, (req, res) => { 
         res.render('broadcast-form', { title: 'Рассылка', page: 'broadcast', error: null, success: null }); 
     });
+    // ДОБАВЬТЕ ЭТОТ КОД В index.js ПОСЛЕ app.get('/broadcast', ...)
+
+// Обработчик для приёма и запуска рассылки
+app.post('/broadcast', requireAuth, upload.single('audio'), async (req, res) => {
+    const { message } = req.body;
+    const audioFile = req.file; // Информация о загруженном файле
+
+    if (!message) {
+        return res.render('broadcast-form', { title: 'Рассылка', page: 'broadcast', error: 'Текст сообщения не может быть пустым.', success: null });
+    }
+
+    try {
+        const users = await getAllUsers(true); // Получаем только активных пользователей
+
+        // Сразу отвечаем админу, что всё началось, чтобы страница не "висела"
+        res.render('broadcast-form', { 
+            title: 'Рассылка', 
+            page: 'broadcast', 
+            error: null, 
+            success: `Рассылка запущена для ${users.length} активных пользователей. Это может занять некоторое время.`
+        });
+
+        // Асинхронно запускаем саму рассылку в фоне
+        (async () => {
+            console.log(`[Broadcast] Начинаю рассылку для ${users.length} пользователей.`);
+            let successCount = 0;
+            let errorCount = 0;
+
+            for (const user of users) {
+                try {
+                    // Если был загружен аудиофайл
+                    if (audioFile) {
+                        await bot.telegram.sendAudio(user.id, { source: audioFile.path }, { caption: message, parse_mode: 'Markdown' });
+                    } else { // Если только текст
+                        await bot.telegram.sendMessage(user.id, message, { parse_mode: 'Markdown' });
+                    }
+                    successCount++;
+                } catch (e) {
+                    errorCount++;
+                    if (e.response?.error_code === 403) {
+                        await updateUserField(user.id, 'active', false);
+                    }
+                }
+                // Пауза, чтобы не превысить лимиты Telegram
+                await new Promise(resolve => setTimeout(resolve, 50)); 
+            }
+            console.log(`[Broadcast] Рассылка завершена. Успешно: ${successCount}, Ошибки: ${errorCount}`);
+
+            // После завершения рассылки удаляем временный аудиофайл
+            if (audioFile) {
+                fs.unlink(audioFile.path, (err) => {
+                    if (err) console.error("Не удалось удалить временный файл рассылки:", err);
+                });
+            }
+        })();
+
+    } catch (e) {
+        console.error('Ошибка при запуске рассылки:', e);
+        // В случае критической ошибки до начала рассылки
+        res.render('broadcast-form', { title: 'Рассылка', page: 'broadcast', error: 'Произошла критическая ошибка при запуске рассылки.', success: null });
+    }
+});
     app.get('/expiring-users', requireAuth, async (req, res) => {
         try {
             const users = await getExpiringUsers();
