@@ -1,4 +1,4 @@
-// bot.js (ПОЛНАЯ ФИНАЛЬНАЯ ВЕРСИЯ)
+// bot.js (ФИНАЛЬНАЯ ВЕРСИЯ 4.0)
 
 import { Telegraf, Markup, TelegramError } from 'telegraf';
 import { ADMIN_ID, BOT_TOKEN, WEBHOOK_URL, CHANNEL_USERNAME } from './config.js';
@@ -8,7 +8,7 @@ import { enqueue, downloadQueue } from './services/downloadManager.js';
 
 async function isSubscribed(userId) {
     if (!CHANNEL_USERNAME) {
-        console.warn('CHANNEL_USERNAME не указан в конфиге. Проверка подписки невозможна.');
+        console.warn('CHANNEL_USERNAME не указан в конфиге.');
         return false;
     }
     try {
@@ -33,11 +33,10 @@ function getDaysLeft(premiumUntil) {
     return Math.max(Math.ceil(diff / 86400000), 0);
 }
 
+// ОБНОВЛЕНА ФУНКЦИЯ МЕНЮ: Убрана реф. ссылка, исправлено экранирование
 function formatMenuMessage(user, ctx) {
     const tariffLabel = getTariffName(user.premium_limit);
     const downloadsToday = user.downloads_today || 0;
-    const invited = user.referred_count || 0;
-    const refLink = `https://t.me/${ctx.botInfo.username}?start=${user.id}`;
     const daysLeft = getDaysLeft(user.premium_until);
 
     let message = `
@@ -46,14 +45,11 @@ function formatMenuMessage(user, ctx) {
 💼 Тариф: *${tariffLabel}*
 ⏳ Осталось дней подписки: *${daysLeft}*
 🎧 Сегодня скачано: *${downloadsToday}* из *${user.premium_limit}*
-👫 Приглашено друзей: *${invited}*
-🔗 Твоя реферальная ссылка для друзей:
-\`${refLink}\`
     `.trim();
 
     if (!user.subscribed_bonus_used) {
-        // ИСПРАВЛЕНИЕ: Экранируем спецсимволы в имени канала, чтобы избежать ошибок Markdown
-        const escapedChannelUsername = CHANNEL_USERNAME.replace(/[_*[```()~`>#+-=|{}.!]/g, '\\$&');
+        // ИСПРАВЛЕНО: Экранируем только '_' чтобы не ломать ссылку
+        const escapedChannelUsername = CHANNEL_USERNAME.replace(/_/g, '\\_');
         message += `\n\n🎁 *Бонус!* Подпишись на наш канал ${escapedChannelUsername} и получи *7 дней тарифа Plus* бесплатно!`;
     }
 
@@ -65,13 +61,9 @@ async function handleSendMessageError(e, userId, ctx = null) {
     console.error(`🔴 Ошибка при работе с пользователем ${userId}:`, e.message);
     if (e instanceof TelegramError && e.response?.error_code === 403) {
         await updateUserField(userId, 'active', false);
-        console.log(`- Пользователь ${userId} заблокировал бота. Помечен как неактивный.`);
+        console.log(`- Пользователь ${userId} заблокировал бота.`);
     } else if (ctx) {
-        try {
-            await ctx.reply('Произошла ошибка при выполнении вашего запроса. Попробуйте позже.');
-        } catch (sendError) {
-            console.error(`- Не удалось отправить сообщение об ошибке пользователю ${userId}.`);
-        }
+        try { await ctx.reply('Произошла ошибка при выполнении вашего запроса.'); } catch (sendError) { console.error(`- Не удалось отправить сообщение об ошибке пользователю ${userId}.`); }
     }
 }
 
@@ -123,27 +115,30 @@ bot.action('check_subscription', async (ctx) => {
     if (subscribed) {
         await setPremium(ctx.from.id, 30, 7); 
         await updateUserField(ctx.from.id, 'subscribed_bonus_used', true);
-        await ctx.editMessageText('🎉 Поздравляем! Вам начислено 7 дней тарифа Plus. Спасибо за подписку!\n\nМожете проверить свой новый статус в меню.', { reply_markup: undefined });
+        await ctx.editMessageText('🎉 Поздравляем! Вам начислено 7 дней тарифа Plus. Спасибо за подписку!\n\nМожете проверить свой новый статус в меню.');
         await ctx.answerCbQuery('Бонус успешно активирован!');
     } else {
-        const escapedChannelUsername = CHANNEL_USERNAME.replace(/[_*[```()~`>#+-=|{}.!]/g, '\\$&');
+        const escapedChannelUsername = CHANNEL_USERNAME.replace(/_/g, '\\_');
         await ctx.answerCbQuery(`Вы еще не подписаны на канал ${escapedChannelUsername}. Пожалуйста, подпишитесь и нажмите кнопку снова.`, { show_alert: true });
     }
 });
 
+// ИСПРАВЛЕНА ЛОГИКА ОТОБРАЖЕНИЯ КНОПКИ
 bot.hears(T('menu'), async (ctx) => {
     const user = await getUser(ctx.from.id);
     const message = formatMenuMessage(user, ctx);
-    const extra = {};
+    
+    // Показываем обычную клавиатуру
+    await ctx.reply(T('menu'), Markup.keyboard([[T('menu'), T('upgrade')], [T('mytracks'), T('help')]]).resize());
+
+    // Отправляем сообщение меню ОТДЕЛЬНО, чтобы можно было прикрепить инлайн-кнопку
+    const extraOptions = { parse_mode: 'Markdown' };
     if (!user.subscribed_bonus_used) {
-        extra.reply_markup = {
+        extraOptions.reply_markup = {
             inline_keyboard: [[ Markup.button.callback('✅ Я подписался и хочу бонус!', 'check_subscription') ]]
         };
     }
-    await ctx.replyWithMarkdown(message, { 
-        ...extra, 
-        ...Markup.keyboard([[T('menu'), T('upgrade')], [T('mytracks'), T('help')]]).resize()
-    });
+    await ctx.reply(message, extraOptions);
 });
 
 bot.hears(T('mytracks'), async (ctx) => {
@@ -165,9 +160,10 @@ bot.hears(T('mytracks'), async (ctx) => {
 });
 
 bot.hears(T('help'), async (ctx) => await ctx.reply(T('helpInfo')));
+
 bot.hears(T('upgrade'), async (ctx) => {
-    // Используем MarkdownV2 для upgradeInfo, т.к. там могут быть спецсимволы
-    await ctx.reply(T('upgradeInfo'), { parse_mode: 'MarkdownV2' });
+    // Используем parse_mode: 'Markdown' для совместимости
+    await ctx.reply(T('upgradeInfo'), { parse_mode: 'Markdown' });
 });
 
 bot.on('text', async (ctx) => {
