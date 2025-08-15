@@ -161,6 +161,44 @@ function setupExpress() {
             res.status(500).send("Ошибка сервера");
         }
     });
+    // ЗАМЕНИТЕ СУЩЕСТВУЮЩИЙ РОУТ /user/:id НА ЭТОТ
+
+app.get('/user/:id', requireAuth, async (req, res) => {
+    try {
+        const userId = req.params.id;
+
+        // Делаем три запроса параллельно для скорости
+        const [userProfile, downloads, referrals] = await Promise.all([
+            getUserById(userId),
+            getDownloadsByUserId(userId),
+            getReferralsByUserId(userId)
+        ]);
+
+        // Если пользователь не найден, показываем ошибку
+        if (!userProfile) {
+            return res.status(404).render('user-profile', {
+                title: 'Пользователь не найден',
+                page: 'users',
+                userProfile: null,
+                downloads: [],
+                referrals: []
+            });
+        }
+        
+        // Рендерим ваш шаблон со всеми необходимыми данными
+        res.render('user-profile', {
+            title: `Профиль: ${userProfile.first_name || userId}`,
+            page: 'users',
+            userProfile, // Данные самого пользователя
+            downloads,   // Его история загрузок
+            referrals    // Кого он пригласил
+        });
+    } catch (error) {
+        console.error(`Ошибка при получении профиля пользователя ${req.params.id}:`, error);
+        res.status(500).send("Ошибка сервера");
+    }
+});
+
 
     // Этот роут остается для обработки AJAX-запросов от HTMX
     app.get('/users-table', requireAuth, async (req, res) => {
