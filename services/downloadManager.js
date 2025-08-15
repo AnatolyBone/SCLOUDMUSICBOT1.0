@@ -8,7 +8,6 @@ import crypto from 'crypto';
 import pLimit from 'p-limit';
 
 import { bot } from '../bot.js';
-import redisService from './redisClient.js';
 import { T } from '../config/texts.js';
 import { TaskQueue } from '../lib/TaskQueue.js';
 import {
@@ -28,6 +27,7 @@ const cacheDir = path.join(__dirname, 'cache');
 const YTDL_TIMEOUT = 60;
 const TRACK_TITLE_LIMIT = 100;
 const UNLIMITED_PLAYLIST_LIMIT = 100;
+const FAKE_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36';
 
 const ytdlLimit = pLimit(1);
 
@@ -63,7 +63,8 @@ async function trackDownloadProcessor(task) {
         await ytdl(url, {
             output: tempFilePath,
             extractAudio: true, audioFormat: 'mp3',
-            retries: 3, "socket-timeout": YTDL_TIMEOUT
+            retries: 3, "socket-timeout": YTDL_TIMEOUT,
+            'user-agent': FAKE_USER_AGENT // <--- ИЗМЕНЕНИЕ ЗДЕСЬ
         });
         
         if (!fs.existsSync(tempFilePath)) throw new Error(`Файл не был создан`);
@@ -82,6 +83,9 @@ async function trackDownloadProcessor(task) {
             await incrementDownloadsAndSaveTrack(userId, trackName, sentMessage.audio.file_id, url);
         }
         
+        // Логика для плейлистов с Redis была в старом коде, но ваша БД - Postgres. 
+        // Если вам нужна эта логика, ее надо адаптировать. Пока что оставляю закомментированной.
+        /* 
         if (playlistInfo) {
             const redisClient = redisService.getClient();
             const playlistKey = `playlist:${userId}:${playlistInfo.id}`;
@@ -91,6 +95,7 @@ async function trackDownloadProcessor(task) {
                 await redisClient.del(playlistKey);
             }
         }
+        */
     } catch (err) {
         let userErrorMessage = `❌ Не удалось обработать трек: "${trackName}"`;
         const errorDetails = err.stderr || err.message || '';
@@ -121,7 +126,13 @@ export async function enqueue(ctx, userId, url) {
         await resetDailyLimitIfNeeded(userId);
         processingMessage = await safeSendMessage(userId, '🔍 Анализирую ссылку...');
         
-        const info = await ytdlLimit(() => ytdl(url, { dumpSingleJson: true, retries: 2, "socket-timeout": YTDL_TIMEOUT }));
+        const info = await ytdlLimit(() => ytdl(url, {
+            dumpSingleJson: true,
+            retries: 2,
+            "socket-timeout": YTDL_TIMEOUT,
+            'user-agent': FAKE_USER_AGENT // <--- ИЗМЕНЕНИЕ ЗДЕСЬ
+        }));
+        
         if (!info) throw new Error('Не удалось получить метаданные');
 
         if (processingMessage) {
@@ -220,9 +231,6 @@ export async function enqueue(ctx, userId, url) {
                 await safeSendMessage(userId, `⏳ ${tasksToReallyDownload.length} трек(ов) добавлено в очередь. Вы получите их по мере готовности.`);
                 
                 if (isPlaylist && playlistInfo) {
-                    const redisClient = redisService.getClient();
-                    const playlistKey = `playlist:${userId}:${playlistInfo.id}`;
-                    await redisClient.setEx(playlistKey, 3600, tasksToReallyDownload.length.toString());
                     await logEvent(userId, 'download_playlist');
                 }
                 
@@ -238,9 +246,9 @@ export async function enqueue(ctx, userId, url) {
         if (err.name === 'TimeoutError' || errorMessage.includes('timed out')) {
             console.error(`❌ Таймаут в enqueue для ${userId}:`, errorMessage);
             await safeSendMessage(userId, '❌ Ошибка: SoundCloud отвечает слишком долго. Попробуйте позже.');
-        } else if (errorMessage.includes('404: Not Found')) {
-            console.warn(`[User Error] Трек не найден (404) для ${userId}.`);
-            await safeSendMessage(userId, '❌ Трек по этой ссылке не найден.');
+        } else if (errorMessage.includes('404: Not Found') || errorMessage.includes('403: Forbidden')) {
+            console.warn(`[User Error] Трек не найден (404/403) для ${userId}.`);
+            await safeSendMessage(userId, '❌ Трек по этой ссылке не найден или доступ к нему ограничен.');
         } else {
             console.error(`❌ Глобальная ошибка в enqueue для ${userId}:`, err);
             await safeSendMessage(userId, `❌ Произошла ошибка при обработке ссылки.`);
