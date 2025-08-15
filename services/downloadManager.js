@@ -53,8 +53,12 @@ async function safeSendMessage(userId, text, extra = {}) {
     }
 }
 
+// В ФАЙЛЕ services/downloadManager.js
+
+// >>>>> ЗАМЕНИТЕ ВСЮ ФУНКЦИЮ trackDownloadProcessor НА ЭТУ <<<<<
+
 async function trackDownloadProcessor(task) {
-    const { userId, url, trackName, trackId, uploader, playlistInfo } = task;
+    const { userId, url, trackName, trackId, uploader } = task;
     let tempFilePath = null;
     let statusMessage = null;
     
@@ -74,18 +78,50 @@ async function trackDownloadProcessor(task) {
         
         if (statusMessage) await bot.telegram.editMessageText(userId, statusMessage.message_id, undefined, `✅ Скачал. Отправляю...`).catch(()=>{});
         
-        const sentMessage = await bot.telegram.sendAudio(userId, { source: fs.createReadStream(tempFilePath) }, { 
+        // 1. Отправляем трек пользователю
+        const sentToUserMessage = await bot.telegram.sendAudio(userId, { source: fs.createReadStream(tempFilePath) }, { 
             title: trackName, 
             performer: uploader || 'SoundCloud' 
         });
         
         if (statusMessage) await bot.telegram.deleteMessage(userId, statusMessage.message_id).catch(()=>{});
-        
-        if (sentMessage?.audio?.file_id) {
-            await cacheTrack(url, sentMessage.audio.file_id, trackName);
-            await incrementDownloadsAndSaveTrack(userId, trackName, sentMessage.audio.file_id, url);
+
+        // 2. Обновляем статистику пользователя (делаем это сразу)
+        if (sentToUserMessage?.audio?.file_id) {
+            await incrementDownloadsAndSaveTrack(userId, trackName, sentToUserMessage.audio.file_id, url);
         }
+
+        // 3. Асинхронно кэшируем трек в фоне, не задерживая пользователя
+        (async () => {
+            if (STORAGE_CHANNEL_ID) {
+                try {
+                    console.log(`[Cache] Отправляю "${trackName}" в канал-хранилище...`);
+                    // Отправляем копию в канал-хранилище
+                    const sentToStorageMessage = await bot.telegram.sendAudio(STORAGE_CHANNEL_ID, { source: tempFilePath });
+                    
+                    // Если успешно, сохраняем file_id из хранилища в базу кэша
+                    if (sentToStorageMessage?.audio?.file_id) {
+                        await cacheTrack(url, sentToStorageMessage.audio.file_id, trackName);
+                        console.log(`✅ [Cache] Трек "${trackName}" успешно закэширован.`);
+                    }
+                } catch (e) {
+                    console.error(`❌ [Cache] Ошибка при кэшировании трека "${trackName}":`, e.message);
+                } finally {
+                    // Важно! Удаляем файл только после того, как обе отправки завершились.
+                    if (fs.existsSync(tempFilePath)) {
+                        await fs.promises.unlink(tempFilePath).catch(err => console.error("Ошибка удаления временного файла:", err));
+                    }
+                }
+            } else {
+                 // Если нет канала, просто удаляем файл
+                 if (fs.existsSync(tempFilePath)) {
+                    await fs.promises.unlink(tempFilePath).catch(err => console.error("Ошибка удаления временного файла:", err));
+                }
+            }
+        })();
+
     } catch (err) {
+        // ... (блок catch остается без изменений) ...
         let userErrorMessage = `❌ Не удалось обработать трек: "${trackName}"`;
         const errorDetails = err.stderr || err.message || '';
         if (err.name === 'TimeoutError' || errorDetails.includes('timed out')) {
@@ -97,13 +133,14 @@ async function trackDownloadProcessor(task) {
         } else {
             await safeSendMessage(userId, userErrorMessage);
         }
-    } finally {
+
+        // Если произошла ошибка, тоже нужно удалить временный файл
         if (tempFilePath && fs.existsSync(tempFilePath)) {
             await fs.promises.unlink(tempFilePath).catch(() => {});
         }
-    }
+    } 
+    // Блок finally удален, т.к. логика удаления перенесена внутрь
 }
-
 export const downloadQueue = new TaskQueue({
     maxConcurrent: 1, // Важное значение для стабильности
     taskProcessor: trackDownloadProcessor
