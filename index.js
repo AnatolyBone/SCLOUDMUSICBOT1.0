@@ -18,6 +18,7 @@ import {
     getUserById, 
     resetDailyStats, 
     getAllUsers, 
+    getPaginatedUsers, // <<< ДОБАВЛЕН ИМПОРТ
     getReferralSourcesStats, 
     getDownloadsByDate, 
     getRegistrationsByDate, 
@@ -86,7 +87,7 @@ function setupExpress() {
     app.use(expressLayouts);
     app.set('view engine', 'ejs');
     app.set('views', path.join(__dirname, 'views'));
-    app.set('layout', 'layout');
+    app.set('layout', 'layout'); // Убедитесь, что ваш главный layout-файл называется layout.ejs
     
     const pgSession = pgSessionFactory(session);
     app.use(session({ store: new pgSession({ pool, tableName: 'session' }), secret: SESSION_SECRET, resave: false, saveUninitialized: false, cookie: { maxAge: 30 * 24 * 60 * 60 * 1000 } }));
@@ -162,42 +163,40 @@ function setupExpress() {
         }
     });
 
+    // >>>>>>>> ЭТОТ БЛОК ПОЛНОСТЬЮ ЗАМЕНЕН <<<<<<<<<<
     app.get('/users', requireAuth, async (req, res) => {
         try {
-            const { q: searchQuery = '', status: statusFilter = '', page: pageNum = 1, limit = 25 } = req.query;
-            const offset = (pageNum - 1) * limit;
+            const { q = '', status = '', page = 1, limit = 25, sort = 'created_at', order = 'desc' } = req.query;
 
-            let queryText = 'SELECT id, username, first_name, total_downloads, premium_limit, created_at, last_active, active FROM users';
-            const whereClauses = [];
-            const queryParams = [];
-            if (statusFilter === 'active') whereClauses.push('active = TRUE');
-            else if (statusFilter === 'inactive') whereClauses.push('active = FALSE');
-            if (searchQuery) {
-                queryParams.push(`%${searchQuery}%`);
-                whereClauses.push(`(CAST(id AS TEXT) ILIKE $${queryParams.length} OR first_name ILIKE $${queryParams.length} OR username ILIKE $${queryParams.length})`);
-            }
-            if (whereClauses.length > 0) queryText += ' WHERE ' + whereClauses.join(' AND ');
-
-            const totalResult = await pool.query(`SELECT COUNT(*) FROM (${queryText.split('ORDER BY')[0]}) AS subquery`, queryParams);
-            const totalUsers = parseInt(totalResult.rows[0].count, 10);
-            const totalPages = Math.ceil(totalUsers / limit);
-
-            queryText += ' ORDER BY created_at DESC';
-            queryParams.push(limit);
-            queryText += ` LIMIT $${queryParams.length}`;
-            queryParams.push(offset);
-            queryText += ` OFFSET $${queryParams.length}`;
-            const { rows: users } = await pool.query(queryText, queryParams);
+            const { users, totalPages, currentPage, totalUsers } = await getPaginatedUsers({
+                searchQuery: q,
+                statusFilter: status,
+                page: parseInt(page, 10),
+                limit: parseInt(limit, 10),
+                sortBy: sort,
+                sortOrder: order
+            });
+            
+            const queryParams = { q, status, page, limit, sort, order };
 
             res.render('users', {
-                title: 'Пользователи', page: 'users', users,
-                totalPages, currentPage: pageNum, limit, searchQuery, statusFilter, totalUsers
+                title: 'Пользователи', 
+                page: 'users',
+                users,
+                totalUsers,
+                totalPages,
+                currentPage: parseInt(page, 10),
+                limit: parseInt(limit, 10),
+                searchQuery: q,
+                statusFilter: status,
+                queryParams
             });
         } catch (error) {
-            console.error("Ошибка страницы пользователей:", error);
+            console.error("Ошибка на странице пользователей:", error);
             res.status(500).send("Ошибка сервера");
         }
     });
+    // >>>>>>>> КОНЕЦ ЗАМЕНЕННОГО БЛОКА <<<<<<<<<<
     
     app.get('/broadcast', requireAuth, (req, res) => { 
         res.render('broadcast-form', { title: 'Рассылка', page: 'broadcast', error: null, success: null }); 
@@ -229,6 +228,33 @@ function setupExpress() {
         }
         res.redirect(req.get('referer') || '/dashboard');
     });
+
+    // >>>>>>>> НОВЫЕ РОУТЫ ДЛЯ "БЫСТРЫХ ДЕЙСТВИЙ" <<<<<<<<<<
+    app.post('/reset-bonus', requireAuth, async (req, res) => {
+        const { userId } = req.body;
+        if (userId) {
+            try {
+                await updateUserField(userId, 'subscribed_bonus_used', false);
+            } catch (error) {
+                console.error(`Ошибка при сбросе бонуса для ${userId}:`, error);
+            }
+        }
+        res.redirect('back');
+    });
+
+    app.post('/reset-daily-limit', requireAuth, async (req, res) => {
+        const { userId } = req.body;
+        if (userId) {
+            try {
+                await updateUserField(userId, 'downloads_today', 0);
+                await updateUserField(userId, 'tracks_today', '[]');
+            } catch (error) {
+                console.error(`Ошибка при сбросе дневного лимита для ${userId}:`, error);
+            }
+        }
+        res.redirect('back');
+    });
+    // >>>>>>>> КОНЕЦ НОВЫХ РОУТОВ <<<<<<<<<<
 }
 
 async function stopBot(signal) {
