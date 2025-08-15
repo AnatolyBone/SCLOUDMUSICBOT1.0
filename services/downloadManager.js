@@ -116,7 +116,7 @@ async function trackDownloadProcessor(task) {
 }
 
 export const downloadQueue = new TaskQueue({
-    maxConcurrent: 2,
+    maxConcurrent: 4,
     taskProcessor: trackDownloadProcessor
 });
 
