@@ -252,7 +252,7 @@ export async function enqueue(ctx, userId, url) {
                 }
             }
             if (sentFromCacheCount > 0) {
-                await safeSendMessage(userId, `✅ ${sentFromCacheCount} трек(ов) отправлено мгновенно из кэша.`);
+                //await safeSendMessage(userId, `✅ ${sentFromCacheCount} трек(ов) отправлено мгновенно из кэша.`);
             }
         }
         
