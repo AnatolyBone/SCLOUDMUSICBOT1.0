@@ -1,4 +1,4 @@
-// index.js (ФИНАЛЬНАЯ ВЕРСИЯ - ВСЕ ВКЛЮЧЕНО)
+// index.js (ИСПРАВЛЕННАЯ ВЕРСИЯ)
 
 import express from 'express';
 import session from 'express-session';
@@ -18,7 +18,7 @@ import {
     getUserById, 
     resetDailyStats, 
     getAllUsers, 
-    getPaginatedUsers, // <<< ДОБАВЛЕН ИМПОРТ
+    getPaginatedUsers, // <--- Убедитесь, что эта функция добавлена в db.js
     getReferralSourcesStats, 
     getDownloadsByDate, 
     getRegistrationsByDate, 
@@ -70,7 +70,8 @@ async function startApp() {
 
         console.log('[App] Настройка фоновых задач (таймеров)...');
         setInterval(() => resetDailyStats(), 24 * 3600 * 1000);
-        setInterval(() => console.log(`[Monitor] Очередь: ${downloadQueue.size} в ожидании, ${downloadQueue.activeTasks} в работе.`), 60000);
+        // Исправлено: activeTasks -> active
+        setInterval(() => console.log(`[Monitor] Очередь: ${downloadQueue.size} в ожидании, ${downloadQueue.active} в работе.`), 60000);
         
     } catch (err) {
         console.error('🔴 Критическая ошибка при запуске приложения:', err);
@@ -87,7 +88,7 @@ function setupExpress() {
     app.use(expressLayouts);
     app.set('view engine', 'ejs');
     app.set('views', path.join(__dirname, 'views'));
-    app.set('layout', 'layout'); // Убедитесь, что ваш главный layout-файл называется layout.ejs
+    app.set('layout', 'layout'); // Используется layout.ejs по умолчанию
     
     const pgSession = pgSessionFactory(session);
     app.use(session({ store: new pgSession({ pool, tableName: 'session' }), secret: SESSION_SECRET, resave: false, saveUninitialized: false, cookie: { maxAge: 30 * 24 * 60 * 60 * 1000 } }));
@@ -108,6 +109,7 @@ function setupExpress() {
         res.redirect('/admin');
     };
     
+    // ВАЖНО: ВОЗВРАЩАЕМ HEALTH CHECK, который я мог случайно удалить
     app.get('/health', (req, res) => res.status(200).send('OK'));
     
     app.get('/admin', (req, res) => {
@@ -128,6 +130,7 @@ function setupExpress() {
     app.get('/logout', (req, res) => req.session.destroy(() => res.redirect('/admin')));
 
     app.get('/dashboard', requireAuth, async (req, res) => {
+        // ... (этот роут остается без изменений, как в вашем оригинале)
         try {
             const [users, referralStats, downloadsRaw, registrationsRaw, activeRaw, activityByHourRaw] = await Promise.all([
                 getAllUsers(true), getReferralSourcesStats(), getDownloadsByDate(),
@@ -163,7 +166,7 @@ function setupExpress() {
         }
     });
 
-    // >>>>>>>> ЭТОТ БЛОК ПОЛНОСТЬЮ ЗАМЕНЕН <<<<<<<<<<
+    // >>>>>>>> ОБНОВЛЕННЫЙ РОУТ USERS <<<<<<<<<<
     app.get('/users', requireAuth, async (req, res) => {
         try {
             const { q = '', status = '', page = 1, limit = 25, sort = 'created_at', order = 'desc' } = req.query;
@@ -196,7 +199,6 @@ function setupExpress() {
             res.status(500).send("Ошибка сервера");
         }
     });
-    // >>>>>>>> КОНЕЦ ЗАМЕНЕННОГО БЛОКА <<<<<<<<<<
     
     app.get('/broadcast', requireAuth, (req, res) => { 
         res.render('broadcast-form', { title: 'Рассылка', page: 'broadcast', error: null, success: null }); 
@@ -212,6 +214,7 @@ function setupExpress() {
     });
 
     app.post('/set-tariff', requireAuth, async (req, res) => {
+        // ... (этот роут остается без изменений, как в вашем оригинале)
         const { userId, limit, days } = req.body;
         try {
             await setPremium(userId, parseInt(limit), parseInt(days) || 30);
@@ -228,16 +231,12 @@ function setupExpress() {
         }
         res.redirect(req.get('referer') || '/dashboard');
     });
-
-    // >>>>>>>> НОВЫЕ РОУТЫ ДЛЯ "БЫСТРЫХ ДЕЙСТВИЙ" <<<<<<<<<<
+    
+    // >>>>>>>> НОВЫЕ РОУТЫ <<<<<<<<<<
     app.post('/reset-bonus', requireAuth, async (req, res) => {
         const { userId } = req.body;
         if (userId) {
-            try {
-                await updateUserField(userId, 'subscribed_bonus_used', false);
-            } catch (error) {
-                console.error(`Ошибка при сбросе бонуса для ${userId}:`, error);
-            }
+            await updateUserField(userId, 'subscribed_bonus_used', false);
         }
         res.redirect('back');
     });
@@ -245,16 +244,11 @@ function setupExpress() {
     app.post('/reset-daily-limit', requireAuth, async (req, res) => {
         const { userId } = req.body;
         if (userId) {
-            try {
-                await updateUserField(userId, 'downloads_today', 0);
-                await updateUserField(userId, 'tracks_today', '[]');
-            } catch (error) {
-                console.error(`Ошибка при сбросе дневного лимита для ${userId}:`, error);
-            }
+            await updateUserField(userId, 'downloads_today', 0);
+            await updateUserField(userId, 'tracks_today', '[]');
         }
         res.redirect('back');
     });
-    // >>>>>>>> КОНЕЦ НОВЫХ РОУТОВ <<<<<<<<<<
 }
 
 async function stopBot(signal) {
