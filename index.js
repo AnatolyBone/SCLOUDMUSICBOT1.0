@@ -166,39 +166,59 @@ function setupExpress() {
         }
     });
 
-    // >>>>>>>> ОБНОВЛЕННЫЙ РОУТ USERS <<<<<<<<<<
-    app.get('/users', requireAuth, async (req, res) => {
-        try {
-            const { q = '', status = '', page = 1, limit = 25, sort = 'created_at', order = 'desc' } = req.query;
+   // ЗАМЕНИТЕ СТАРЫЙ app.get('/users', ...) НА ЭТИ ДВА РОУТА
 
-            const { users, totalPages, currentPage, totalUsers } = await getPaginatedUsers({
-                searchQuery: q,
-                statusFilter: status,
-                page: parseInt(page, 10),
-                limit: parseInt(limit, 10),
-                sortBy: sort,
-                sortOrder: order
-            });
-            
-            const queryParams = { q, status, page, limit, sort, order };
+// Роут для первоначальной загрузки страницы
+app.get('/users', requireAuth, async (req, res) => {
+    try {
+        const { q = '', status = '', page = 1, limit = 25, sort = 'created_at', order = 'desc' } = req.query;
+        
+        const { users, totalPages, totalUsers } = await getPaginatedUsers({
+            searchQuery: q, statusFilter: status, page: 1, limit: parseInt(limit), sortBy: sort, sortOrder: order
+        });
+        
+        res.render('users', {
+            title: 'Пользователи', page: 'users',
+            users, // Данные для первой загрузки
+            totalUsers,
+            totalPages,
+            currentPage: 1,
+            limit: parseInt(limit),
+            searchQuery: q,
+            statusFilter: status,
+            queryParams: { q, status, page: 1, limit, sort, order }
+        });
+    } catch (error) {
+        console.error("Ошибка на странице пользователей:", error);
+        res.status(500).send("Ошибка сервера");
+    }
+});
 
-            res.render('users', {
-                title: 'Пользователи', 
-                page: 'users',
-                users,
-                totalUsers,
-                totalPages,
-                currentPage: parseInt(page, 10),
-                limit: parseInt(limit, 10),
-                searchQuery: q,
-                statusFilter: status,
-                queryParams
-            });
-        } catch (error) {
-            console.error("Ошибка на странице пользователей:", error);
-            res.status(500).send("Ошибка сервера");
-        }
-    });
+// Роут, который будет обрабатывать "живые" запросы от HTMX
+app.get('/users-table', requireAuth, async (req, res) => {
+    try {
+        const { q = '', status = '', page = 1, limit = 25, sort = 'created_at', order = 'desc' } = req.query;
+
+        const { users, totalPages } = await getPaginatedUsers({
+            searchQuery: q, statusFilter: status,
+            page: parseInt(page), limit: parseInt(limit),
+            sortBy: sort, sortOrder: order
+        });
+        
+        const queryParams = { q, status, page, limit, sort, order };
+
+        // Рендерим только частичный шаблон, без layout
+        res.render('partials/users-table', {
+            users, totalPages,
+            currentPage: parseInt(page),
+            queryParams,
+            layout: false // Важно!
+        });
+    } catch (error) {
+        console.error("Ошибка при обновлении таблицы пользователей:", error);
+        res.status(500).send("Ошибка сервера при обновлении таблицы");
+    }
+});
     
     app.get('/broadcast', requireAuth, (req, res) => { 
         res.render('broadcast-form', { title: 'Рассылка', page: 'broadcast', error: null, success: null }); 
