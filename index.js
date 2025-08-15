@@ -123,12 +123,16 @@ function setupExpress() {
                 getAllUsers(true), getReferralSourcesStats(), getDownloadsByDate(),
                 getRegistrationsByDate(), getActiveUsersByDate()
             ]);
-            const stats = {
-                total_users: users.length,
-                active_users: users.filter(u => u.active).length,
-                total_downloads: users.reduce((sum, u) => sum + (u.total_downloads || 0), 0),
-                active_today: users.filter(u => u.last_active && new Date(u.last_active).toDateString() === new Date().toDateString()).length
-            };
+            // В файле index.js, внутри роута app.get('/dashboard', ...)
+
+const stats = {
+    total_users: users.length,
+    active_users: users.filter(u => u.active).length,
+    total_downloads: users.reduce((sum, u) => sum + (u.total_downloads || 0), 0),
+    active_today: users.filter(u => u.last_active && new Date(u.last_active).toDateString() === new Date().toDateString()).length,
+    queueWaiting: downloadQueue.size, // <<< ДОБАВЬТЕ ЭТУ СТРОКУ
+    queueActive: downloadQueue.active // <<< И ЭТУ СТРОКУ
+};
             const prepareChartData = (registrations, downloads, active) => ({
                 labels: [...new Set([...Object.keys(registrations), ...Object.keys(downloads), ...Object.keys(active)])].sort(),
                 datasets: [ { label: 'Регистрации', data: Object.values(registrations), borderColor: '#198754' }, { label: 'Загрузки', data: Object.values(downloads), borderColor: '#fd7e14' }, { label: 'Активные', data: Object.values(active), borderColor: '#0d6efd' } ]
