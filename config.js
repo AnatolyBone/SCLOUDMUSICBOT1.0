@@ -14,7 +14,7 @@ export const DATABASE_URL = process.env.DATABASE_URL;
 export const REDIS_URL = process.env.REDIS_URL;
 export const SUPABASE_URL = process.env.SUPABASE_URL;
 export const SUPABASE_KEY = process.env.SUPABASE_KEY;
-export const CHANNEL_USERNAME = '@SCM_BLOG'; // Или @username вашего канала
+export const CHANNEL_USERNAME = process.env.CHANNEL_URL;
 
 if (!BOT_TOKEN || !ADMIN_ID || !WEBHOOK_URL || !DATABASE_URL || !REDIS_URL) {
     console.error('❌ Отсутствуют критически важные переменные окружения!');
