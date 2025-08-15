@@ -14,7 +14,16 @@ export const DATABASE_URL = process.env.DATABASE_URL;
 export const REDIS_URL = process.env.REDIS_URL;
 export const SUPABASE_URL = process.env.SUPABASE_URL;
 export const SUPABASE_KEY = process.env.SUPABASE_KEY;
-export const CHANNEL_USERNAME = process.env.CHANNEL_URL;
+let rawChannelIdentifier = process.env.CHANNEL_URL || '';
+// Если в переменной полная ссылка, извлекаем username
+if (rawChannelIdentifier.includes('t.me/')) {
+  rawChannelIdentifier = '@' + rawChannelIdentifier.split('/').pop();
+}
+// Убеждаемся, что на выходе всегда есть @, если это не пустая строка
+if (rawChannelIdentifier && !rawChannelIdentifier.startsWith('@')) {
+    rawChannelIdentifier = '@' + rawChannelIdentifier;
+}
+export const CHANNEL_USERNAME = rawChannelIdentifier;
 
 if (!BOT_TOKEN || !ADMIN_ID || !WEBHOOK_URL || !DATABASE_URL || !REDIS_URL) {
     console.error('❌ Отсутствуют критически важные переменные окружения!');
