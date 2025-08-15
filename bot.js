@@ -169,13 +169,31 @@ bot.hears(T('upgrade'), async (ctx) => {
     await ctx.reply(T('upgradeInfo'), { parse_mode: 'Markdown' });
 });
 
-bot.on('text', async (ctx) => {
+// В ФАЙЛЕ bot.js
+
+// >>>>> ЗАМЕНИТЕ ВЕСЬ БЛОК bot.on('text', ...) НА ЭТОТ <<<<<
+
+bot.on('text', (ctx) => { // Убрали async, чтобы было понятнее
     const userText = ctx.message.text;
-    if (Object.values(allTextsSync()).includes(userText)) return;
+    if (Object.values(allTextsSync()).includes(userText)) {
+        return; // Если это команда из меню, ничего не делаем
+    }
+    
     const url = userText.match(/(https?:\/\/[^\s]+)/g)?.find(u => u.includes('soundcloud.com'));
+    
     if (url) {
-        await enqueue(ctx, ctx.from.id, url);
+        // 1. Мгновенно отвечаем пользователю
+        ctx.reply('🔍 Анализирую ссылку...');
+        
+        // 2. Запускаем тяжелую задачу в фоне, не дожидаясь её завершения.
+        // Это позволяет Telegraf сразу отправить Telegram'у ответ 200 OK.
+        enqueue(ctx, ctx.from.id, url).catch(err => {
+            console.error(`[Background Enqueue Error] Ошибка для user ${ctx.from.id}:`, err.message);
+            // Если что-то пошло не так на этапе анализа, сообщаем пользователю
+            ctx.reply('❌ Не удалось обработать вашу ссылку. Попробуйте другую.').catch(() => {});
+        });
+        
     } else {
-        await ctx.reply('Я не понял. Пришлите ссылку или используйте меню.');
+        ctx.reply('Я не понял. Пришлите ссылку или используйте меню.');
     }
 });
