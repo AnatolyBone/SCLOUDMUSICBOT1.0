@@ -1,4 +1,4 @@
-// index.js (ФИНАЛЬНАЯ ВЕРСИЯ - ВСЕ ИСПРАВЛЕНО)
+// index.js (ФИНАЛЬНАЯ ВЕРСИЯ С ПРАВИЛЬНОЙ СТРУКТУРОЙ)
 
 import express from 'express';
 import session from 'express-session';
@@ -87,6 +87,8 @@ function setupExpress() {
         res.redirect('/admin');
     };
     
+    // --- ВСЕ РОУТЫ (АДРЕСА) ДОЛЖНЫ БЫТЬ ВНУТРИ ЭТОЙ ФУНКЦИИ ---
+
     app.get('/health', (req, res) => res.status(200).send('OK'));
     app.get('/admin', (req, res) => {
         if (req.session.authenticated) return res.redirect('/dashboard');
@@ -172,72 +174,50 @@ function setupExpress() {
         res.render('broadcast-form', { title: 'Рассылка', page: 'broadcast', error: null, success: null }); 
     });
 
-    // В ФАЙЛЕ index.js
-
-// >>>>> ЗАМЕНИТЕ ВЕСЬ БЛОК app.post('/broadcast', ...) НА ЭТОТ <<<<<
-
-app.post('/broadcast', requireAuth, upload.single('audio'), async (req, res) => {
-    const { message } = req.body;
-    const audioFile = req.file;
-    
-    if (!message) {
-        return res.render('broadcast-form', { title: 'Рассылка', page: 'broadcast', error: 'Текст сообщения не может быть пустым.', success: null });
-    }
-    
-    try {
-        const users = await getAllUsers(true);
-        res.render('broadcast-form', {
-            title: 'Рассылка',
-            page: 'broadcast',
-            error: null,
-            success: `Рассылка запущена для ${users.length} активных пользователей...`
-        });
-        
-        (async () => {
-            console.log(`[Broadcast] Начинаю рассылку для ${users.length} пользователей.`);
-            let successCount = 0;
-            let errorCount = 0;
-            
-            // ИСПРАВЛЕНИЕ: Преобразуем базовый Markdown в безопасный HTML
-            let safeMessage = message
-                .replace(/\*(.*?)\*/g, '<b>$1</b>') // *жирный* -> <b>жирный</b>
-                .replace(/_(.*?)_/g, '<i>$1</i>') // _курсив_ -> <i>курсив</i>
-                .replace(/`(.*?)`/g, '<code>$1</code>'); // `код` -> <code>код</code>
-            
-            for (const user of users) {
-                try {
-                    const options = { parse_mode: 'HTML' }; // <<< ИСПОЛЬЗУЕМ HTML
-                    
-                    if (audioFile) {
-                        options.caption = safeMessage;
-                        await bot.telegram.sendAudio(user.id, { source: audioFile.path }, options);
-                    } else {
-                        await bot.telegram.sendMessage(user.id, safeMessage, options);
+    app.post('/broadcast', requireAuth, upload.single('audio'), async (req, res) => {
+        const { message } = req.body;
+        const audioFile = req.file;
+        if (!message) {
+            return res.render('broadcast-form', { title: 'Рассылка', page: 'broadcast', error: 'Текст сообщения не может быть пустым.', success: null });
+        }
+        try {
+            const users = await getAllUsers(true);
+            res.render('broadcast-form', { title: 'Рассылка', page: 'broadcast', error: null, success: `Рассылка запущена для ${users.length} активных пользователей...` });
+            (async () => {
+                console.log(`[Broadcast] Начинаю рассылку для ${users.length} пользователей.`);
+                let successCount = 0, errorCount = 0;
+                let safeMessage = message.replace(/\*(.*?)\*/g, '<b>$1</b>').replace(/_(.*?)_/g, '<i>$1</i>').replace(/`(.*?)`/g, '<code>$1</code>');
+                for (const user of users) {
+                    try {
+                        const options = { parse_mode: 'HTML' };
+                        if (audioFile) {
+                            options.caption = safeMessage;
+                            await bot.telegram.sendAudio(user.id, { source: audioFile.path }, options);
+                        } else {
+                            await bot.telegram.sendMessage(user.id, safeMessage, options);
+                        }
+                        successCount++;
+                    } catch (e) {
+                        errorCount++;
+                        if (e.response?.error_code === 403) { await updateUserField(user.id, 'active', false); } 
+                        else { console.error(`[Broadcast] Ошибка отправки для user ${user.id}:`, e.message); }
                     }
-                    successCount++;
-                } catch (e) {
-                    errorCount++;
-                    if (e.response?.error_code === 403) {
-                        await updateUserField(user.id, 'active', false);
-                    } else {
-                        // Логируем ошибку, чтобы понять, в чем дело в следующий раз
-                        console.error(`[Broadcast] Ошибка отправки для user ${user.id}:`, e.message);
-                    }
+                    await new Promise(resolve => setTimeout(resolve, 50));
                 }
-                await new Promise(resolve => setTimeout(resolve, 50));
-            }
-            console.log(`[Broadcast] Рассылка завершена. Успешно: ${successCount}, Ошибки: ${errorCount}`);
-            if (audioFile) {
-                fs.unlink(audioFile.path, (err) => {
-                    if (err) console.error("Не удалось удалить временный файл рассылки:", err);
-                });
-            }
-        })();
-    } catch (e) {
-        console.error('Ошибка при запуске рассылки:', e);
-        res.render('broadcast-form', { title: 'Рассылка', page: 'broadcast', error: 'Критическая ошибка при запуске рассылки.', success: null });
-    }
-});
+                console.log(`[Broadcast] Рассылка завершена. Успешно: ${successCount}, Ошибки: ${errorCount}`);
+                try {
+                    const reportMessage = `📢 **Отчет по рассылке**\n\n✅ Успешно отправлено: *${successCount}*\n❌ Ошибки (вкл. блокировки): *${errorCount}*\n👥 Всего было в базе: *${users.length}*`;
+                    await bot.telegram.sendMessage(ADMIN_ID, reportMessage, { parse_mode: 'Markdown' });
+                } catch (e) {
+                    console.error('[Broadcast] Не удалось отправить отчет админу:', e.message);
+                }
+                if (audioFile) { fs.unlink(audioFile.path, (err) => { if (err) console.error("Не удалось удалить временный файл рассылки:", err); }); }
+            })();
+        } catch (e) {
+            console.error('Ошибка при запуске рассылки:', e);
+            res.render('broadcast-form', { title: 'Рассылка', page: 'broadcast', error: 'Критическая ошибка при запуске рассылки.', success: null });
+        }
+    });
 
     app.get('/expiring-users', requireAuth, async (req, res) => {
         try {
@@ -280,7 +260,7 @@ app.post('/broadcast', requireAuth, upload.single('audio'), async (req, res) => 
         }
         res.redirect(req.get('Referrer') || '/users');
     });
-}
+} // <-- Вот здесь заканчивается функция setupExpress()
 
 async function stopBot(signal) {
     console.log(`[App] Получен сигнал ${signal}. Начинаю корректное завершение...`);
