@@ -126,7 +126,7 @@ export async function enqueue(ctx, userId, url) {
     let processingMessage = null;
     try {
         await resetDailyLimitIfNeeded(userId);
-        processingMessage = await safeSendMessage(userId, '🔍 Анализирую ссылку...');
+        //processingMessage = await safeSendMessage(userId, '🔍 Анализирую ссылку...');
         
         const info = await ytdlLimit(() => ytdl(url, {
             dumpSingleJson: true,
@@ -137,10 +137,10 @@ export async function enqueue(ctx, userId, url) {
         
         if (!info) throw new Error('Не удалось получить метаданные');
 
-        if (processingMessage) {
-            await bot.telegram.deleteMessage(userId, processingMessage.message_id).catch(() => {});
-            processingMessage = null;
-        }
+       // if (processingMessage) {
+            a//wait bot.telegram.deleteMessage(userId, processingMessage.message_id).catch(() => {});
+            //processingMessage = null;
+        //}
 
         const isPlaylist = Array.isArray(info.entries) && info.entries.length > 0;
         // ЗАМЕНИТЕ СТАРЫЙ БЛОК НА ЭТОТ
