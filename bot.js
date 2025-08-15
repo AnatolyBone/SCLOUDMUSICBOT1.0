@@ -33,12 +33,14 @@ function getDaysLeft(premiumUntil) {
     return Math.max(Math.ceil(diff / 86400000), 0);
 }
 
-// ОБНОВЛЕНА ФУНКЦИЯ МЕНЮ: Убрана реф. ссылка, исправлено экранирование
+// В ФАЙЛЕ bot.js
+
+// >>>>> ЗАМЕНИТЕ ВСЮ ФУНКЦИЮ formatMenuMessage НА ЭТУ:
 function formatMenuMessage(user, ctx) {
     const tariffLabel = getTariffName(user.premium_limit);
     const downloadsToday = user.downloads_today || 0;
     const daysLeft = getDaysLeft(user.premium_until);
-
+    
     let message = `
 👋 Привет, ${user.first_name || 'пользователь'}!
 Твой профиль:
@@ -46,13 +48,14 @@ function formatMenuMessage(user, ctx) {
 ⏳ Осталось дней подписки: *${daysLeft}*
 🎧 Сегодня скачано: *${downloadsToday}* из *${user.premium_limit}*
     `.trim();
-
+    
     if (!user.subscribed_bonus_used) {
-        // ИСПРАВЛЕНО: Экранируем только '_' чтобы не ломать ссылку
-        const escapedChannelUsername = CHANNEL_USERNAME.replace(/_/g, '\\_');
-        message += `\n\n🎁 *Бонус!* Подпишись на наш канал ${escapedChannelUsername} и получи *7 дней тарифа Plus* бесплатно!`;
+        // ИСПРАВЛЕНО: Создаем красивую кликабельную ссылку в формате Markdown
+        const cleanUsername = CHANNEL_USERNAME.replace('@', '');
+        const channelLink = `[наш канал](https://t.me/${cleanUsername})`;
+        message += `\n\n🎁 *Бонус!* Подпишись на ${channelLink} и получи *7 дней тарифа Plus* бесплатно!`;
     }
-
+    
     message += '\n\nПросто отправь мне ссылку, и я скачаю трек!';
     return message;
 }
