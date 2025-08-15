@@ -1,7 +1,7 @@
 // bot.js (ФИНАЛЬНАЯ ВЕРСИЯ 5.0 - CRASH FIX)
 
 import { Telegraf, Markup, TelegramError } from 'telegraf';
-import { ADMIN_ID, BOT_TOKEN, WEBHOOK_URL, CHANNEL_USERNAME } from './config.js';
+import { ADMIN_ID, BOT_TOKEN, WEBHOOK_URL, CHANNEL_USERNAME, STORAGE_CHANNEL_ID } from './config.js';
 import { updateUserField, getUser, createUser, setPremium, getAllUsers, resetDailyLimitIfNeeded } from './db.js';
 import { T, allTextsSync } from './config/texts.js';
 import { enqueue, downloadQueue } from './services/downloadManager.js';
