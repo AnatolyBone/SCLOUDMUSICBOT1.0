@@ -17,7 +17,7 @@ import {
     pool, supabase, getUserById, resetDailyStats, getAllUsers, getPaginatedUsers, 
     getReferralSourcesStats, getDownloadsByDate, getRegistrationsByDate, 
     getActiveUsersByDate, getExpiringUsers, setPremium, updateUserField, 
-    getLatestReviews, getUserActivityByDayHour, getDownloadsByUserId, getReferralsByUserId
+    getLatestReviews, getUserActivityByDayHour, getDownloadsByUserId, getReferralsByUserId, getCachedTracksCount
 } from './db.js';
 import { bot } from './bot.js';
 import redisService from './services/redisClient.js';
