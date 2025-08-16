@@ -106,45 +106,60 @@ function setupExpress() {
     });
     app.get('/logout', (req, res) => req.session.destroy(() => res.redirect('/admin')));
     
-    app.get('/dashboard', requireAuth, async (req, res) => {
-        try {
-            let storageStatus = { available: false, error: '' };
-            if (STORAGE_CHANNEL_ID) {
-                try {
-                    // Пытаемся получить информацию о канале. Если получится - он доступен.
-                    await bot.telegram.getChat(STORAGE_CHANNEL_ID);
-                    storageStatus.available = true;
-                } catch (e) {
-                    storageStatus.error = e.message;
-                    console.error("[Dashboard] Ошибка проверки канала-хранилища:", e.message);
-                }
-            }
-            const [users, referralStats, downloadsRaw, registrationsRaw, activeRaw, activityByHourRaw] = await Promise.all([
-                getAllUsers(true), getReferralSourcesStats(), getDownloadsByDate(),
-                getRegistrationsByDate(), getActiveUsersByDate(),
-                getCachedTracksCount()
-            ]);
-            // В файле index.js, внутри роута app.get('/dashboard', ...)
+    // В ФАЙЛЕ index.js
 
-const stats = {
-    total_users: users.length,
-    active_users: users.filter(u => u.active).length,
-    total_downloads: users.reduce((sum, u) => sum + (u.total_downloads || 0), 0),
-    active_today: users.filter(u => u.last_active && new Date(u.last_active).toDateString() === new Date().toDateString()).length,
-    queueWaiting: downloadQueue.size, // <<< ДОБАВЬТЕ ЭТУ СТРОКУ
-    queueActive: downloadQueue.active,
-    cachedTracksCount: cachedTracksCount// <<< И ЭТУ СТРОКУ
-};
-            const prepareChartData = (registrations, downloads, active) => ({
-                labels: [...new Set([...Object.keys(registrations), ...Object.keys(downloads), ...Object.keys(active)])].sort(),
-                datasets: [ { label: 'Регистрации', data: Object.values(registrations), borderColor: '#198754' }, { label: 'Загрузки', data: Object.values(downloads), borderColor: '#fd7e14' }, { label: 'Активные', data: Object.values(active), borderColor: '#0d6efd' } ]
-            });
-            res.render('dashboard', { title: 'Дашборд', page: 'dashboard', stats, query: req.query,storageStatus, chartDataCombined: prepareChartData(registrationsRaw, downloadsRaw, activeRaw) });
-        } catch (error) {
-            console.error("Ошибка дашборда:", error);
-            res.status(500).send("Ошибка сервера");
+// >>>>> ЗАМЕНИТЕ ВЕСЬ БЛОК app.get('/dashboard', ...) НА ЭТОТ <<<<<
+
+app.get('/dashboard', requireAuth, async (req, res) => {
+    try {
+        let storageStatus = { available: false, error: '' };
+        if (STORAGE_CHANNEL_ID) {
+            try {
+                await bot.telegram.getChat(STORAGE_CHANNEL_ID);
+                storageStatus.available = true;
+            } catch (e) {
+                storageStatus.error = e.message;
+                console.error("[Dashboard] Ошибка проверки канала-хранилища:", e.message);
+            }
         }
-    });
+
+        // ИСПРАВЛЕНИЕ: Добавляем getCachedTracksCount в этот Promise.all
+        const [users, referralStats, downloadsRaw, registrationsRaw, activeRaw, cachedTracksCount] = await Promise.all([
+            getAllUsers(true), 
+            getReferralSourcesStats(), 
+            getDownloadsByDate(),
+            getRegistrationsByDate(), 
+            getActiveUsersByDate(),
+            getCachedTracksCount() // <-- ЭТА СТРОКА БЫЛА ПРОПУЩЕНА
+        ]);
+        
+        const stats = {
+            total_users: users.length,
+            active_users: users.filter(u => u.active).length,
+            total_downloads: users.reduce((sum, u) => sum + (u.total_downloads || 0), 0),
+            active_today: users.filter(u => u.last_active && new Date(u.last_active).toDateString() === new Date().toDateString()).length,
+            queueWaiting: downloadQueue.size,
+            queueActive: downloadQueue.active,
+            cachedTracksCount: cachedTracksCount // <-- ИСПРАВЛЕНО: Теперь эта переменная существует
+        };
+        
+        const prepareChartData = (registrations, downloads, active) => ({
+            labels: [...new Set([...Object.keys(registrations), ...Object.keys(downloads), ...Object.keys(active)])].sort(),
+            datasets: [ { label: 'Регистрации', data: Object.values(registrations), borderColor: '#198754' }, { label: 'Загрузки', data: Object.values(downloads), borderColor: '#fd7e14' }, { label: 'Активные', data: Object.values(active), borderColor: '#0d6efd' } ]
+        });
+        
+        res.render('dashboard', { 
+            title: 'Дашборд', page: 'dashboard', 
+            stats,
+            query: req.query,
+            storageStatus,
+            chartDataCombined: prepareChartData(registrationsRaw, downloadsRaw, activeRaw)
+        });
+    } catch (error) {
+        console.error("Ошибка дашборда:", error);
+        res.status(500).send("Ошибка сервера");
+    }
+});
 
     app.get('/users', requireAuth, async (req, res) => {
         try {
