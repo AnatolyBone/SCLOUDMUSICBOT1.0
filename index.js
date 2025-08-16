@@ -121,7 +121,8 @@ function setupExpress() {
             }
             const [users, referralStats, downloadsRaw, registrationsRaw, activeRaw, activityByHourRaw] = await Promise.all([
                 getAllUsers(true), getReferralSourcesStats(), getDownloadsByDate(),
-                getRegistrationsByDate(), getActiveUsersByDate()
+                getRegistrationsByDate(), getActiveUsersByDate(),
+                getCachedTracksCount()
             ]);
             // В файле index.js, внутри роута app.get('/dashboard', ...)
 
@@ -131,7 +132,8 @@ const stats = {
     total_downloads: users.reduce((sum, u) => sum + (u.total_downloads || 0), 0),
     active_today: users.filter(u => u.last_active && new Date(u.last_active).toDateString() === new Date().toDateString()).length,
     queueWaiting: downloadQueue.size, // <<< ДОБАВЬТЕ ЭТУ СТРОКУ
-    queueActive: downloadQueue.active // <<< И ЭТУ СТРОКУ
+    queueActive: downloadQueue.active,
+    cachedTracksCount: cachedTracksCount// <<< И ЭТУ СТРОКУ
 };
             const prepareChartData = (registrations, downloads, active) => ({
                 labels: [...new Set([...Object.keys(registrations), ...Object.keys(downloads), ...Object.keys(active)])].sort(),
