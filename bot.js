@@ -93,7 +93,6 @@ bot.command('admin', async (ctx) => {
         return;
     }
     try {
-        // --- НАЧАЛО НОВОГО КОДА ПРОВЕРКИ ---
         let storageStatusText = '';
         if (STORAGE_CHANNEL_ID) {
             try {
@@ -105,9 +104,15 @@ bot.command('admin', async (ctx) => {
         } else {
             storageStatusText = '⚠️ Не настроен';
         }
-        // --- КОНЕЦ НОВОГО КОДА ПРОВЕРКИ ---
         
-        const users = await getAllUsers(true);
+        // --- НАЧАЛО НОВОГО КОДА ---
+        // Параллельно получаем статистику и количество треков в кэше
+        const [users, cachedTracksCount] = await Promise.all([
+            getAllUsers(true),
+            getCachedTracksCount()
+        ]);
+        // --- КОНЕЦ НОВОГО КОДА ---
+        
         const totalUsers = users.length;
         const activeUsers = users.filter(u => u.active).length;
         const totalDownloads = users.reduce((sum, u) => sum + (u.total_downloads || 0), 0);
@@ -128,6 +133,7 @@ bot.command('admin', async (ctx) => {
 ⚙️ **Система:**
    - Очередь: *${downloadQueue.size}* в ож. / *${downloadQueue.active}* в раб.
    - Канал-хранилище: *${storageStatusText}*
+   - Треков в базе (кэше): *${cachedTracksCount}*
 
 🔗 **Админ-панель:**
 [Открыть дашборд](${WEBHOOK_URL.replace(/\/$/, '')}/dashboard)
