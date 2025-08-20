@@ -1,4 +1,4 @@
-// bot.js (ФИНАЛЬНАЯ ВЕРСИЯ 5.0 - CRASH FIX)
+// bot.js
 
 import { Telegraf, Markup, TelegramError } from 'telegraf';
 import { ADMIN_ID, BOT_TOKEN, WEBHOOK_URL, CHANNEL_USERNAME, STORAGE_CHANNEL_ID } from './config.js';
@@ -37,7 +37,6 @@ function formatMenuMessage(user, ctx) {
     const tariffLabel = getTariffName(user.premium_limit);
     const downloadsToday = user.downloads_today || 0;
     const daysLeft = getDaysLeft(user.premium_until);
-
     let message = `
 👋 Привет, ${user.first_name || 'пользователь'}!
 Твой профиль:
@@ -45,13 +44,11 @@ function formatMenuMessage(user, ctx) {
 ⏳ Осталось дней подписки: *${daysLeft}*
 🎧 Сегодня скачано: *${downloadsToday}* из *${user.premium_limit}*
     `.trim();
-
     if (!user.subscribed_bonus_used) {
         const cleanUsername = CHANNEL_USERNAME.replace('@', '');
         const channelLink = `[наш канал](https://t.me/${cleanUsername})`;
         message += `\n\n🎁 *Бонус!* Подпишись на ${channelLink} и получи *7 дней тарифа Plus* бесплатно!`;
     }
-
     message += '\n\nПросто отправь мне ссылку, и я скачаю трек!';
     return message;
 }
@@ -89,9 +86,7 @@ bot.start(async (ctx) => {
 });
 
 bot.command('admin', async (ctx) => {
-    if (ctx.from.id !== ADMIN_ID) {
-        return;
-    }
+    if (ctx.from.id !== ADMIN_ID) return;
     try {
         let storageStatusText = '';
         if (STORAGE_CHANNEL_ID) {
@@ -104,21 +99,15 @@ bot.command('admin', async (ctx) => {
         } else {
             storageStatusText = '⚠️ Не настроен';
         }
-        
-        // --- НАЧАЛО НОВОГО КОДА ---
-        // Параллельно получаем статистику и количество треков в кэше
         const [users, cachedTracksCount] = await Promise.all([
             getAllUsers(true),
             getCachedTracksCount()
         ]);
-        // --- КОНЕЦ НОВОГО КОДА ---
-        
         const totalUsers = users.length;
         const activeUsers = users.filter(u => u.active).length;
         const totalDownloads = users.reduce((sum, u) => sum + (u.total_downloads || 0), 0);
         const now = new Date();
         const activeToday = users.filter(u => u.last_active && new Date(u.last_active).toDateString() === now.toDateString()).length;
-        
         const statsMessage = `
 📊 **Статистика Бота**
 
@@ -138,7 +127,6 @@ bot.command('admin', async (ctx) => {
 🔗 **Админ-панель:**
 [Открыть дашборд](${WEBHOOK_URL.replace(/\/$/, '')}/dashboard)
         `.trim();
-        
         await ctx.reply(statsMessage, { parse_mode: 'Markdown' });
     } catch (e) {
         console.error('❌ Ошибка в команде /admin:', e);
@@ -202,32 +190,23 @@ bot.hears(T('upgrade'), async (ctx) => {
     await ctx.reply(T('upgradeInfo'), { parse_mode: 'Markdown' });
 });
 
-// >>>>>>>> ИСПРАВЛЕННЫЙ БЛОК <<<<<<<<<<
 bot.on('text', async (ctx) => {
     const userText = ctx.message.text;
     if (Object.values(allTextsSync()).includes(userText)) {
         return;
     }
-
     const url = userText.match(/(https?:\/\/[^\s]+)/g)?.find(u => u.includes('soundcloud.com'));
-    
     if (url) {
         try {
-            // 1. "Безопасно" отвечаем пользователю. Если он нас заблокировал,
-            // .catch() перехватит ошибку и не даст приложению упасть.
             await ctx.reply('🔍 Анализирую ссылку...');
         } catch (e) {
             console.warn(`[Pre-send] Не удалось отправить 'Анализирую' пользователю ${ctx.from.id}. Вероятно, бот заблокирован.`);
-            // Если мы не можем даже отправить это сообщение, нет смысла продолжать.
             return;
         }
-        
-        // 2. Запускаем тяжелую задачу в фоне.
         enqueue(ctx, ctx.from.id, url).catch(err => {
             console.error(`[Background Enqueue Error] Ошибка для user ${ctx.from.id}:`, err.message);
             ctx.reply('❌ Не удалось обработать вашу ссылку. Попробуйте другую.').catch(() => {});
         });
-
     } else {
         await ctx.reply('Я не понял. Пришлите ссылку или используйте меню.');
     }
