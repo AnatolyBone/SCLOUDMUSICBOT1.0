@@ -207,50 +207,92 @@ app.get('/dashboard', requireAuth, async (req, res) => {
         res.render('broadcast-form', { title: 'Рассылка', page: 'broadcast', error: null, success: null }); 
     });
 
-    app.post('/broadcast', requireAuth, upload.single('audio'), async (req, res) => {
-        const { message } = req.body;
-        const audioFile = req.file;
-        if (!message) {
-            return res.render('broadcast-form', { title: 'Рассылка', page: 'broadcast', error: 'Текст сообщения не может быть пустым.', success: null });
+    // В ФАЙЛЕ index.js
+
+// >>>>> ЗАМЕНИТЕ ВЕСЬ БЛОК app.post('/broadcast', ...) НА ЭТОТ <<<<<
+
+app.post('/broadcast', requireAuth, upload.single('audio'), async (req, res) => {
+    const { message, targetAudience, disable_notification, action } = req.body;
+    const audioFile = req.file;
+
+    if (!message) {
+        return res.render('broadcast-form', { title: 'Рассылка', page: 'broadcast', error: 'Текст сообщения не может быть пустым.', success: null });
+    }
+
+    try {
+        let users = [];
+        let successMessage = '';
+
+        if (action === 'preview') {
+            // Если предпросмотр, отправляем только админу
+            users = [{ id: ADMIN_ID }];
+            successMessage = 'Предпросмотр успешно отправлен вам в Telegram.';
+        } else {
+            // Если обычная отправка, выбираем аудиторию
+            if (targetAudience === 'all') {
+                users = await getAllUsers(true);
+            } else if (targetAudience === 'free_users') {
+                users = await getActiveFreeUsers();
+            } else if (targetAudience === 'premium_users') {
+                users = await getActivePremiumUsers();
+            }
+            successMessage = `Рассылка запущена для ${users.length} пользователей. Отчет придет в Telegram.`;
         }
-        try {
-            const users = await getAllUsers(true);
-            res.render('broadcast-form', { title: 'Рассылка', page: 'broadcast', error: null, success: `Рассылка запущена для ${users.length} активных пользователей...` });
-            (async () => {
-                console.log(`[Broadcast] Начинаю рассылку для ${users.length} пользователей.`);
-                let successCount = 0, errorCount = 0;
-                let safeMessage = message.replace(/\*(.*?)\*/g, '<b>$1</b>').replace(/_(.*?)_/g, '<i>$1</i>').replace(/`(.*?)`/g, '<code>$1</code>');
-                for (const user of users) {
-                    try {
-                        const options = { parse_mode: 'HTML' };
-                        if (audioFile) {
-                            options.caption = safeMessage;
-                            await bot.telegram.sendAudio(user.id, { source: audioFile.path }, options);
-                        } else {
-                            await bot.telegram.sendMessage(user.id, safeMessage, options);
-                        }
-                        successCount++;
-                    } catch (e) {
-                        errorCount++;
-                        if (e.response?.error_code === 403) { await updateUserField(user.id, 'active', false); } 
-                        else { console.error(`[Broadcast] Ошибка отправки для user ${user.id}:`, e.message); }
-                    }
-                    await new Promise(resolve => setTimeout(resolve, 50));
-                }
-                console.log(`[Broadcast] Рассылка завершена. Успешно: ${successCount}, Ошибки: ${errorCount}`);
+
+        // Сразу отвечаем админу, чтобы страница не "висела"
+        res.render('broadcast-form', { 
+            title: 'Рассылка', page: 'broadcast', error: null, success: successMessage
+        });
+
+        // Асинхронно запускаем саму рассылку в фоне
+        (async () => {
+            console.log(`[Broadcast] Начинаю рассылку для ${users.length} пользователей (аудитория: ${targetAudience}, действие: ${action}).`);
+            let successCount = 0, errorCount = 0;
+
+            let safeMessage = message.replace(/\*(.*?)\*/g, '<b>$1</b>').replace(/_(.*?)_/g, '<i>$1</i>').replace(/(https?:\/\/[^\s]+)/g, '<a href="$1">$1</a>');
+
+            for (const user of users) {
                 try {
-                    const reportMessage = `📢 **Отчет по рассылке**\n\n✅ Успешно отправлено: *${successCount}*\n❌ Ошибки (вкл. блокировки): *${errorCount}*\n👥 Всего было в базе: *${users.length}*`;
-                    await bot.telegram.sendMessage(ADMIN_ID, reportMessage, { parse_mode: 'Markdown' });
+                    const options = { 
+                        parse_mode: 'HTML', 
+                        disable_web_page_preview: true,
+                        disable_notification: !!disable_notification // Превращаем в boolean
+                    };
+                    if (audioFile) {
+                        options.caption = safeMessage;
+                        await bot.telegram.sendAudio(user.id, { source: audioFile.path }, options);
+                    } else {
+                        await bot.telegram.sendMessage(user.id, safeMessage, options);
+                    }
+                    successCount++;
                 } catch (e) {
-                    console.error('[Broadcast] Не удалось отправить отчет админу:', e.message);
+                    errorCount++;
+                    if (e.response?.error_code === 403) await updateUserField(user.id, 'active', false);
                 }
-                if (audioFile) { fs.unlink(audioFile.path, (err) => { if (err) console.error("Не удалось удалить временный файл рассылки:", err); }); }
-            })();
-        } catch (e) {
-            console.error('Ошибка при запуске рассылки:', e);
-            res.render('broadcast-form', { title: 'Рассылка', page: 'broadcast', error: 'Критическая ошибка при запуске рассылки.', success: null });
-        }
-    });
+                await new Promise(resolve => setTimeout(resolve, 50));
+            }
+
+            console.log(`[Broadcast] Рассылка завершена. Успешно: ${successCount}, Ошибки: ${errorCount}`);
+            
+            // Отправляем отчет админу (кроме случая с предпросмотром)
+            if (action !== 'preview') {
+                try {
+                    const reportMessage = `📢 **Отчет по рассылке**\n\n✅ Успешно: *${successCount}*\n❌ Ошибки: *${errorCount}*\n👥 Аудитория: *${targetAudience}* (${users.length} чел.)`;
+                    await bot.telegram.sendMessage(ADMIN_ID, reportMessage, { parse_mode: 'Markdown' });
+                } catch (e) { console.error('[Broadcast] Не удалось отправить отчет админу:', e.message); }
+            }
+
+            if (audioFile) {
+                fs.unlink(audioFile.path, (err) => {
+                    if (err) console.error("Не удалось удалить временный файл рассылки:", err);
+                });
+            }
+        })();
+    } catch (e) {
+        console.error('Ошибка при запуске рассылки:', e);
+        res.render('broadcast-form', { title: 'Рассылка', page: 'broadcast', error: 'Критическая ошибка.', success: null });
+    }
+});
 
     app.get('/expiring-users', requireAuth, async (req, res) => {
         try {
