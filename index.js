@@ -304,19 +304,26 @@ async function runSingleBroadcast(task, users, taskId = null) {
     console.log(`[Broadcast Worker] Запуск рассылки для ${users.length} пользователей.`);
     let successCount = 0, errorCount = 0;
     
-    // НОВЫЙ, БОЛЕЕ НАДЕЖНЫЙ СПОСОБ ФОРМАТИРОВАНИЯ
+    // ФИНАЛЬНЫЙ, НАДЕЖНЫЙ СПОСОБ ФОРМАТИРОВАНИЯ
     let safeMessage = task.message
-        // 1. Экранируем базовые HTML-символы, чтобы текст не ломал разметку
+        // 1. Экранируем базовые HTML-символы
         .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-        // 2. Превращаем Markdown в HTML
+        // 2. Превращаем *жирный* в <b>жирный</b>
         .replace(/\*(.*?)\*/g, '<b>$1</b>')
-        .replace(/_(.*?)_/g, '<i>$1</i>')
-        // 3. Находим все ссылки и оборачиваем их в <code>, чтобы защитить от искажения
-        .replace(/(https?:\/\/[^\s]+)/g, '<code>$1</code>');
+        // 3. Превращаем _курсив_ в <i>курсив</i>. ВАЖНО: не затрагиваем _ внутри слов.
+        .replace(/(?<!\w)_(.*?)_(?!\w)/g, '<i>$1</i>')
+        // 4. Оборачиваем ссылки в теги <a>, чтобы они были кликабельными
+        .replace(/(https?:\/\/[^\s]+)/g, '<a href="$1">$1</a>');
 
     for (const user of users) {
         try {
-            const options = { parse_mode: 'HTML', disable_web_page_preview: true, disable_notification: task.disableNotification };
+            // Отправляем с parse_mode: 'HTML' и отключаем предпросмотр
+            const options = { 
+                parse_mode: 'HTML', 
+                disable_web_page_preview: true, 
+                disable_notification: task.disableNotification 
+            };
+            
             if (task.audioPath || task.audio_path) {
                 options.caption = safeMessage;
                 await bot.telegram.sendAudio(user.id, { source: task.audioPath || task.audio_path }, options);
