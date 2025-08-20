@@ -1,4 +1,5 @@
-// index.js
+// index.js (ФИНАЛЬНАЯ ВЕРСИЯ СО ВСЕМИ ФУНКЦИЯМИ И ИМПОРТАМИ)
+
 import express from 'express';
 import session from 'express-session';
 import compression from 'compression';
@@ -11,6 +12,7 @@ import pLimit from 'p-limit';
 import fs from 'fs';
 import cron from 'node-cron';
 
+// Полный и правильный список импортов из db.js
 import { 
     pool, supabase, getUserById, resetDailyStats, getAllUsers, getPaginatedUsers, 
     getReferralSourcesStats, getDownloadsByDate, getRegistrationsByDate, 
@@ -192,7 +194,7 @@ function setupExpress() {
         const tasks = await getAllBroadcastTasks();
         res.render('broadcasts', { title: 'Управление рассылками', page: 'broadcasts', tasks });
     });
-
+    
     app.get('/broadcast/new', requireAuth, (req, res) => { 
         res.render('broadcast-form', { title: 'Новая рассылка', page: 'broadcasts', error: null, success: null }); 
     });
@@ -236,7 +238,6 @@ function setupExpress() {
             }
             // Если время не указано, отправляем немедленно, иначе - планируем
             const scheduleTime = scheduledAt ? new Date(scheduledAt) : new Date();
-
             if (isEditing) {
                 await updateBroadcastTask(taskId, { ...taskData, scheduledAt: scheduleTime });
             } else {
@@ -259,15 +260,36 @@ function setupExpress() {
     });
 
     app.post('/set-tariff', requireAuth, async (req, res) => {
-        // ... (этот роут без изменений)
+        const { userId, limit, days } = req.body;
+        try {
+            await setPremium(userId, parseInt(limit), parseInt(days) || 30);
+            let tariffName = '';
+            const newLimit = parseInt(limit);
+            if (newLimit <= 5) tariffName = 'Free';
+            else if (newLimit <= 30) tariffName = 'Plus';
+            else if (newLimit <= 100) tariffName = 'Pro';
+            else tariffName = 'Unlimited';
+            const message = `🎉 Ваш тариф был обновлен администратором!\n\nНовый тариф: *${tariffName}* (${newLimit} загрузок/день).\nСрок действия: *${parseInt(days) || 30} дней*.`;
+            await bot.telegram.sendMessage(userId, message, { parse_mode: 'Markdown' });
+        } catch (error) {
+            console.error(`[Admin] Ошибка при смене тарифа для ${userId}:`, error.message);
+        }
+        res.redirect(req.get('Referrer') || '/users');
     });
 
     app.post('/reset-bonus', requireAuth, async (req, res) => {
-        // ... (этот роут без изменений)
+        const { userId } = req.body;
+        if (userId) { await updateUserField(userId, 'subscribed_bonus_used', false); }
+        res.redirect(req.get('Referrer') || '/users');
     });
 
     app.post('/reset-daily-limit', requireAuth, async (req, res) => {
-        // ... (этот роут без изменений)
+        const { userId } = req.body;
+        if (userId) {
+            await updateUserField(userId, 'downloads_today', 0);
+            await updateUserField(userId, 'tracks_today', '[]');
+        }
+        res.redirect(req.get('Referrer') || '/users');
     });
 }
 
