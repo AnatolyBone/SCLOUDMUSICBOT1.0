@@ -1,5 +1,4 @@
-// index.js (ФИНАЛЬНАЯ ВЕРСИЯ С ПРАВИЛЬНОЙ СТРУКТУРОЙ)
-
+// index.js (ФИНАЛЬНАЯ ВЕРСИЯ СО ВСЕМИ ФУНКЦИЯМИ И ИМПОРТАМИ)
 
 import express from 'express';
 import session from 'express-session';
@@ -10,15 +9,20 @@ import expressLayouts from 'express-ejs-layouts';
 import { fileURLToPath } from 'url';
 import pgSessionFactory from 'connect-pg-simple';
 import pLimit from 'p-limit';
-import json2csv from 'json-2-csv';
 import fs from 'fs';
+import cron from 'node-cron';
 
+// >>>>>>>> ИСПРАВЛЕННЫЙ БЛОК ИМПОРТОВ <<<<<<<<<<
 import { 
     pool, supabase, getUserById, resetDailyStats, getAllUsers, getPaginatedUsers, 
     getReferralSourcesStats, getDownloadsByDate, getRegistrationsByDate, 
     getActiveUsersByDate, getExpiringUsers, setPremium, updateUserField, 
-    getLatestReviews, getUserActivityByDayHour, getDownloadsByUserId, getReferralsByUserId, getCachedTracksCount, getActiveFreeUsers, getActivePremiumUsers, failBroadcastTask
+    getLatestReviews, getUserActivityByDayHour, getDownloadsByUserId, getReferralsByUserId, 
+    getCachedTracksCount, getActiveFreeUsers, getActivePremiumUsers,
+    createBroadcastTask, getPendingBroadcastTask, completeBroadcastTask, failBroadcastTask
 } from './db.js';
+// >>>>>>>> КОНЕЦ ИСПРАВЛЕННОГО БЛОКА <<<<<<<<<<
+
 import { bot } from './bot.js';
 import redisService from './services/redisClient.js';
 import { WEBHOOK_URL, PORT, SESSION_SECRET, ADMIN_ID, ADMIN_LOGIN, ADMIN_PASSWORD, WEBHOOK_PATH, STORAGE_CHANNEL_ID } from './config.js';
@@ -37,6 +41,7 @@ async function startApp() {
         await loadTexts(true);
         await redisService.connect();
         setupExpress();
+        startBroadcastWorker();
         bot.on('message', (ctx, next) => limit(() => next()));
         if (process.env.NODE_ENV === 'production') {
             const fullWebhookUrl = (WEBHOOK_URL.endsWith('/') ? WEBHOOK_URL.slice(0, -1) : WEBHOOK_URL) + WEBHOOK_PATH;
@@ -88,8 +93,6 @@ function setupExpress() {
         res.redirect('/admin');
     };
     
-    // --- ВСЕ РОУТЫ (АДРЕСА) ДОЛЖНЫ БЫТЬ ВНУТРИ ЭТОЙ ФУНКЦИИ ---
-
     app.get('/health', (req, res) => res.status(200).send('OK'));
     app.get('/admin', (req, res) => {
         if (req.session.authenticated) return res.redirect('/dashboard');
@@ -106,60 +109,45 @@ function setupExpress() {
     });
     app.get('/logout', (req, res) => req.session.destroy(() => res.redirect('/admin')));
     
-    // В ФАЙЛЕ index.js
-
-// >>>>> ЗАМЕНИТЕ ВЕСЬ БЛОК app.get('/dashboard', ...) НА ЭТОТ <<<<<
-
-app.get('/dashboard', requireAuth, async (req, res) => {
-    try {
-        let storageStatus = { available: false, error: '' };
-        if (STORAGE_CHANNEL_ID) {
-            try {
-                await bot.telegram.getChat(STORAGE_CHANNEL_ID);
-                storageStatus.available = true;
-            } catch (e) {
-                storageStatus.error = e.message;
-                console.error("[Dashboard] Ошибка проверки канала-хранилища:", e.message);
+    app.get('/dashboard', requireAuth, async (req, res) => {
+        try {
+            let storageStatus = { available: false, error: '' };
+            if (STORAGE_CHANNEL_ID) {
+                try {
+                    await bot.telegram.getChat(STORAGE_CHANNEL_ID);
+                    storageStatus.available = true;
+                } catch (e) {
+                    storageStatus.error = e.message;
+                    console.error("[Dashboard] Ошибка проверки канала-хранилища:", e.message);
+                }
             }
+            const [users, referralStats, downloadsRaw, registrationsRaw, activeRaw, cachedTracksCount] = await Promise.all([
+                getAllUsers(true), 
+                getReferralSourcesStats(), 
+                getDownloadsByDate(),
+                getRegistrationsByDate(), 
+                getActiveUsersByDate(),
+                getCachedTracksCount()
+            ]);
+            const stats = {
+                total_users: users.length,
+                active_users: users.filter(u => u.active).length,
+                total_downloads: users.reduce((sum, u) => sum + (u.total_downloads || 0), 0),
+                active_today: users.filter(u => u.last_active && new Date(u.last_active).toDateString() === new Date().toDateString()).length,
+                queueWaiting: downloadQueue.size,
+                queueActive: downloadQueue.active,
+                cachedTracksCount: cachedTracksCount
+            };
+            const prepareChartData = (registrations, downloads, active) => ({
+                labels: [...new Set([...Object.keys(registrations), ...Object.keys(downloads), ...Object.keys(active)])].sort(),
+                datasets: [ { label: 'Регистрации', data: Object.values(registrations), borderColor: '#198754' }, { label: 'Загрузки', data: Object.values(downloads), borderColor: '#fd7e14' }, { label: 'Активные', data: Object.values(active), borderColor: '#0d6efd' } ]
+            });
+            res.render('dashboard', { title: 'Дашборд', page: 'dashboard', stats, storageStatus, query: req.query, chartDataCombined: prepareChartData(registrationsRaw, downloadsRaw, activeRaw) });
+        } catch (error) {
+            console.error("Ошибка дашборда:", error);
+            res.status(500).send("Ошибка сервера");
         }
-
-        // ИСПРАВЛЕНИЕ: Добавляем getCachedTracksCount в этот Promise.all
-        const [users, referralStats, downloadsRaw, registrationsRaw, activeRaw, cachedTracksCount] = await Promise.all([
-            getAllUsers(true), 
-            getReferralSourcesStats(), 
-            getDownloadsByDate(),
-            getRegistrationsByDate(), 
-            getActiveUsersByDate(),
-            getCachedTracksCount() // <-- ЭТА СТРОКА БЫЛА ПРОПУЩЕНА
-        ]);
-        
-        const stats = {
-            total_users: users.length,
-            active_users: users.filter(u => u.active).length,
-            total_downloads: users.reduce((sum, u) => sum + (u.total_downloads || 0), 0),
-            active_today: users.filter(u => u.last_active && new Date(u.last_active).toDateString() === new Date().toDateString()).length,
-            queueWaiting: downloadQueue.size,
-            queueActive: downloadQueue.active,
-            cachedTracksCount: cachedTracksCount // <-- ИСПРАВЛЕНО: Теперь эта переменная существует
-        };
-        
-        const prepareChartData = (registrations, downloads, active) => ({
-            labels: [...new Set([...Object.keys(registrations), ...Object.keys(downloads), ...Object.keys(active)])].sort(),
-            datasets: [ { label: 'Регистрации', data: Object.values(registrations), borderColor: '#198754' }, { label: 'Загрузки', data: Object.values(downloads), borderColor: '#fd7e14' }, { label: 'Активные', data: Object.values(active), borderColor: '#0d6efd' } ]
-        });
-        
-        res.render('dashboard', { 
-            title: 'Дашборд', page: 'dashboard', 
-            stats,
-            query: req.query,
-            storageStatus,
-            chartDataCombined: prepareChartData(registrationsRaw, downloadsRaw, activeRaw)
-        });
-    } catch (error) {
-        console.error("Ошибка дашборда:", error);
-        res.status(500).send("Ошибка сервера");
-    }
-});
+    });
 
     app.get('/users', requireAuth, async (req, res) => {
         try {
@@ -207,92 +195,36 @@ app.get('/dashboard', requireAuth, async (req, res) => {
         res.render('broadcast-form', { title: 'Рассылка', page: 'broadcast', error: null, success: null }); 
     });
 
-    // В ФАЙЛЕ index.js
-
-// >>>>> ЗАМЕНИТЕ ВЕСЬ БЛОК app.post('/broadcast', ...) НА ЭТОТ <<<<<
-
-app.post('/broadcast', requireAuth, upload.single('audio'), async (req, res) => {
-    const { message, targetAudience, disable_notification, action } = req.body;
-    const audioFile = req.file;
-
-    if (!message) {
-        return res.render('broadcast-form', { title: 'Рассылка', page: 'broadcast', error: 'Текст сообщения не может быть пустым.', success: null });
-    }
-
-    try {
-        let users = [];
-        let successMessage = '';
-
-        if (action === 'preview') {
-            // Если предпросмотр, отправляем только админу
-            users = [{ id: ADMIN_ID }];
-            successMessage = 'Предпросмотр успешно отправлен вам в Telegram.';
-        } else {
-            // Если обычная отправка, выбираем аудиторию
-            if (targetAudience === 'all') {
-                users = await getAllUsers(true);
-            } else if (targetAudience === 'free_users') {
-                users = await getActiveFreeUsers();
-            } else if (targetAudience === 'premium_users') {
-                users = await getActivePremiumUsers();
+    app.post('/broadcast', requireAuth, upload.single('audio'), async (req, res) => {
+        try {
+            const { message, targetAudience, scheduledAt, disable_notification, action } = req.body;
+            const audioFile = req.file;
+            if (!message) return res.render('broadcast-form', { error: 'Текст не может быть пустым.' });
+            const taskData = { message, audioPath: audioFile ? audioFile.path : null, targetAudience, disableNotification: !!disable_notification };
+            if (action === 'preview') {
+                await runSingleBroadcast(taskData, [{ id: ADMIN_ID }]);
+                if (audioFile) fs.unlinkSync(audioFile.path);
+                return res.render('broadcast-form', { success: 'Предпросмотр отправлен вам в Telegram.' });
             }
-            successMessage = `Рассылка запущена для ${users.length} пользователей. Отчет придет в Telegram.`;
+            if (scheduledAt) {
+                await createBroadcastTask({ ...taskData, scheduledAt: new Date(scheduledAt) });
+                return res.render('broadcast-form', { success: `Рассылка успешно запланирована на ${new Date(scheduledAt).toLocaleString()}` });
+            } else {
+                let users = [];
+                if (targetAudience === 'all') users = await getAllUsers(true);
+                else if (targetAudience === 'free_users') users = await getActiveFreeUsers();
+                else if (targetAudience === 'premium_users') users = await getActivePremiumUsers();
+                res.render('broadcast-form', { success: `Рассылка запущена для ${users.length} пользователей. Отчет придет в Telegram.` });
+                (async () => {
+                    await runSingleBroadcast(taskData, users);
+                    if (audioFile) fs.unlinkSync(audioFile.path);
+                })();
+            }
+        } catch (e) {
+            console.error('Ошибка создания задачи рассылки:', e);
+            res.render('broadcast-form', { error: 'Не удалось создать задачу.' });
         }
-
-        // Сразу отвечаем админу, чтобы страница не "висела"
-        res.render('broadcast-form', { 
-            title: 'Рассылка', page: 'broadcast', error: null, success: successMessage
-        });
-
-        // Асинхронно запускаем саму рассылку в фоне
-        (async () => {
-            console.log(`[Broadcast] Начинаю рассылку для ${users.length} пользователей (аудитория: ${targetAudience}, действие: ${action}).`);
-            let successCount = 0, errorCount = 0;
-
-            let safeMessage = message.replace(/\*(.*?)\*/g, '<b>$1</b>').replace(/_(.*?)_/g, '<i>$1</i>').replace(/(https?:\/\/[^\s]+)/g, '<a href="$1">$1</a>');
-
-            for (const user of users) {
-                try {
-                    const options = { 
-                        parse_mode: 'HTML', 
-                        disable_web_page_preview: true,
-                        disable_notification: !!disable_notification // Превращаем в boolean
-                    };
-                    if (audioFile) {
-                        options.caption = safeMessage;
-                        await bot.telegram.sendAudio(user.id, { source: audioFile.path }, options);
-                    } else {
-                        await bot.telegram.sendMessage(user.id, safeMessage, options);
-                    }
-                    successCount++;
-                } catch (e) {
-                    errorCount++;
-                    if (e.response?.error_code === 403) await updateUserField(user.id, 'active', false);
-                }
-                await new Promise(resolve => setTimeout(resolve, 50));
-            }
-
-            console.log(`[Broadcast] Рассылка завершена. Успешно: ${successCount}, Ошибки: ${errorCount}`);
-            
-            // Отправляем отчет админу (кроме случая с предпросмотром)
-            if (action !== 'preview') {
-                try {
-                    const reportMessage = `📢 **Отчет по рассылке**\n\n✅ Успешно: *${successCount}*\n❌ Ошибки: *${errorCount}*\n👥 Аудитория: *${targetAudience}* (${users.length} чел.)`;
-                    await bot.telegram.sendMessage(ADMIN_ID, reportMessage, { parse_mode: 'Markdown' });
-                } catch (e) { console.error('[Broadcast] Не удалось отправить отчет админу:', e.message); }
-            }
-
-            if (audioFile) {
-                fs.unlink(audioFile.path, (err) => {
-                    if (err) console.error("Не удалось удалить временный файл рассылки:", err);
-                });
-            }
-        })();
-    } catch (e) {
-        console.error('Ошибка при запуске рассылки:', e);
-        res.render('broadcast-form', { title: 'Рассылка', page: 'broadcast', error: 'Критическая ошибка.', success: null });
-    }
-});
+    });
 
     app.get('/expiring-users', requireAuth, async (req, res) => {
         try {
@@ -335,7 +267,64 @@ app.post('/broadcast', requireAuth, upload.single('audio'), async (req, res) => 
         }
         res.redirect(req.get('Referrer') || '/users');
     });
-} // <-- Вот здесь заканчивается функция setupExpress()
+}
+
+async function runSingleBroadcast(task, users, taskId = null) {
+    console.log(`[Broadcast] Начинаю рассылку для ${users.length} пользователей.`);
+    let successCount = 0, errorCount = 0;
+    let safeMessage = task.message.replace(/\*(.*?)\*/g, '<b>$1</b>').replace(/_(.*?)_/g, '<i>$1</i>').replace(/(https?:\/\/[^\s]+)/g, '<a href="$1">$1</a>');
+    for (const user of users) {
+        try {
+            const options = { parse_mode: 'HTML', disable_web_page_preview: true, disable_notification: task.disableNotification };
+            if (task.audioPath || task.audio_path) {
+                options.caption = safeMessage;
+                await bot.telegram.sendAudio(user.id, { source: task.audioPath || task.audio_path }, options);
+            } else {
+                await bot.telegram.sendMessage(user.id, safeMessage, options);
+            }
+            successCount++;
+        } catch (e) {
+            errorCount++;
+            if (e.response?.error_code === 403) await updateUserField(user.id, 'active', false);
+        }
+        await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    const report = { successCount, errorCount, totalUsers: users.length };
+    console.log(`[Broadcast] Рассылка завершена.`, report);
+    if (users.length > 1 || (users.length === 1 && users[0].id !== ADMIN_ID)) {
+        try {
+            const reportMessage = `📢 Отчет по рассылке ${taskId ? `(задача #${taskId})` : ''}\n\n✅ Успешно: *${successCount}*\n❌ Ошибки: *${errorCount}*\n👥 Аудитория: *${task.targetAudience}* (${users.length} чел.)`;
+            await bot.telegram.sendMessage(ADMIN_ID, reportMessage, { parse_mode: 'Markdown' });
+        } catch (e) { console.error('Не удалось отправить отчет админу:', e.message); }
+    }
+    return report;
+}
+
+function startBroadcastWorker() {
+    console.log('[Broadcast Worker] Планировщик запущен.');
+    cron.schedule('* * * * *', async () => {
+        // console.log('[Broadcast Worker] Проверяю наличие задач...'); // Можно раскомментировать для отладки
+        const task = await getPendingBroadcastTask();
+        if (task) {
+            try {
+                let users = [];
+                if (task.target_audience === 'all') users = await getAllUsers(true);
+                else if (task.target_audience === 'free_users') users = await getActiveFreeUsers();
+                else if (task.target_audience === 'premium_users') users = await getActivePremiumUsers();
+                const report = await runSingleBroadcast(task, users, task.id);
+                await completeBroadcastTask(task.id, report);
+                if (task.audio_path) {
+                    fs.unlink(task.audio_path, (err) => {
+                        if (err) console.error("Не удалось удалить временный файл рассылки:", err);
+                    });
+                }
+            } catch (error) {
+                console.error(`[Broadcast Worker] Критическая ошибка при выполнении задачи #${task.id}:`, error);
+                await failBroadcastTask(task.id, error.message);
+            }
+        }
+    });
+}
 
 async function stopBot(signal) {
     console.log(`[App] Получен сигнал ${signal}. Начинаю корректное завершение...`);
