@@ -36,7 +36,7 @@ export async function getUser(id, first_name = '', username = '') {
   const { rows } = await query('SELECT * FROM users WHERE id = $1', [id]);
   if (rows.length > 0) {
     if (rows[0].active) {
-        await query('UPDATE users SET last_active = NOW() WHERE id = $1', [id]);
+      await query('UPDATE users SET last_active = NOW() WHERE id = $1', [id]);
     }
     return rows[0];
   }
@@ -100,11 +100,11 @@ export async function setPremium(id, limit, days = 30) {
 export async function resetDailyLimitIfNeeded(userId) {
   const { rows } = await query('SELECT last_reset_date FROM users WHERE id = $1', [userId]);
   if (rows.length > 0) {
-      const lastReset = new Date(rows[0].last_reset_date);
-      const today = new Date();
-      if(lastReset.toDateString() !== today.toDateString()){
-          await query(`UPDATE users SET downloads_today = 0, tracks_today = '[]'::jsonb, last_reset_date = CURRENT_DATE WHERE id = $1`, [userId]);
-      }
+    const lastReset = new Date(rows[0].last_reset_date);
+    const today = new Date();
+    if (lastReset.toDateString() !== today.toDateString()) {
+      await query(`UPDATE users SET downloads_today = 0, tracks_today = '[]'::jsonb, last_reset_date = CURRENT_DATE WHERE id = $1`, [userId]);
+    }
   }
 }
 
@@ -118,40 +118,46 @@ export async function getAllUsers(includeInactive = true) {
   return rows;
 }
 
-export async function logDownload(userId, trackTitle, url) { 
+export async function logDownload(userId, trackTitle, url) {
   try {
     await supabase.from('downloads_log').insert([{ user_id: userId, track_title: trackTitle, url: url }]);
   } catch (e) {
     console.error(`❌ Критическая ошибка вызова Supabase для logDownload:`, e.message);
   }
 }
-
+export async function logEvent(userId, event) {
+  try {
+    await supabase.from('events').insert([{ user_id: userId, event_type: event }]);
+  } catch (e) {
+    console.error(`❌ Критическая ошибка вызова Supabase для logEvent:`, e.message);
+  }
+}
 export async function getPaginatedUsers(options) {
-    const { searchQuery = '', statusFilter = '', page = 1, limit = 25, sortBy = 'created_at', sortOrder = 'desc' } = options;
-    const allowedSortFields = ['id', 'total_downloads', 'created_at', 'last_active', 'premium_limit'];
-    const safeSortBy = allowedSortFields.includes(sortBy) ? `"${sortBy}"` : '"created_at"';
-    const safeSortOrder = sortOrder.toLowerCase() === 'asc' ? 'ASC' : 'DESC';
-    const offset = (page - 1) * limit;
-    let whereClauses = [];
-    let queryParams = [];
-    let paramIndex = 1;
-    if (statusFilter === 'active') { whereClauses.push('active = TRUE'); } 
-    else if (statusFilter === 'inactive') { whereClauses.push('active = FALSE'); }
-    if (searchQuery) {
-        queryParams.push(`%${searchQuery}%`);
-        whereClauses.push(`(CAST(id AS TEXT) ILIKE $${paramIndex} OR first_name ILIKE $${paramIndex} OR username ILIKE $${paramIndex})`);
-        paramIndex++;
-    }
-    const whereString = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
-    const totalQuery = `SELECT COUNT(*) FROM users ${whereString}`;
-    const totalResult = await query(totalQuery, queryParams);
-    const totalUsers = parseInt(totalResult.rows[0].count, 10);
-    const totalPages = Math.ceil(totalUsers / limit);
-    queryParams.push(limit);
-    queryParams.push(offset);
-    const usersQuery = `SELECT * FROM users ${whereString} ORDER BY ${safeSortBy} ${safeSortOrder} LIMIT $${paramIndex++} OFFSET $${paramIndex++}`;
-    const usersResult = await query(usersQuery, queryParams);
-    return { users: usersResult.rows, totalPages, currentPage: page, totalUsers };
+  const { searchQuery = '', statusFilter = '', page = 1, limit = 25, sortBy = 'created_at', sortOrder = 'desc' } = options;
+  const allowedSortFields = ['id', 'total_downloads', 'created_at', 'last_active', 'premium_limit'];
+  const safeSortBy = allowedSortFields.includes(sortBy) ? `"${sortBy}"` : '"created_at"';
+  const safeSortOrder = sortOrder.toLowerCase() === 'asc' ? 'ASC' : 'DESC';
+  const offset = (page - 1) * limit;
+  let whereClauses = [];
+  let queryParams = [];
+  let paramIndex = 1;
+  if (statusFilter === 'active') { whereClauses.push('active = TRUE'); }
+  else if (statusFilter === 'inactive') { whereClauses.push('active = FALSE'); }
+  if (searchQuery) {
+    queryParams.push(`%${searchQuery}%`);
+    whereClauses.push(`(CAST(id AS TEXT) ILIKE $${paramIndex} OR first_name ILIKE $${paramIndex} OR username ILIKE $${paramIndex})`);
+    paramIndex++;
+  }
+  const whereString = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+  const totalQuery = `SELECT COUNT(*) FROM users ${whereString}`;
+  const totalResult = await query(totalQuery, queryParams);
+  const totalUsers = parseInt(totalResult.rows[0].count, 10);
+  const totalPages = Math.ceil(totalUsers / limit);
+  queryParams.push(limit);
+  queryParams.push(offset);
+  const usersQuery = `SELECT * FROM users ${whereString} ORDER BY ${safeSortBy} ${safeSortOrder} LIMIT $${paramIndex++} OFFSET $${paramIndex++}`;
+  const usersResult = await query(usersQuery, queryParams);
+  return { users: usersResult.rows, totalPages, currentPage: page, totalUsers };
 }
 
 export async function getCachedTracksCount() {
@@ -223,7 +229,7 @@ export async function completeBroadcastTask(taskId, report) {
 }
 
 export async function failBroadcastTask(taskId, error) {
-    await query(`UPDATE broadcast_tasks SET status = 'failed', report = $1 WHERE id = $2`, [{ error }, taskId]);
+  await query(`UPDATE broadcast_tasks SET status = 'failed', report = $1 WHERE id = $2`, [{ error }, taskId]);
 }
 
 export async function getAllBroadcastTasks() {
