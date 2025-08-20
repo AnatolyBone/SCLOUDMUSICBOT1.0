@@ -221,13 +221,15 @@ export async function createBroadcastTask(task) {
   );
 }
 
+// В ФАЙЛЕ db.js
+// >>>>> ЗАМЕНИТЕ ЭТУ ФУНКЦИЮ <<<<<
 export async function getPendingBroadcastTask() {
   const { rows } = await query(`
     UPDATE broadcast_tasks
     SET status = 'processing'
     WHERE id = (
       SELECT id FROM broadcast_tasks
-      WHERE status = 'pending' AND scheduled_at <= NOW()
+      WHERE status = 'pending' AND scheduled_at <= NOW() AT TIME ZONE 'UTC'
       ORDER BY scheduled_at
       LIMIT 1
       FOR UPDATE SKIP LOCKED
