@@ -1,4 +1,4 @@
-// index.js (ФИНАЛЬНАЯ ВЕРСИЯ - ПОЛНАЯ СИНХРОНИЗАЦИЯ)
+// index.js (ФИНАЛЬНАЯ ВЕРСИЯ)
 
 import express from 'express';
 import session from 'express-session';
@@ -20,11 +20,11 @@ import {
     getLatestReviews, getUserActivityByDayHour, getDownloadsByUserId, getReferralsByUserId, 
     getCachedTracksCount, getActiveFreeUsers, getActivePremiumUsers,
     createBroadcastTask, getPendingBroadcastTask, completeBroadcastTask, failBroadcastTask,
-    getAllBroadcastTasks, deleteBroadcastTask, getBroadcastTaskById, updateBroadcastTask, logEvent
+    getAllBroadcastTasks, deleteBroadcastTask, getBroadcastTaskById, updateBroadcastTask
 } from './db.js';
 import { bot } from './bot.js';
 import redisService from './services/redisClient.js';
-import { WEBHOOK_URL, PORT, SESSION_SECRET, ADMIN_ID, ADMIN_LOGIN, ADMIN_PASSWORD, WEBHOOK_PATH, STORAGE_CHANNEL_ID, CHANNEL_USERNAME } from './config.js';
+import { WEBHOOK_URL, PORT, SESSION_SECRET, ADMIN_ID, ADMIN_LOGIN, ADMIN_PASSWORD, WEBHOOK_PATH, STORAGE_CHANNEL_ID } from './config.js';
 import { loadTexts } from './config/texts.js';
 import { downloadQueue } from './services/downloadManager.js';
 
@@ -39,9 +39,10 @@ async function startApp() {
     try {
         await loadTexts(true);
         await redisService.connect();
+        
         setupExpress();
         startBroadcastWorker();
-        bot.on('message', (ctx, next) => limit(() => next()));
+
         if (process.env.NODE_ENV === 'production') {
             const fullWebhookUrl = (WEBHOOK_URL.endsWith('/') ? WEBHOOK_URL.slice(0, -1) : WEBHOOK_URL) + WEBHOOK_PATH;
             const webhookInfo = await bot.telegram.getWebhookInfo();
@@ -52,12 +53,14 @@ async function startApp() {
                 console.log('[App] Вебхук уже установлен.');
             }
             app.use(bot.webhookCallback(WEBHOOK_PATH));
-            app.listen(PORT, () => console.log(`✅ [App] Сервер запущен на порту ${PORT}.`));
         } else {
             console.log('[App] Запуск бота в режиме long-polling...');
             await bot.telegram.deleteWebhook({ drop_pending_updates: true });
-            await bot.launch();
+            bot.launch();
         }
+
+        app.listen(PORT, () => console.log(`✅ [App] Сервер запущен на порту ${PORT}.`));
+        
         console.log('[App] Настройка фоновых задач...');
         setInterval(() => resetDailyStats(), 24 * 3600 * 1000);
         setInterval(() => console.log(`[Monitor] Очередь: ${downloadQueue.size} в ожидании, ${downloadQueue.active} в работе.`), 60000);
@@ -93,6 +96,7 @@ function setupExpress() {
     };
     
     app.get('/health', (req, res) => res.status(200).send('OK'));
+    app.get('/', (req, res) => res.redirect('/dashboard'));
     app.get('/admin', (req, res) => {
         if (req.session.authenticated) return res.redirect('/dashboard');
         res.render('login', { title: 'Вход', page: 'login', layout: false, error: null });
@@ -117,15 +121,11 @@ function setupExpress() {
                     storageStatus.available = true;
                 } catch (e) {
                     storageStatus.error = e.message;
-                    console.error("[Dashboard] Ошибка проверки канала-хранилища:", e.message);
                 }
             }
-            const [users, referralStats, downloadsRaw, registrationsRaw, activeRaw, cachedTracksCount] = await Promise.all([
+            const [users, registrationsRaw, cachedTracksCount] = await Promise.all([
                 getAllUsers(true), 
-                getReferralSourcesStats(), 
-                getDownloadsByDate(),
-                getRegistrationsByDate(), 
-                getActiveUsersByDate(),
+                getRegistrationsByDate(),
                 getCachedTracksCount()
             ]);
             const stats = {
@@ -137,11 +137,7 @@ function setupExpress() {
                 queueActive: downloadQueue.active,
                 cachedTracksCount: cachedTracksCount
             };
-            const prepareChartData = (registrations, downloads, active) => ({
-                labels: [...new Set([...Object.keys(registrations), ...Object.keys(downloads), ...Object.keys(active)])].sort(),
-                datasets: [ { label: 'Регистрации', data: Object.values(registrations), borderColor: '#198754' }, { label: 'Загрузки', data: Object.values(downloads), borderColor: '#fd7e14' }, { label: 'Активные', data: Object.values(active), borderColor: '#0d6efd' } ]
-            });
-            res.render('dashboard', { title: 'Дашборд', page: 'dashboard', stats, storageStatus, query: req.query, chartDataCombined: prepareChartData(registrationsRaw, downloadsRaw, activeRaw) });
+            res.render('dashboard', { title: 'Дашборд', page: 'dashboard', stats, storageStatus, chartDataCombined: { labels: Object.keys(registrationsRaw), datasets: [{ label: 'Регистрации', data: Object.values(registrationsRaw) }] } });
         } catch (error) {
             console.error("Ошибка дашборда:", error);
             res.status(500).send("Ошибка сервера");
@@ -236,7 +232,7 @@ function setupExpress() {
                 renderOptions.success = 'Предпросмотр отправлен вам в Telegram.';
                 return res.render('broadcast-form', renderOptions);
             }
-            const scheduleTime = scheduledAt ? new Date(scheduledAt) : new Date(Date.now() + 5000);
+            const scheduleTime = scheduledAt ? new Date(scheduledAt) : new Date();
             if (isEditing) {
                 await updateBroadcastTask(taskId, { ...taskData, scheduledAt: scheduleTime });
             } else {
