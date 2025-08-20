@@ -126,8 +126,6 @@ export async function logDownload(userId, trackTitle, url) {
   }
 }
 
-// ... (все ваши остальные функции до getPaginatedUsers) ...
-
 export async function getPaginatedUsers(options) {
     const { searchQuery = '', statusFilter = '', page = 1, limit = 25, sortBy = 'created_at', sortOrder = 'desc' } = options;
     const allowedSortFields = ['id', 'total_downloads', 'created_at', 'last_active', 'premium_limit'];
@@ -243,11 +241,11 @@ export async function getBroadcastTaskById(taskId) {
 }
 
 export async function updateBroadcastTask(taskId, task) {
-  const { message, targetAudience, disableNotification, scheduledAt } = task;
+  const { message, audioPath, targetAudience, disableNotification, scheduledAt } = task;
   await query(
     `UPDATE broadcast_tasks 
-     SET message = $1, target_audience = $2, disable_notification = $3, scheduled_at = $4, status = 'pending'
-     WHERE id = $5`,
-    [message, targetAudience, disableNotification, scheduledAt, taskId]
+     SET message = $1, audio_path = $2, target_audience = $3, disable_notification = $4, scheduled_at = $5, status = 'pending'
+     WHERE id = $6`,
+    [message, audioPath, targetAudience, disableNotification, scheduledAt, taskId]
   );
 }
