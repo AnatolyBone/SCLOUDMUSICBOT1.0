@@ -297,10 +297,23 @@ function setupExpress() {
     });
 }
 
+// В ФАЙЛЕ index.js
+
+// >>>>> ЗАМЕНИТЕ ВСЮ ФУНКЦИЮ runSingleBroadcast <<<<<
 async function runSingleBroadcast(task, users, taskId = null) {
     console.log(`[Broadcast Worker] Запуск рассылки для ${users.length} пользователей.`);
     let successCount = 0, errorCount = 0;
-    let safeMessage = task.message.replace(/\*(.*?)\*/g, '<b>$1</b>').replace(/_(.*?)_/g, '<i>$1</i>').replace(/(https?:\/\/[^\s]+)/g, '<a href="$1">$1</a>');
+    
+    // НОВЫЙ, БОЛЕЕ НАДЕЖНЫЙ СПОСОБ ФОРМАТИРОВАНИЯ
+    let safeMessage = task.message
+        // 1. Экранируем базовые HTML-символы, чтобы текст не ломал разметку
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        // 2. Превращаем Markdown в HTML
+        .replace(/\*(.*?)\*/g, '<b>$1</b>')
+        .replace(/_(.*?)_/g, '<i>$1</i>')
+        // 3. Находим все ссылки и оборачиваем их в <code>, чтобы защитить от искажения
+        .replace(/(https?:\/\/[^\s]+)/g, '<code>$1</code>');
+
     for (const user of users) {
         try {
             const options = { parse_mode: 'HTML', disable_web_page_preview: true, disable_notification: task.disableNotification };
@@ -317,14 +330,18 @@ async function runSingleBroadcast(task, users, taskId = null) {
         }
         await new Promise(resolve => setTimeout(resolve, 50));
     }
+
     const report = { successCount, errorCount, totalUsers: users.length };
     console.log(`[Broadcast Worker] Рассылка завершена.`, report);
+
     if (users.length > 1 || (users.length === 1 && users[0].id !== ADMIN_ID)) {
         try {
-            const reportMessage = `📢 Отчет по рассылке ${taskId ? `(задача #${taskId})` : ''}\n\n✅ Успешно: *${successCount}*\n❌ Ошибки: *${errorCount}*\n👥 Аудитория: *${task.targetAudience}* (${users.length} чел.)`;
+            const audienceName = task.targetAudience.replace('_', ' ');
+            const reportMessage = `📢 Отчет по рассылке ${taskId ? `(задача #${taskId})` : ''}\n\n✅ Успешно: *${successCount}*\n❌ Ошибки: *${errorCount}*\n👥 Аудитория: *${audienceName}* (${users.length} чел.)`;
             await bot.telegram.sendMessage(ADMIN_ID, reportMessage, { parse_mode: 'Markdown' });
         } catch (e) { console.error('Не удалось отправить отчет админу:', e.message); }
     }
+    
     return report;
 }
 
