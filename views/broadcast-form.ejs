@@ -1,3 +1,7 @@
+<% // views/broadcast-form.ejs (УЛУЧШЕННАЯ ВЕРСЯ) %>
+
+<%- contentFor('body') %>
+
 <div class="card shadow-sm">
   <div class="card-header d-flex align-items-center justify-content-between">
     <span class="h5 mb-0">📢 Рассылка</span>
@@ -5,45 +9,63 @@
   </div>
   <div class="card-body">
     <% if (error) { %>
-      <div class="alert alert-danger" data-autohide>
-        <%= error %>
-      </div>
+      <div class="alert alert-danger" data-autohide><%= error %></div>
     <% } %>
     <% if (success) { %>
-      <div class="alert alert-success" data-autohide>
-        <%= success %>
-      </div>
+      <div class="alert alert-success" data-autohide><%= success %></div>
     <% } %>
-    <form method="post" enctype="multipart/form-data">
-      
+    
+    <form method="post" action="/broadcast" enctype="multipart/form-data">
       <!-- Поле для текста сообщения -->
       <div class="mb-3">
-        <label class="form-label">Текст сообщения</label>
-        <textarea name="message" class="form-control" rows="4" placeholder="Сообщение для пользователей..." required></textarea>
+        <label for="message" class="form-label">Текст сообщения (поддерживает Markdown: *жирный*, _курсив_)</label>
+        <textarea name="message" id="message" class="form-control" rows="5" placeholder="Сообщение для пользователей..." required></textarea>
       </div>
-      
+
       <!-- Поле для загрузки аудиофайла -->
       <div class="mb-3">
-        <label class="form-label">Аудио-файл (опционально)</label>
-        <input type="file" name="audio" accept="audio/*" class="form-control" />
-        <div class="form-text">Размер не более 20 МБ</div>
+        <label for="audio" class="form-label">Аудио-файл (опционально)</label>
+        <input type="file" name="audio" id="audio" accept="audio/*" class="form-control" />
+      </div>
+
+      <!-- НОВЫЕ ПОЛЯ: Сегментация и опции -->
+      <div class="row">
+        <div class="col-md-8 mb-3">
+          <label for="targetAudience" class="form-label">Целевая аудитория</label>
+          <select class="form-select" id="targetAudience" name="targetAudience">
+            <option value="all" selected>Всем активным пользователям</option>
+            <option value="free_users">Только с тарифом Free</option>
+            <option value="premium_users">Только с платными тарифами</option>
+          </select>
+        </div>
+        <div class="col-md-4 mb-3 d-flex align-items-end">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" name="disable_notification" id="disable_notification">
+            <label class="form-check-label" for="disable_notification">
+              Отправить без звука
+            </label>
+          </div>
+        </div>
       </div>
       
-      <!-- Кнопка отправки -->
-      <div class="mb-3">
-        <button class="btn btn-primary w-100">
-          <i class="bi bi-send"></i> Отправить
+      <!-- НОВЫЕ КНОПКИ: Предпросмотр и Отправка -->
+      <div class="d-flex gap-2">
+        <button type="submit" name="action" value="preview" class="btn btn-outline-secondary">
+          <i class="bi bi-eye"></i> Предпросмотр (отправить мне)
+        </button>
+        <button type="submit" name="action" value="send" class="btn btn-primary w-100" onclick="return confirm('Вы уверены, что хотите запустить рассылку?')">
+          <i class="bi bi-send"></i> Отправить всем
         </button>
       </div>
     </form>
   </div>
 </div>
 
-<!-- Скрипты для автоматического скрытия уведомлений -->
+<!-- Скрипт для автоматического скрытия уведомлений -->
 <script>
   document.querySelectorAll('.alert[data-autohide]').forEach(el => {
     setTimeout(() => {
       el.classList.add('d-none');
-    }, 4000);
+    }, 5000);
   });
 </script>
