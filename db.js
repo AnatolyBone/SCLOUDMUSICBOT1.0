@@ -1,4 +1,5 @@
-// db.js
+// db.js (ФИНАЛЬНАЯ ВЕРСЯ СО ВСЕМИ ФУНКЦИЯМИ)
+
 import { Pool } from 'pg';
 import { createClient } from '@supabase/supabase-js';
 import { SUPABASE_URL, SUPABASE_KEY, DATABASE_URL } from './config.js';
@@ -36,7 +37,7 @@ export async function getUser(id, first_name = '', username = '') {
   const { rows } = await query('SELECT * FROM users WHERE id = $1', [id]);
   if (rows.length > 0) {
     if (rows[0].active) {
-      await query('UPDATE users SET last_active = NOW() WHERE id = $1', [id]);
+        await query('UPDATE users SET last_active = NOW() WHERE id = $1', [id]);
     }
     return rows[0];
   }
@@ -100,11 +101,11 @@ export async function setPremium(id, limit, days = 30) {
 export async function resetDailyLimitIfNeeded(userId) {
   const { rows } = await query('SELECT last_reset_date FROM users WHERE id = $1', [userId]);
   if (rows.length > 0) {
-    const lastReset = new Date(rows[0].last_reset_date);
-    const today = new Date();
-    if (lastReset.toDateString() !== today.toDateString()) {
-      await query(`UPDATE users SET downloads_today = 0, tracks_today = '[]'::jsonb, last_reset_date = CURRENT_DATE WHERE id = $1`, [userId]);
-    }
+      const lastReset = new Date(rows[0].last_reset_date);
+      const today = new Date();
+      if(lastReset.toDateString() !== today.toDateString()){
+          await query(`UPDATE users SET downloads_today = 0, tracks_today = '[]'::jsonb, last_reset_date = CURRENT_DATE WHERE id = $1`, [userId]);
+      }
   }
 }
 
@@ -118,13 +119,15 @@ export async function getAllUsers(includeInactive = true) {
   return rows;
 }
 
-export async function logDownload(userId, trackTitle, url) {
+export async function logDownload(userId, trackTitle, url) { 
   try {
     await supabase.from('downloads_log').insert([{ user_id: userId, track_title: trackTitle, url: url }]);
   } catch (e) {
     console.error(`❌ Критическая ошибка вызова Supabase для logDownload:`, e.message);
   }
 }
+
+// ВОССТАНОВЛЕНА ФУНКЦИЯ
 export async function logEvent(userId, event) {
   try {
     await supabase.from('events').insert([{ user_id: userId, event_type: event }]);
@@ -132,32 +135,45 @@ export async function logEvent(userId, event) {
     console.error(`❌ Критическая ошибка вызова Supabase для logEvent:`, e.message);
   }
 }
+
+// ВОССТАНОВЛЕНА ФУНКЦИЯ
+export async function getActiveUsersByDate() {
+  const { rows } = await query(`SELECT TO_CHAR(last_active, 'YYYY-MM-DD') as date, COUNT(DISTINCT id) as count FROM users WHERE last_active IS NOT NULL GROUP BY date ORDER BY date`);
+  return rows.reduce((acc, row) => ({ ...acc, [row.date]: parseInt(row.count, 10) }), {});
+}
+
+// ВОССТАНОВЛЕНА ФУНКЦИЯ
+export async function getExpiringUsers(days = 3) {
+    const { rows } = await query( `SELECT * FROM users WHERE premium_until IS NOT NULL AND premium_until BETWEEN NOW() AND NOW() + INTERVAL '${days} days' ORDER BY premium_until ASC`);
+    return rows;
+}
+
 export async function getPaginatedUsers(options) {
-  const { searchQuery = '', statusFilter = '', page = 1, limit = 25, sortBy = 'created_at', sortOrder = 'desc' } = options;
-  const allowedSortFields = ['id', 'total_downloads', 'created_at', 'last_active', 'premium_limit'];
-  const safeSortBy = allowedSortFields.includes(sortBy) ? `"${sortBy}"` : '"created_at"';
-  const safeSortOrder = sortOrder.toLowerCase() === 'asc' ? 'ASC' : 'DESC';
-  const offset = (page - 1) * limit;
-  let whereClauses = [];
-  let queryParams = [];
-  let paramIndex = 1;
-  if (statusFilter === 'active') { whereClauses.push('active = TRUE'); }
-  else if (statusFilter === 'inactive') { whereClauses.push('active = FALSE'); }
-  if (searchQuery) {
-    queryParams.push(`%${searchQuery}%`);
-    whereClauses.push(`(CAST(id AS TEXT) ILIKE $${paramIndex} OR first_name ILIKE $${paramIndex} OR username ILIKE $${paramIndex})`);
-    paramIndex++;
-  }
-  const whereString = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
-  const totalQuery = `SELECT COUNT(*) FROM users ${whereString}`;
-  const totalResult = await query(totalQuery, queryParams);
-  const totalUsers = parseInt(totalResult.rows[0].count, 10);
-  const totalPages = Math.ceil(totalUsers / limit);
-  queryParams.push(limit);
-  queryParams.push(offset);
-  const usersQuery = `SELECT * FROM users ${whereString} ORDER BY ${safeSortBy} ${safeSortOrder} LIMIT $${paramIndex++} OFFSET $${paramIndex++}`;
-  const usersResult = await query(usersQuery, queryParams);
-  return { users: usersResult.rows, totalPages, currentPage: page, totalUsers };
+    const { searchQuery = '', statusFilter = '', page = 1, limit = 25, sortBy = 'created_at', sortOrder = 'desc' } = options;
+    const allowedSortFields = ['id', 'total_downloads', 'created_at', 'last_active', 'premium_limit'];
+    const safeSortBy = allowedSortFields.includes(sortBy) ? `"${sortBy}"` : '"created_at"';
+    const safeSortOrder = sortOrder.toLowerCase() === 'asc' ? 'ASC' : 'DESC';
+    const offset = (page - 1) * limit;
+    let whereClauses = [];
+    let queryParams = [];
+    let paramIndex = 1;
+    if (statusFilter === 'active') { whereClauses.push('active = TRUE'); } 
+    else if (statusFilter === 'inactive') { whereClauses.push('active = FALSE'); }
+    if (searchQuery) {
+        queryParams.push(`%${searchQuery}%`);
+        whereClauses.push(`(CAST(id AS TEXT) ILIKE $${paramIndex} OR first_name ILIKE $${paramIndex} OR username ILIKE $${paramIndex})`);
+        paramIndex++;
+    }
+    const whereString = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+    const totalQuery = `SELECT COUNT(*) FROM users ${whereString}`;
+    const totalResult = await query(totalQuery, queryParams);
+    const totalUsers = parseInt(totalResult.rows[0].count, 10);
+    const totalPages = Math.ceil(totalUsers / limit);
+    queryParams.push(limit);
+    queryParams.push(offset);
+    const usersQuery = `SELECT * FROM users ${whereString} ORDER BY ${safeSortBy} ${safeSortOrder} LIMIT $${paramIndex++} OFFSET $${paramIndex++}`;
+    const usersResult = await query(usersQuery, queryParams);
+    return { users: usersResult.rows, totalPages, currentPage: page, totalUsers };
 }
 
 export async function getCachedTracksCount() {
@@ -229,7 +245,7 @@ export async function completeBroadcastTask(taskId, report) {
 }
 
 export async function failBroadcastTask(taskId, error) {
-  await query(`UPDATE broadcast_tasks SET status = 'failed', report = $1 WHERE id = $2`, [{ error }, taskId]);
+    await query(`UPDATE broadcast_tasks SET status = 'failed', report = $1 WHERE id = $2`, [{ error }, taskId]);
 }
 
 export async function getAllBroadcastTasks() {
@@ -254,4 +270,39 @@ export async function updateBroadcastTask(taskId, task) {
      WHERE id = $6`,
     [message, audioPath, targetAudience, disableNotification, scheduledAt, taskId]
   );
+}
+
+// Эти функции были в вашем старом коде, восстанавливаю их
+export async function getReferralSourcesStats() {
+  const { rows } = await query(`SELECT referral_source, COUNT(*) as count FROM users WHERE referral_source IS NOT NULL GROUP BY referral_source ORDER BY count DESC`);
+  return rows.map(row => ({ source: row.referral_source, count: parseInt(row.count, 10) }));
+}
+
+export async function getRegistrationsByDate() {
+  const { rows } = await query(`SELECT TO_CHAR(created_at, 'YYYY-MM-DD') as date, COUNT(*) as count FROM users GROUP BY date ORDER BY date`);
+  return rows.reduce((acc, row) => ({ ...acc, [row.date]: parseInt(row.count, 10) }), {});
+}
+
+export async function getDownloadsByDate() {
+  const { rows } = await query(`SELECT TO_CHAR(downloaded_at, 'YYYY-MM-DD') as date, COUNT(*) as count FROM downloads_log GROUP BY date ORDER BY date`);
+  return rows.reduce((acc, row) => ({ ...acc, [row.date]: parseInt(row.count, 10) }), {});
+}
+
+export async function getLatestReviews(limit = 10) {
+  const { data } = await supabase.from('reviews').select('*').order('time', { ascending: false }).limit(limit);
+  return data || [];
+}
+
+export async function getUserActivityByDayHour(days = 30) {
+    const { rows } = await query(`
+        SELECT TO_CHAR(last_active, 'YYYY-MM-DD') AS day, EXTRACT(HOUR FROM last_active) AS hour, COUNT(*) AS count
+        FROM users WHERE last_active >= CURRENT_DATE - INTERVAL '${days} days'
+        GROUP BY day, hour ORDER BY day, hour
+    `);
+    const activity = {};
+    rows.forEach(row => {
+        if (!activity[row.day]) activity[row.day] = Array(24).fill(0);
+        activity[row.day][parseInt(row.hour, 10)] = parseInt(row.count, 10);
+    });
+    return activity;
 }
