@@ -1,4 +1,4 @@
-// index.js (ФИНАЛЬНАЯ ВЕРСИЯ СО ВСЕМИ ИСПРАВЛЕНИЯМИ)
+// index.js (ФИНАЛЬНАЯ ВЕРСИЯ СО ВСЕМИ ФУНКЦИЯМИ И ИМПОРТАМИ)
 
 import express from 'express';
 import session from 'express-session';
@@ -12,14 +12,18 @@ import pLimit from 'p-limit';
 import fs from 'fs';
 import cron from 'node-cron';
 
+// >>>>>>>> ИСПРАВЛЕННЫЙ БЛОК ИМПОРТОВ <<<<<<<<<<
 import { 
     pool, supabase, getUserById, resetDailyStats, getAllUsers, getPaginatedUsers, 
     getReferralSourcesStats, getDownloadsByDate, getRegistrationsByDate, 
     getActiveUsersByDate, getExpiringUsers, setPremium, updateUserField, 
     getLatestReviews, getUserActivityByDayHour, getDownloadsByUserId, getReferralsByUserId, 
     getCachedTracksCount, getActiveFreeUsers, getActivePremiumUsers,
-    createBroadcastTask, getPendingBroadcastTask, completeBroadcastTask, failBroadcastTask
+    createBroadcastTask, getPendingBroadcastTask, completeBroadcastTask, failBroadcastTask,
+    getAllBroadcastTasks, deleteBroadcastTask
 } from './db.js';
+// >>>>>>>> КОНЕЦ ИСПРАВЛЕННОГО БЛОКА <<<<<<<<<<
+
 import { bot } from './bot.js';
 import redisService from './services/redisClient.js';
 import { WEBHOOK_URL, PORT, SESSION_SECRET, ADMIN_ID, ADMIN_LOGIN, ADMIN_PASSWORD, WEBHOOK_PATH, STORAGE_CHANNEL_ID } from './config.js';
@@ -188,55 +192,41 @@ function setupExpress() {
         }
     });
     
-    app.get('/broadcast', requireAuth, (req, res) => { 
-        res.render('broadcast-form', { title: 'Рассылка', page: 'broadcast', error: null, success: null }); 
+    app.get('/broadcast-new', requireAuth, (req, res) => { 
+        res.render('broadcast-form', { title: 'Новая рассылка', page: 'broadcasts', error: null, success: null }); 
     });
 
-    // >>>>>>>> ПОЛНОСТЬЮ ИСПРАВЛЕННЫЙ РОУТ <<<<<<<<<<
-    app.post('/broadcast', requireAuth, upload.single('audio'), async (req, res) => {
+    app.get('/broadcasts', requireAuth, async (req, res) => {
+        const tasks = await getAllBroadcastTasks();
+        res.render('broadcasts', { title: 'Управление рассылками', page: 'broadcasts', tasks });
+    });
+
+    app.post('/broadcasts/delete', requireAuth, async (req, res) => {
+        const { taskId } = req.body;
+        await deleteBroadcastTask(taskId);
+        res.redirect('/broadcasts');
+    });
+
+    app.post('/broadcast-new', requireAuth, upload.single('audio'), async (req, res) => {
         const { message, targetAudience, scheduledAt, disable_notification, action } = req.body;
         const audioFile = req.file;
-        // Создаем объект с опциями для рендеринга, чтобы не повторяться
-        const renderOptions = { title: 'Рассылка', page: 'broadcast', success: null, error: null };
-
+        const renderOptions = { title: 'Новая рассылка', page: 'broadcasts', success: null, error: null };
         try {
             if (!message) {
-                renderOptions.error = 'Текст сообщения не может быть пустым.';
+                renderOptions.error = 'Текст не может быть пустым.';
                 return res.render('broadcast-form', renderOptions);
             }
-
-            const taskData = {
-                message,
-                audioPath: audioFile ? audioFile.path : null,
-                targetAudience,
-                disableNotification: !!disable_notification
-            };
-
+            const taskData = { message, audioPath: audioFile ? audioFile.path : null, targetAudience, disableNotification: !!disable_notification };
             if (action === 'preview') {
                 await runSingleBroadcast(taskData, [{ id: ADMIN_ID }]);
-                if (audioFile) fs.unlinkSync(audioFile.path); // Удаляем файл сразу после предпросмотра
+                if (audioFile) fs.unlinkSync(audioFile.path);
                 renderOptions.success = 'Предпросмотр отправлен вам в Telegram.';
                 return res.render('broadcast-form', renderOptions);
             }
-
-            if (scheduledAt) {
-                await createBroadcastTask({ ...taskData, scheduledAt: new Date(scheduledAt) });
-                renderOptions.success = `Рассылка успешно запланирована на ${new Date(scheduledAt).toLocaleString()}`;
-                return res.render('broadcast-form', renderOptions);
-            } else {
-                let users = [];
-                if (targetAudience === 'all') users = await getAllUsers(true);
-                else if (targetAudience === 'free_users') users = await getActiveFreeUsers();
-                else if (targetAudience === 'premium_users') users = await getActivePremiumUsers();
-                
-                renderOptions.success = `Рассылка запущена для ${users.length} пользователей. Отчет придет в Telegram.`;
-                res.render('broadcast-form', renderOptions);
-                
-                (async () => {
-                    await runSingleBroadcast(taskData, users);
-                    if (audioFile) fs.unlinkSync(audioFile.path);
-                })();
-            }
+            const scheduleTime = scheduledAt ? new Date(scheduledAt) : new Date(Date.now() + 5000);
+            await createBroadcastTask({ ...taskData, scheduledAt: scheduleTime });
+            renderOptions.success = scheduledAt ? `Рассылка успешно запланирована на ${scheduleTime.toLocaleString()}` : 'Рассылка запущена немедленно.';
+            res.render('broadcast-form', renderOptions);
         } catch (e) {
             console.error('Ошибка создания задачи рассылки:', e);
             renderOptions.error = 'Не удалось создать задачу.';
