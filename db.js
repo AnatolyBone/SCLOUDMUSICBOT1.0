@@ -238,6 +238,9 @@ export async function getActivePremiumUsers() {
 }
 
 // --- Функции для очереди рассылок ---
+// В КОНЕЦ ФАЙЛА db.js
+
+// --- Функции для очереди рассылок ---
 export async function createBroadcastTask(task) {
   const { message, audioPath, targetAudience, disableNotification, scheduledAt } = task;
   await query(
@@ -248,7 +251,6 @@ export async function createBroadcastTask(task) {
 }
 
 export async function getPendingBroadcastTask() {
-  // Находим одну задачу, готовую к отправке, и блокируем её для других воркеров
   const { rows } = await query(`
     UPDATE broadcast_tasks
     SET status = 'processing'
@@ -262,7 +264,7 @@ export async function getPendingBroadcastTask() {
     )
     RETURNING *;
   `);
-  return rows[0];
+  return rows[0] || null;
 }
 
 export async function completeBroadcastTask(taskId, report) {
@@ -271,6 +273,11 @@ export async function completeBroadcastTask(taskId, report) {
     [report, taskId]
   );
 }
+
+export async function failBroadcastTask(taskId, error) {
+    await query(`UPDATE broadcast_tasks SET status = 'failed', report = $1 WHERE id = $2`, [{ error }, taskId]);
+}
+
 // ДОБАВЬТЕ ЭТО В КОНЕЦ ФАЙЛА db.js
 
 export async function getCachedTracksCount() {
