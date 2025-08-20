@@ -1,9 +1,14 @@
 <% // views/broadcasts.ejs %>
+
 <%- contentFor('body') %>
+
 <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
   <h1 class="h2">Управление рассылками</h1>
-  <a href="/broadcast/new" class="btn btn-sm btn-primary"><i class="bi bi-plus-circle"></i> Создать новую</a>
+  <a href="/broadcast/new" class="btn btn-sm btn-primary">
+    <i class="bi bi-plus-circle"></i> Создать новую
+  </a>
 </div>
+
 <div class="table-responsive">
   <table class="table table-hover align-middle">
     <thead>
@@ -12,7 +17,7 @@
         <th>Статус</th>
         <th>Аудитория</th>
         <th>Сообщение</th>
-        <th>Запланировано на (ваше время)</th>
+        <th>Запланировано на</th>
         <th>Действия</th>
       </tr>
     </thead>
@@ -22,29 +27,33 @@
           <tr>
             <td><%= task.id %></td>
             <td>
-              <% if (task.status === 'pending') { %><span class="badge bg-warning">В ожидании</span><% } %>
-              <% if (task.status === 'processing') { %><span class="badge bg-info">В процессе</span><% } %>
+              <% if (task.status === 'pending') { %><span class="badge bg-warning text-dark">В ожидании</span><% } %>
+              <% if (task.status === 'processing') { %><span class="badge bg-info text-dark">В процессе</span><% } %>
               <% if (task.status === 'completed') { %><span class="badge bg-success">Завершена</span><% } %>
               <% if (task.status === 'failed') { %><span class="badge bg-danger">Ошибка</span><% } %>
             </td>
-            <td><%= task.target_audience %></td>
-            <td class="text-truncate" style="max-width: 300px;"><%= task.message %></td>
-            <td><%= new Date(task.scheduled_at).toLocaleString('ru-RU') %></td>
+            <td><%= task.target_audience.replace('_', ' ') %></td>
+            <td class="text-truncate" style="max-width: 300px;" title="<%= task.message %>"><%= task.message %></td>
+            <td><%= new Date(task.scheduled_at).toLocaleString('ru-RU', { dateStyle: 'short', timeStyle: 'short' }) %></td>
             <td>
               <% if (task.status === 'pending') { %>
                 <div class="d-flex gap-2">
                   <a href="/broadcast/edit/<%= task.id %>" class="btn btn-sm btn-outline-primary">Ред.</a>
-                  <form method="POST" action="/broadcast/delete" onsubmit="return confirm('Удалить эту рассылку?')">
+                  <form method="POST" action="/broadcast/delete" onsubmit="return confirm('Удалить эту запланированную рассылку?')">
                     <input type="hidden" name="taskId" value="<%= task.id %>">
                     <button type="submit" class="btn btn-sm btn-outline-danger">Удалить</button>
                   </form>
                 </div>
-              <% } else { %> <span class="text-muted">—</span> <% } %>
+              <% } else { %>
+                <span class="text-muted">—</span>
+              <% } %>
             </td>
           </tr>
         <% }) %>
       <% } else { %>
-        <tr><td colspan="6" class="text-center text-muted py-4">Нет запланированных рассылок.</td></tr>
+        <tr>
+          <td colspan="6" class="text-center text-muted py-4">Нет запланированных рассылок.</td>
+        </tr>
       <% } %>
     </tbody>
   </table>
