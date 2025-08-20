@@ -224,6 +224,53 @@ export async function getReferralsByUserId(userId) {
   );
   return rows;
 }
+// В КОНЕЦ ФАЙЛА db.js
+
+// --- Функции для сегментации рассылки ---
+export async function getActiveFreeUsers() {
+  const { rows } = await query(`SELECT id FROM users WHERE active = TRUE AND premium_limit <= 5`);
+  return rows;
+}
+
+export async function getActivePremiumUsers() {
+  const { rows } = await query(`SELECT id FROM users WHERE active = TRUE AND premium_limit > 5`);
+  return rows;
+}
+
+// --- Функции для очереди рассылок ---
+export async function createBroadcastTask(task) {
+  const { message, audioPath, targetAudience, disableNotification, scheduledAt } = task;
+  await query(
+    `INSERT INTO broadcast_tasks (message, audio_path, target_audience, disable_notification, scheduled_at, status)
+     VALUES ($1, $2, $3, $4, $5, 'pending')`,
+    [message, audioPath, targetAudience, disableNotification, scheduledAt]
+  );
+}
+
+export async function getPendingBroadcastTask() {
+  // Находим одну задачу, готовую к отправке, и блокируем её для других воркеров
+  const { rows } = await query(`
+    UPDATE broadcast_tasks
+    SET status = 'processing'
+    WHERE id = (
+      SELECT id
+      FROM broadcast_tasks
+      WHERE status = 'pending' AND scheduled_at <= NOW()
+      ORDER BY scheduled_at
+      LIMIT 1
+      FOR UPDATE SKIP LOCKED
+    )
+    RETURNING *;
+  `);
+  return rows[0];
+}
+
+export async function completeBroadcastTask(taskId, report) {
+  await query(
+    `UPDATE broadcast_tasks SET status = 'completed', report = $1, completed_at = NOW() WHERE id = $2`,
+    [report, taskId]
+  );
+}
 // ДОБАВЬТЕ ЭТО В КОНЕЦ ФАЙЛА db.js
 
 export async function getCachedTracksCount() {
