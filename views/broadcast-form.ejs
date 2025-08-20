@@ -1,71 +1,53 @@
-<% // views/broadcast-form.ejs (УЛУЧШЕННАЯ ВЕРСЯ) %>
+<% // views/broadcast-form.ejs (ФИНАЛЬНАЯ ВЕРСЯ) %>
 
 <%- contentFor('body') %>
 
+<h1 class="h3 mb-3">Создать рассылку</h1>
+
+<% if (success) { %><div class="alert alert-success"><%= success %></div><% } %>
+<% if (error) { %><div class="alert alert-danger"><%= error %></div><% } %>
+
 <div class="card shadow-sm">
-  <div class="card-header d-flex align-items-center justify-content-between">
-    <span class="h5 mb-0">📢 Рассылка</span>
-    <a href="/dashboard" class="btn btn-sm btn-outline-secondary">Назад</a>
-  </div>
   <div class="card-body">
-    <% if (error) { %>
-      <div class="alert alert-danger" data-autohide><%= error %></div>
-    <% } %>
-    <% if (success) { %>
-      <div class="alert alert-success" data-autohide><%= success %></div>
-    <% } %>
-    
-    <form method="post" action="/broadcast" enctype="multipart/form-data">
-      <!-- Поле для текста сообщения -->
+    <form method="POST" action="/broadcast" enctype="multipart/form-data">
       <div class="mb-3">
-        <label for="message" class="form-label">Текст сообщения (поддерживает Markdown: *жирный*, _курсив_)</label>
-        <textarea name="message" id="message" class="form-control" rows="5" placeholder="Сообщение для пользователей..." required></textarea>
+        <label for="message" class="form-label">Текст сообщения (Markdown: *жирный*, _курсив_)</label>
+        <textarea name="message" id="message" class="form-control" rows="5" required></textarea>
       </div>
 
-      <!-- Поле для загрузки аудиофайла -->
-      <div class="mb-3">
-        <label for="audio" class="form-label">Аудио-файл (опционально)</label>
-        <input type="file" name="audio" id="audio" accept="audio/*" class="form-control" />
-      </div>
-
-      <!-- НОВЫЕ ПОЛЯ: Сегментация и опции -->
       <div class="row">
-        <div class="col-md-8 mb-3">
+        <div class="col-md-6 mb-3">
+          <label for="audio" class="form-label">Аудио-файл (опционально)</label>
+          <input type="file" name="audio" id="audio" accept="audio/*" class="form-control" />
+        </div>
+        <div class="col-md-6 mb-3">
           <label for="targetAudience" class="form-label">Целевая аудитория</label>
           <select class="form-select" id="targetAudience" name="targetAudience">
-            <option value="all" selected>Всем активным пользователям</option>
+            <option value="all" selected>Всем активным</option>
             <option value="free_users">Только с тарифом Free</option>
             <option value="premium_users">Только с платными тарифами</option>
           </select>
         </div>
-        <div class="col-md-4 mb-3 d-flex align-items-end">
-          <div class="form-check">
-            <input class="form-check-input" type="checkbox" name="disable_notification" id="disable_notification">
-            <label class="form-check-label" for="disable_notification">
-              Отправить без звука
-            </label>
+      </div>
+
+      <div class="row align-items-end">
+          <div class="col-md-6 mb-3">
+              <label for="scheduledAt" class="form-label">Запланировать на (необязательно)</label>
+              <input type="datetime-local" class="form-control" id="scheduledAt" name="scheduledAt">
+              <div class="form-text">Если оставить пустым, отправка будет немедленной.</div>
           </div>
-        </div>
+          <div class="col-md-6 mb-3 d-flex align-items-center">
+              <div class="form-check">
+                  <input class="form-check-input" type="checkbox" name="disable_notification" id="disable_notification">
+                  <label class="form-check-label" for="disable_notification">Тихая рассылка (без звука)</label>
+              </div>
+          </div>
       </div>
       
-      <!-- НОВЫЕ КНОПКИ: Предпросмотр и Отправка -->
-      <div class="d-flex gap-2">
-        <button type="submit" name="action" value="preview" class="btn btn-outline-secondary">
-          <i class="bi bi-eye"></i> Предпросмотр (отправить мне)
-        </button>
-        <button type="submit" name="action" value="send" class="btn btn-primary w-100" onclick="return confirm('Вы уверены, что хотите запустить рассылку?')">
-          <i class="bi bi-send"></i> Отправить всем
-        </button>
+      <div class="d-flex flex-wrap gap-2">
+        <button type="submit" name="action" value="preview" class="btn btn-outline-secondary">Предпросмотр (мне)</button>
+        <button type="submit" name="action" value="send" class="btn btn-primary flex-grow-1" onclick="return confirm('Вы уверены, что хотите запустить/запланировать эту рассылку?')">🚀 Отправить / Запланировать</button>
       </div>
     </form>
   </div>
 </div>
-
-<!-- Скрипт для автоматического скрытия уведомлений -->
-<script>
-  document.querySelectorAll('.alert[data-autohide]').forEach(el => {
-    setTimeout(() => {
-      el.classList.add('d-none');
-    }, 5000);
-  });
-</script>
