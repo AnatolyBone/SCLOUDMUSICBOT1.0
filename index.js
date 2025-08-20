@@ -1,4 +1,4 @@
-// index.js (ФИНАЛЬНАЯ ВЕРСИЯ СО ВСЕМИ ФУНКЦИЯМИ И ИМПОРТАМИ)
+// index.js (ФИНАЛЬНАЯ ВЕРСИЯ СО ВСЕМИ ИСПРАВЛЕНИЯМИ)
 
 import express from 'express';
 import session from 'express-session';
@@ -12,7 +12,6 @@ import pLimit from 'p-limit';
 import fs from 'fs';
 import cron from 'node-cron';
 
-// >>>>>>>> ИСПРАВЛЕННЫЙ БЛОК ИМПОРТОВ <<<<<<<<<<
 import { 
     pool, supabase, getUserById, resetDailyStats, getAllUsers, getPaginatedUsers, 
     getReferralSourcesStats, getDownloadsByDate, getRegistrationsByDate, 
@@ -21,8 +20,6 @@ import {
     getCachedTracksCount, getActiveFreeUsers, getActivePremiumUsers,
     createBroadcastTask, getPendingBroadcastTask, completeBroadcastTask, failBroadcastTask
 } from './db.js';
-// >>>>>>>> КОНЕЦ ИСПРАВЛЕННОГО БЛОКА <<<<<<<<<<
-
 import { bot } from './bot.js';
 import redisService from './services/redisClient.js';
 import { WEBHOOK_URL, PORT, SESSION_SECRET, ADMIN_ID, ADMIN_LOGIN, ADMIN_PASSWORD, WEBHOOK_PATH, STORAGE_CHANNEL_ID } from './config.js';
@@ -195,26 +192,46 @@ function setupExpress() {
         res.render('broadcast-form', { title: 'Рассылка', page: 'broadcast', error: null, success: null }); 
     });
 
+    // >>>>>>>> ПОЛНОСТЬЮ ИСПРАВЛЕННЫЙ РОУТ <<<<<<<<<<
     app.post('/broadcast', requireAuth, upload.single('audio'), async (req, res) => {
+        const { message, targetAudience, scheduledAt, disable_notification, action } = req.body;
+        const audioFile = req.file;
+        // Создаем объект с опциями для рендеринга, чтобы не повторяться
+        const renderOptions = { title: 'Рассылка', page: 'broadcast', success: null, error: null };
+
         try {
-            const { message, targetAudience, scheduledAt, disable_notification, action } = req.body;
-            const audioFile = req.file;
-            if (!message) return res.render('broadcast-form', { error: 'Текст не может быть пустым.' });
-            const taskData = { message, audioPath: audioFile ? audioFile.path : null, targetAudience, disableNotification: !!disable_notification };
+            if (!message) {
+                renderOptions.error = 'Текст сообщения не может быть пустым.';
+                return res.render('broadcast-form', renderOptions);
+            }
+
+            const taskData = {
+                message,
+                audioPath: audioFile ? audioFile.path : null,
+                targetAudience,
+                disableNotification: !!disable_notification
+            };
+
             if (action === 'preview') {
                 await runSingleBroadcast(taskData, [{ id: ADMIN_ID }]);
-                if (audioFile) fs.unlinkSync(audioFile.path);
-                return res.render('broadcast-form', { success: 'Предпросмотр отправлен вам в Telegram.' });
+                if (audioFile) fs.unlinkSync(audioFile.path); // Удаляем файл сразу после предпросмотра
+                renderOptions.success = 'Предпросмотр отправлен вам в Telegram.';
+                return res.render('broadcast-form', renderOptions);
             }
+
             if (scheduledAt) {
                 await createBroadcastTask({ ...taskData, scheduledAt: new Date(scheduledAt) });
-                return res.render('broadcast-form', { success: `Рассылка успешно запланирована на ${new Date(scheduledAt).toLocaleString()}` });
+                renderOptions.success = `Рассылка успешно запланирована на ${new Date(scheduledAt).toLocaleString()}`;
+                return res.render('broadcast-form', renderOptions);
             } else {
                 let users = [];
                 if (targetAudience === 'all') users = await getAllUsers(true);
                 else if (targetAudience === 'free_users') users = await getActiveFreeUsers();
                 else if (targetAudience === 'premium_users') users = await getActivePremiumUsers();
-                res.render('broadcast-form', { success: `Рассылка запущена для ${users.length} пользователей. Отчет придет в Telegram.` });
+                
+                renderOptions.success = `Рассылка запущена для ${users.length} пользователей. Отчет придет в Telegram.`;
+                res.render('broadcast-form', renderOptions);
+                
                 (async () => {
                     await runSingleBroadcast(taskData, users);
                     if (audioFile) fs.unlinkSync(audioFile.path);
@@ -222,7 +239,8 @@ function setupExpress() {
             }
         } catch (e) {
             console.error('Ошибка создания задачи рассылки:', e);
-            res.render('broadcast-form', { error: 'Не удалось создать задачу.' });
+            renderOptions.error = 'Не удалось создать задачу.';
+            res.render('broadcast-form', renderOptions);
         }
     });
 
@@ -303,7 +321,6 @@ async function runSingleBroadcast(task, users, taskId = null) {
 function startBroadcastWorker() {
     console.log('[Broadcast Worker] Планировщик запущен.');
     cron.schedule('* * * * *', async () => {
-        // console.log('[Broadcast Worker] Проверяю наличие задач...'); // Можно раскомментировать для отладки
         const task = await getPendingBroadcastTask();
         if (task) {
             try {
