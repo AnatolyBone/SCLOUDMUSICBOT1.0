@@ -1,28 +1,24 @@
 <% // views/broadcast-form.ejs %>
 <%- contentFor('body') %>
-
 <% const isEditing = typeof task !== 'undefined' && task; %>
-
 <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
   <h1 class="h2"><%= isEditing ? 'Редактировать рассылку' : 'Создать рассылку' %></h1>
   <a href="/broadcasts" class="btn btn-sm btn-outline-secondary"><i class="bi bi-arrow-left"></i> Назад к списку</a>
 </div>
-
 <% if (success) { %><div class="alert alert-success"><%= success %></div><% } %>
 <% if (error) { %><div class="alert alert-danger"><%= error %></div><% } %>
-
 <div class="card shadow-sm">
   <div class="card-body">
     <form id="broadcastForm" method="POST" action="<%= isEditing ? '/broadcast/edit/' + task.id : '/broadcast/new' %>" enctype="multipart/form-data">
       <div class="mb-3">
-        <label for="message" class="form-label">Текст сообщения (Markdown: *жирный*, _курсив_)</label>
+        <label for="message" class="form-label">Текст сообщения</label>
         <textarea name="message" id="message" class="form-control" rows="5" required><%= isEditing ? task.message : '' %></textarea>
       </div>
       <div class="row">
         <div class="col-md-6 mb-3">
-          <label for="audio" class="form-label">Аудио-файл (<%= isEditing ? 'Заменить' : 'Прикрепить' %>)</label>
+          <label for="audio" class="form-label">Аудио-файл</label>
           <input type="file" name="audio" id="audio" accept="audio/*" class="form-control" />
-          <% if (isEditing && task.audio_path) { %><div class="form-text">Сейчас прикреплен файл. Новая загрузка заменит его.</div><% } %>
+          <% if (isEditing && task.audio_path) { %><div class="form-text">Прикреплен файл. Загрузка нового заменит его.</div><% } %>
         </div>
         <div class="col-md-6 mb-3">
           <label for="targetAudience" class="form-label">Аудитория</label>
@@ -34,36 +30,32 @@
         </div>
       </div>
       <div class="row align-items-end">
-          <div class="col-md-6 mb-3">
-              <label for="localScheduledAt" class="form-label">Запланировать на (ваше локальное время)</label>
-              <input type="datetime-local" class="form-control" id="localScheduledAt" name="localScheduledAt" value="<%= isEditing && task.scheduled_at ? new Date(new Date(task.scheduled_at).getTime() - (new Date().getTimezoneOffset() * 60000)).toISOString().slice(0, 16) : '' %>">
-              <input type="hidden" name="scheduledAt" id="scheduledAt">
-              <div class="form-text">Если оставить пустым, отправка будет немедленной.</div>
+        <div class="col-md-6 mb-3">
+          <label for="localScheduledAt" class="form-label">Запланировать на (ваше локальное время)</label>
+          <input type="datetime-local" class="form-control" id="localScheduledAt" value="<%= isEditing && task.scheduled_at ? new Date(new Date(task.scheduled_at).getTime() - (new Date().getTimezoneOffset() * 60000)).toISOString().slice(0, 16) : '' %>">
+          <input type="hidden" name="scheduledAt" id="scheduledAt">
+          <div class="form-text">Если оставить пустым, отправка будет немедленной.</div>
+        </div>
+        <div class="col-md-6 mb-3 d-flex align-items-center">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" name="disable_notification" id="disable_notification" <%= (isEditing && task.disable_notification) ? 'checked' : '' %>>
+            <label class="form-check-label" for="disable_notification">Тихая рассылка</label>
           </div>
-          <div class="col-md-6 mb-3 d-flex align-items-center">
-              <div class="form-check">
-                  <input class="form-check-input" type="checkbox" name="disable_notification" id="disable_notification" <%= (isEditing && task.disable_notification) ? 'checked' : '' %>>
-                  <label class="form-check-label" for="disable_notification">Тихая рассылка</label>
-              </div>
-          </div>
+        </div>
       </div>
       <div class="d-flex flex-wrap gap-2">
-        <% if (!isEditing) { %>
-          <button type="submit" name="action" value="preview" class="btn btn-outline-secondary">Предпросмотр (мне)</button>
-        <% } %>
-        <button type="submit" name="action" value="send" class="btn btn-primary flex-grow-1" onclick="return confirm('Вы уверены?')">🚀 <%= isEditing ? 'Сохранить изменения' : 'Отправить / Запланировать' %></button>
+        <% if (!isEditing) { %><button type="submit" name="action" value="preview" class="btn btn-outline-secondary">Предпросмотр</button><% } %>
+        <button type="submit" name="action" value="send" class="btn btn-primary flex-grow-1" onclick="return confirm('Вы уверены?')">🚀 <%= isEditing ? 'Сохранить' : 'Отправить/Запланировать' %></button>
       </div>
     </form>
   </div>
 </div>
-
 <script>
   document.getElementById('broadcastForm').addEventListener('submit', function(event) {
     const localTimeInput = document.getElementById('localScheduledAt');
     const utcTimeInput = document.getElementById('scheduledAt');
     if (localTimeInput.value) {
-      const localDate = new Date(localTimeInput.value);
-      utcTimeInput.value = localDate.toISOString();
+      utcTimeInput.value = new Date(localTimeInput.value).toISOString();
     }
   });
 </script>
