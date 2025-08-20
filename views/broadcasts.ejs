@@ -29,7 +29,7 @@
             </td>
             <td><%= task.target_audience.replace('_', ' ') %></td>
             <td class="text-truncate" style="max-width: 300px;" title="<%= task.message %>"><%= task.message %></td>
-            <td><%= new Date(task.scheduled_at).toLocaleString('ru-RU') %></td>
+            <td><%= new Date(task.scheduled_at).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', dateStyle: 'short', timeStyle: 'short' }) %></td>
             <td>
               <% if (task.status === 'pending') { %>
                 <div class="d-flex gap-2">
