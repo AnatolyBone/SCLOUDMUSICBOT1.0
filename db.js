@@ -277,7 +277,18 @@ export async function completeBroadcastTask(taskId, report) {
 export async function failBroadcastTask(taskId, error) {
     await query(`UPDATE broadcast_tasks SET status = 'failed', report = $1 WHERE id = $2`, [{ error }, taskId]);
 }
+// В КОНЕЦ ФАЙЛА db.js
 
+export async function getAllBroadcastTasks() {
+  const { rows } = await query(`
+    SELECT * FROM broadcast_tasks ORDER BY scheduled_at DESC
+  `);
+  return rows;
+}
+
+export async function deleteBroadcastTask(taskId) {
+  await query(`DELETE FROM broadcast_tasks WHERE id = $1`, [taskId]);
+}
 // ДОБАВЬТЕ ЭТО В КОНЕЦ ФАЙЛА db.js
 
 export async function getCachedTracksCount() {
