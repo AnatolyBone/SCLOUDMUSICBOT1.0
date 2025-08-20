@@ -1,4 +1,4 @@
-// index.js (ФИНАЛЬНАЯ ВЕРСИЯ СО ВСЕМИ ФУНКЦИЯМИ И ИМПОРТАМИ)
+// index.js (ФИНАЛЬНАЯ ВЕРСИЯ - ПОЛНАЯ СИНХРОНИЗАЦИЯ)
 
 import express from 'express';
 import session from 'express-session';
@@ -20,11 +20,11 @@ import {
     getLatestReviews, getUserActivityByDayHour, getDownloadsByUserId, getReferralsByUserId, 
     getCachedTracksCount, getActiveFreeUsers, getActivePremiumUsers,
     createBroadcastTask, getPendingBroadcastTask, completeBroadcastTask, failBroadcastTask,
-    getAllBroadcastTasks, deleteBroadcastTask, getBroadcastTaskById, updateBroadcastTask
+    getAllBroadcastTasks, deleteBroadcastTask, getBroadcastTaskById, updateBroadcastTask, logEvent
 } from './db.js';
 import { bot } from './bot.js';
 import redisService from './services/redisClient.js';
-import { WEBHOOK_URL, PORT, SESSION_SECRET, ADMIN_ID, ADMIN_LOGIN, ADMIN_PASSWORD, WEBHOOK_PATH, STORAGE_CHANNEL_ID } from './config.js';
+import { WEBHOOK_URL, PORT, SESSION_SECRET, ADMIN_ID, ADMIN_LOGIN, ADMIN_PASSWORD, WEBHOOK_PATH, STORAGE_CHANNEL_ID, CHANNEL_USERNAME } from './config.js';
 import { loadTexts } from './config/texts.js';
 import { downloadQueue } from './services/downloadManager.js';
 
@@ -221,7 +221,7 @@ function setupExpress() {
             const audioFile = req.file;
             const renderOptions = { title: isEditing ? 'Редактировать рассылку' : 'Новая рассылка', page: 'broadcasts', success: null, error: null, task: isEditing ? await getBroadcastTaskById(taskId) : undefined };
             if (!message) {
-                renderOptions.error = 'Текст не может быть пустым.';
+                renderOptions.error = 'Текст сообщения не может быть пустым.';
                 return res.render('broadcast-form', renderOptions);
             }
             const taskData = {
@@ -236,8 +236,7 @@ function setupExpress() {
                 renderOptions.success = 'Предпросмотр отправлен вам в Telegram.';
                 return res.render('broadcast-form', renderOptions);
             }
-            // Если время не указано, отправляем немедленно, иначе - планируем
-            const scheduleTime = scheduledAt ? new Date(scheduledAt) : new Date();
+            const scheduleTime = scheduledAt ? new Date(scheduledAt) : new Date(Date.now() + 5000);
             if (isEditing) {
                 await updateBroadcastTask(taskId, { ...taskData, scheduledAt: scheduleTime });
             } else {
