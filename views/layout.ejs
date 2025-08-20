@@ -21,15 +21,15 @@
         <span class="navbar-toggler-icon"></span>
       </button>
       <div class="collapse navbar-collapse" id="nav">
-        <ul class="navbar-nav me-auto">
-          <li class="nav-item"><a class="nav-link <%= page==='dashboard' ? 'active' : '' %>" href="/dashboard">Дашборд</a></li>
-          <li class="nav-item"><a class="nav-link <%= page==='users' ? 'active' : '' %>" href="/users">Пользователи</a></li>
-          <!-- ИЗМЕНЕННЫЙ ПУНКТ МЕНЮ -->
-<li class="nav-item">
-  <a class="nav-link <%= page==='broadcasts' ? 'active' : '' %>" href="/broadcasts">Рассылки</a>
-</li>
-          <li class="nav-item"><a class="nav-link <%= page==='expiring-users' ? 'active' : '' %>" href="/expiring-users">Истекающие</a></li>
-        </ul>
+        <!-- views/layout.ejs (фрагмент) -->
+<ul class="navbar-nav me-auto">
+  <li class="nav-item"><a class="nav-link <%= page==='dashboard' ? 'active' : '' %>" href="/dashboard">Дашборд</a></li>
+  <li class="nav-item"><a class="nav-link <%= page==='users' ? 'active' : '' %>" href="/users">Пользователи</a></li>
+  <li class="nav-item">
+    <a class="nav-link <%= page==='broadcasts' ? 'active' : '' %>" href="/broadcasts">Рассылки</a>
+  </li>
+  <li class="nav-item"><a class="nav-link <%= page==='expiring-users' ? 'active' : '' %>" href="/expiring-users">Истекающие</a></li>
+</ul>
         <div class="d-flex gap-2">
           <!-- Переключение темы -->
           <button id="themeToggle" class="btn btn-sm btn-outline-secondary" type="button">
