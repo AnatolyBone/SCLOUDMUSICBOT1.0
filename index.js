@@ -119,97 +119,67 @@ function setupExpress() {
 // >>>>> ЗАМЕНИТЕ ВЕСЬ БЛОК app.get('/dashboard', ...) НА ЭТОТ <<<<<
 
 app.get('/dashboard', requireAuth, async (req, res) => {
-    try {
-        const period = req.query.period || 30; // Берем период из URL, по умолчанию 30 дней
-        
-        let storageStatus = { available: false, error: '' };
-        if (STORAGE_CHANNEL_ID) {
-            try {
-                await bot.telegram.getChat(STORAGE_CHANNEL_ID);
-                storageStatus.available = true;
-            } catch (e) {
-                storageStatus.error = e.message;
-                console.error("[Dashboard] Ошибка проверки канала-хранилища:", e.message);
+        try {
+            const period = req.query.period || 30;
+            let storageStatus = { available: false, error: '' };
+            if (STORAGE_CHANNEL_ID) {
+                try {
+                    await bot.telegram.getChat(STORAGE_CHANNEL_ID);
+                    storageStatus.available = true;
+                } catch (e) {
+                    storageStatus.error = e.message;
+                }
             }
+            
+            const [users, cachedTracksCount, usersByTariff, topSources, dailyStats, weekdayActivity] = await Promise.all([
+                getAllUsers(true), 
+                getCachedTracksCount(),
+                getUsersCountByTariff(),
+                getTopReferralSources(),
+                getDailyStats(period),
+                getActivityByWeekday()
+            ]);
+            
+            const stats = {
+                total_users: users.length,
+                active_users: users.filter(u => u.active).length,
+                total_downloads: users.reduce((sum, u) => sum + (u.total_downloads || 0), 0),
+                active_today: users.filter(u => u.last_active && new Date(u.last_active).toDateString() === new Date().toDateString()).length,
+                queueWaiting: downloadQueue.size,
+                queueActive: downloadQueue.active,
+                cachedTracksCount: cachedTracksCount,
+                usersByTariff: usersByTariff,
+                topSources: topSources
+            };
+
+            const chartDataCombined = {
+                labels: dailyStats.map(d => new Date(d.day).toLocaleDateString('ru-RU', {day: '2-digit', month: '2-digit'})),
+                datasets: [
+                    { label: 'Регистрации', data: dailyStats.map(d => d.registrations), borderColor: '#198754', tension: 0.1, fill: false },
+                    { label: 'Активные юзеры', data: dailyStats.map(d => d.active_users), borderColor: '#0d6efd', tension: 0.1, fill: false },
+                    { label: 'Загрузки', data: dailyStats.map(d => d.downloads), borderColor: '#fd7e14', tension: 0.1, fill: false }
+                ]
+            };
+
+            const chartDataTariffs = {
+                labels: Object.keys(usersByTariff),
+                datasets: [{ data: Object.values(usersByTariff), backgroundColor: ['#6c757d', '#17a2b8', '#ffc107', '#007bff', '#dc3545'] }]
+            };
+
+            const chartDataWeekday = {
+                labels: weekdayActivity.map(d => d.weekday.trim()),
+                datasets: [{ label: 'Загрузки', data: weekdayActivity.map(d => d.count), backgroundColor: 'rgba(13, 110, 253, 0.5)' }]
+            };
+
+            res.render('dashboard', { 
+                title: 'Дашборд', page: 'dashboard', stats, storageStatus, period,
+                chartDataCombined, chartDataTariffs, chartDataWeekday
+            });
+        } catch (error) {
+            console.error("Ошибка дашборда:", error);
+            res.status(500).send("Ошибка сервера");
         }
-        
-        // Запускаем все запросы к базе данных параллельно для максимальной скорости
-        const [
-            users,
-            cachedTracksCount,
-            usersByTariff,
-            topSources,
-            dailyStats,
-            weekdayActivity
-        ] = await Promise.all([
-            getAllUsers(true),
-            getCachedTracksCount(),
-            getUsersCountByTariff(),
-            getTopReferralSources(),
-            getDailyStats(period),
-            getActivityByWeekday()
-        ]);
-        
-        // Собираем все метрики в один удобный объект
-        const stats = {
-            total_users: users.length,
-            active_users: users.filter(u => u.active).length,
-            total_downloads: users.reduce((sum, u) => sum + (u.total_downloads || 0), 0),
-            active_today: users.filter(u => u.last_active && new Date(u.last_active).toDateString() === new Date().toDateString()).length,
-            queueWaiting: downloadQueue.size,
-            queueActive: downloadQueue.active,
-            cachedTracksCount: cachedTracksCount,
-            usersByTariff: usersByTariff,
-            topSources: topSources
-        };
-        
-        // Готовим данные для Графика 1: Динамика метрик
-        const chartDataCombined = {
-            labels: dailyStats.map(d => new Date(d.day).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })),
-            datasets: [
-                { label: 'Регистрации', data: dailyStats.map(d => d.registrations), borderColor: '#198754', tension: 0.1, fill: false },
-                { label: 'Активные юзеры', data: dailyStats.map(d => d.active_users), borderColor: '#0d6efd', tension: 0.1, fill: false },
-                { label: 'Загрузки', data: dailyStats.map(d => d.downloads), borderColor: '#fd7e14', tension: 0.1, fill: false }
-            ]
-        };
-        
-        // Готовим данные для Графика 2: Распределение по тарифам
-        const chartDataTariffs = {
-            labels: Object.keys(usersByTariff),
-            datasets: [{
-                data: Object.values(usersByTariff),
-                backgroundColor: ['#6c757d', '#17a2b8', '#ffc107', '#007bff'] // Цвета для Free, Plus, Pro, Unlimited
-            }]
-        };
-        
-        // Готовим данные для Графика 3: Активность по дням недели
-        const chartDataWeekday = {
-            labels: weekdayActivity.map(d => d.weekday.trim()),
-            datasets: [{
-                label: 'Загрузки',
-                data: weekdayActivity.map(d => d.count),
-                backgroundColor: 'rgba(13, 110, 253, 0.5)',
-                borderColor: 'rgba(13, 110, 253, 1)',
-                borderWidth: 1
-            }]
-        };
-        
-        // Рендерим шаблон, передавая все подготовленные данные
-        res.render('dashboard', {
-            title: 'Дашборд',
-            page: 'dashboard',
-            stats,
-            storageStatus,
-            period,
-            chartDataCombined,
-            chartDataTariffs,
-            chartDataWeekday
-        });
-    } catch (error) {
-        console.error("Ошибка дашборда:", error);
-        res.status(500).send("Ошибка сервера");
-    }
-});
+    });
 
     app.get('/users', requireAuth, async (req, res) => {
         try {
