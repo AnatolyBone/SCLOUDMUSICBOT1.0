@@ -1,10 +1,10 @@
-<% // views/dashboard.ejs (ФИНАЛЬНАЯ ВЕРСЯ СО ВСЕМ) %>
+<% // views/dashboard.ejs (ФИНАЛЬНАЯ ВЕРСИЯ СО ВСЕМИ КАРТОЧКАМИ И ГРАФИКАМИ) %>
 
 <%- contentFor('styles') %>
 <style>
   .card-metric { transition: transform 0.2s; }
   .card-metric:hover { transform: translateY(-5px); }
-  .chart-container { position: relative; height: 300px; width: 100%; }
+  .chart-container { position: relative; width: 100%; }
 </style>
 
 <%- contentFor('body') %>
@@ -80,7 +80,7 @@
 <!-- ГРАФИКИ -->
 <div class="card shadow-sm mb-4">
   <div class="card-header">Динамика метрик (за <%= period %> дней)</div>
-  <div class="card-body chart-container">
+  <div class="card-body chart-container" style="height: 350px;">
     <canvas id="mainChart"></canvas>
   </div>
 </div>
@@ -109,27 +109,35 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
   document.addEventListener('DOMContentLoaded', () => {
+    // Инициализация всплывающих подсказок (для статуса систем)
     new bootstrap.Tooltip(document.body, { selector: "[data-bs-toggle='tooltip']" });
+
+    // Функция-помощник для отрисовки графиков
+    function drawChart(canvasId, chartData, chartType, options = {}) {
+        const ctx = document.getElementById(canvasId);
+        if (ctx && chartData && chartData.labels && chartData.labels.length > 0) {
+            new Chart(ctx, { type: chartType, data: chartData, options: options });
+        } else {
+            console.warn(`Нет данных для графика #${canvasId}`);
+        }
+    }
+
+    const commonLineBarOptions = { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true } } };
+    
     // График 1: Динамика
-    const chartDataCombined = <%- JSON.stringify(locals.chartDataCombined || {}) %>;
-    if (chartDataCombined.labels?.length) {
-      new Chart(document.getElementById('mainChart'), {
-        type: 'line', data: chartDataCombined, options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true } } }
-      });
-    }
+    drawChart('mainChart', <%- JSON.stringify(locals.chartDataCombined || {}) %>, 'line', commonLineBarOptions);
+    
     // График 2: Тарифы
-    const chartDataTariffs = <%- JSON.stringify(locals.chartDataTariffs || {}) %>;
-    if (chartDataTariffs.labels?.length) {
-        new Chart(document.getElementById('tariffsChart'), {
-            type: 'doughnut', data: chartDataTariffs, options: { responsive: true, maintainAspectRatio: true, plugins: { legend: { position: 'top' } } }
-        });
-    }
+    drawChart('tariffsChart', <%- JSON.stringify(locals.chartDataTariffs || {}) %>, 'doughnut', { 
+        responsive: true, 
+        maintainAspectRatio: true,
+        plugins: { legend: { position: 'top' } } 
+    });
+    
     // График 3: Дни недели
-    const chartDataWeekday = <%- JSON.stringify(locals.chartDataWeekday || {}) %>;
-    if (chartDataWeekday.labels?.length) {
-        new Chart(document.getElementById('weekdayChart'), {
-            type: 'bar', data: chartDataWeekday, options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true } }, plugins: { legend: { display: false } } }
-        });
-    }
+    drawChart('weekdayChart', <%- JSON.stringify(locals.chartDataWeekday || {}) %>, 'bar', { 
+        ...commonLineBarOptions, 
+        plugins: { legend: { display: false } } 
+    });
   });
 </script>
