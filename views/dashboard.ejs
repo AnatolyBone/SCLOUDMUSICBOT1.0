@@ -1,4 +1,4 @@
-<% // views/dashboard.ejs (ФИНАЛЬНАЯ ВЕРСИЯ СО ВСЕМИ КАРТОЧКАМИ И ГРАФИКАМИ) %>
+<% // views/dashboard.ejs (ФИНАЛЬНАЯ ВЕРСИЯ) %>
 
 <%- contentFor('styles') %>
 <style>
@@ -38,7 +38,7 @@
       <div class="card-body">
         <ul class="list-group list-group-flush">
           <li class="list-group-item d-flex justify-content-between align-items-center px-0"><span>Очередь загрузок</span><span class="badge bg-primary rounded-pill"><%= stats.queueWaiting || 0 %> в ож. / <%= stats.queueActive || 0 %> в раб.</span></li>
-          <li class="list-group-item d-flex justify-content-between align-items-center px-0"><span>Канал-хранилище</span><% if (storageStatus.available) { %><span class="badge bg-success">Доступен</span><% } else { %><span class="badge bg-danger" data-bs-toggle="tooltip" title="<%= storageStatus.error || 'ID не указан' %>">Ошибка</span><% } %></li>
+          <li class="list-group-item d-flex justify-content-between align-items-center px-0"><span>Канал-хранилище</span><% if (locals.storageStatus && storageStatus.available) { %><span class="badge bg-success">Доступен</span><% } else { %><span class="badge bg-danger" data-bs-toggle="tooltip" title="<%= (locals.storageStatus && storageStatus.error) ? storageStatus.error : 'ID не указан' %>">Ошибка</span><% } %></li>
         </ul>
       </div>
     </div>
@@ -47,17 +47,16 @@
     <div class="card shadow-sm h-100">
       <div class="card-header">Пользователи по тарифам</div>
       <div class="card-body">
+        <!-- >>>>> ИСПРАВЛЕНИЕ: Убран лишний вложенный <ul> <<<<< -->
         <ul class="list-group list-group-flush">
-          <!-- В ФАЙЛЕ views/dashboard.ejs, в карточке "Пользователи по тарифам" -->
-<ul class="list-group list-group-flush">
-  <li class="list-group-item d-flex justify-content-between align-items-center px-0"><span>🆓 Free</span><span class="fw-bold"><%= stats.usersByTariff.Free || 0 %></span></li>
-  <li class="list-group-item d-flex justify-content-between align-items-center px-0"><span>🎯 Plus</span><span class="fw-bold"><%= stats.usersByTariff.Plus || 0 %></span></li>
-  <li class="list-group-item d-flex justify-content-between align-items-center px-0"><span>💪 Pro</span><span class="fw-bold"><%= stats.usersByTariff.Pro || 0 %></span></li>
-  <li class="list-group-item d-flex justify-content-between align-items-center px-0"><span>💎 Unlimited</span><span class="fw-bold"><%= stats.usersByTariff.Unlimited || 0 %></span></li>
-  <% if (stats.usersByTariff.Other) { %>
-    <li class="list-group-item d-flex justify-content-between align-items-center px-0"><span>⚙️ Другие</span><span class="fw-bold"><%= stats.usersByTariff.Other %></span></li>
-  <% } %>
-</ul>
+          <li class="list-group-item d-flex justify-content-between align-items-center px-0"><span>🆓 Free</span><span class="fw-bold"><%= stats.usersByTariff.Free || 0 %></span></li>
+          <li class="list-group-item d-flex justify-content-between align-items-center px-0"><span>🎯 Plus</span><span class="fw-bold"><%= stats.usersByTariff.Plus || 0 %></span></li>
+          <li class="list-group-item d-flex justify-content-between align-items-center px-0"><span>💪 Pro</span><span class="fw-bold"><%= stats.usersByTariff.Pro || 0 %></span></li>
+          <li class="list-group-item d-flex justify-content-between align-items-center px-0"><span>💎 Unlimited</span><span class="fw-bold"><%= stats.usersByTariff.Unlimited || 0 %></span></li>
+          <% if (stats.usersByTariff.Other) { %>
+            <li class="list-group-item d-flex justify-content-between align-items-center px-0"><span>⚙️ Другие</span><span class="fw-bold"><%= stats.usersByTariff.Other %></span></li>
+          <% } %>
+        </ul>
       </div>
     </div>
   </div>
@@ -114,32 +113,25 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
   document.addEventListener('DOMContentLoaded', () => {
-    // Инициализация всплывающих подсказок (для статуса систем)
     new bootstrap.Tooltip(document.body, { selector: "[data-bs-toggle='tooltip']" });
 
-    // Функция-помощник для отрисовки графиков
     function drawChart(canvasId, chartData, chartType, options = {}) {
         const ctx = document.getElementById(canvasId);
         if (ctx && chartData && chartData.labels && chartData.labels.length > 0) {
             new Chart(ctx, { type: chartType, data: chartData, options: options });
-        } else {
-            console.warn(`Нет данных для графика #${canvasId}`);
         }
     }
 
     const commonLineBarOptions = { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true } } };
     
-    // График 1: Динамика
     drawChart('mainChart', <%- JSON.stringify(locals.chartDataCombined || {}) %>, 'line', commonLineBarOptions);
     
-    // График 2: Тарифы
     drawChart('tariffsChart', <%- JSON.stringify(locals.chartDataTariffs || {}) %>, 'doughnut', { 
         responsive: true, 
         maintainAspectRatio: true,
         plugins: { legend: { position: 'top' } } 
     });
     
-    // График 3: Дни недели
     drawChart('weekdayChart', <%- JSON.stringify(locals.chartDataWeekday || {}) %>, 'bar', { 
         ...commonLineBarOptions, 
         plugins: { legend: { display: false } } 
