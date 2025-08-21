@@ -317,7 +317,17 @@ export async function getAllBroadcastTasks() {
 export async function deleteBroadcastTask(taskId) {
   await query(`DELETE FROM broadcast_tasks WHERE id = $1 AND status = 'pending'`, [taskId]);
 }
-
+// В ФАЙЛЕ db.js
+export async function resetOtherTariffsToFree() {
+  console.log('[DB-Admin] Начинаю сброс нестандартных тарифов...');
+  const { rowCount } = await query(`
+    UPDATE users
+    SET premium_limit = 5, premium_until = NULL
+    WHERE premium_limit NOT IN (5, 30, 100, 10000);
+  `);
+  console.log(`[DB-Admin] Сброшено ${rowCount} пользователей на тариф Free.`);
+  return rowCount;
+}
 export async function getBroadcastTaskById(taskId) {
   const { rows } = await query(`SELECT * FROM broadcast_tasks WHERE id = $1`, [taskId]);
   return rows[0] || null;
