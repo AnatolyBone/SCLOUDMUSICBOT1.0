@@ -273,7 +273,53 @@ export async function updateBroadcastTask(taskId, task) {
     [message, audioPath, targetAudience, disableNotification, scheduledAt, taskId]
   );
 }
+// В КОНЕЦ ФАЙЛА db.js
 
+// Для Графика 1
+export async function getDailyStats(days = 30) {
+  const { rows } = await query(`
+    WITH date_series AS (
+      SELECT generate_series(
+        CURRENT_DATE - INTERVAL '${days - 1} days',
+        CURRENT_DATE,
+        '1 day'
+      )::date AS day
+    )
+    SELECT 
+      ds.day::text,
+      COUNT(DISTINCT u.id) FILTER (WHERE u.created_at::date = ds.day) AS registrations,
+      COUNT(DISTINCT d.user_id) FILTER (WHERE d.downloaded_at::date = ds.day) AS active_users,
+      COUNT(d.id) FILTER (WHERE d.downloaded_at::date = ds.day) AS downloads
+    FROM date_series ds
+    LEFT JOIN users u ON u.created_at::date <= ds.day
+    LEFT JOIN downloads_log d ON d.downloaded_at::date = ds.day
+    WHERE ds.day >= CURRENT_DATE - INTERVAL '${days - 1} days'
+    GROUP BY ds.day
+    ORDER BY ds.day;
+  `);
+  return rows;
+}
+
+// Для Графика 3
+export async function getActivityByWeekday() {
+  const { rows } = await query(`
+    SELECT 
+      TO_CHAR(downloaded_at, 'ID') as weekday_num, -- ISO 8601: 1 = Пн, 7 = Вс
+      TO_CHAR(downloaded_at, 'Day') as weekday_name,
+      COUNT(*) as count
+    FROM downloads_log
+    WHERE downloaded_at >= NOW() - INTERVAL '90 days'
+    GROUP BY 1, 2
+    ORDER BY 1;
+  `);
+  // Приводим к формату [ { weekday: 'Понедельник', count: 123 }, ... ]
+  const weekdays = ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота', 'Воскресенье'];
+  const result = Array(7).fill(0).map((_, i) => ({ weekday: weekdays[i], count: 0 }));
+  rows.forEach(row => {
+    result[parseInt(row.weekday_num) - 1].count = parseInt(row.count);
+  });
+  return result;
+}
 // Эти функции были в вашем старом коде, восстанавливаю их
 export async function getReferralSourcesStats() {
   const { rows } = await query(`SELECT referral_source, COUNT(*) as count FROM users WHERE referral_source IS NOT NULL GROUP BY referral_source ORDER BY count DESC`);
