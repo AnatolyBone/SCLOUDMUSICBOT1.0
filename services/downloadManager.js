@@ -1,6 +1,6 @@
-// services/downloadManager.js (ФИНАЛЬНАЯ ВЕРСИЯ С ПРОКСИ)
+// services/downloadManager.js
 
-import { STORAGE_CHANNEL_ID, CHANNEL_USERNAME, PROXY_URL } from '../config.js';
+import { STORAGE_CHANNEL_ID, CHANNEL_USERNAME, PROXY_URL, ADMIN_ID } from '../config.js'; // <-- Добавлен ADMIN_ID
 import { Markup } from 'telegraf';
 import path from 'path';
 import fs from 'fs';
@@ -276,6 +276,19 @@ export async function enqueue(ctx, userId, url) {
         } else {
             console.error(`❌ Глобальная ошибка в enqueue для ${userId}:`, err);
             await safeSendMessage(userId, `❌ Произошла ошибка при обработке ссылки.`);
+
+            // Уведомление админу о критической ошибке
+            try {
+                const adminErrorMessage = `🔴 **Критическая ошибка загрузки!**\n\n` +
+                                          `**Пользователь:** \`${userId}\`\n` +
+                                          `**URL:** \`${url}\`\n\n` +
+                                          `**Текст ошибки:**\n` +
+                                          `\`\`\`\n${errorMessage.slice(0, 1000)}\n\`\`\``; // Обрезаем, чтобы не превысить лимит сообщения
+                
+                await bot.telegram.sendMessage(ADMIN_ID, adminErrorMessage, { parse_mode: 'Markdown' });
+            } catch (adminNotifyError) {
+                console.error("!! Не удалось отправить уведомление об ошибке админу:", adminNotifyError.message);
+            }
         }
     }
 }
