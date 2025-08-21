@@ -218,7 +218,6 @@ export async function getReferralsByUserId(userId) {
   );
   return rows;
 }
-
 // В ФАЙЛЕ db.js
 // >>>>> ЗАМЕНИТЕ ЭТУ ФУНКЦИЮ <<<<<
 export async function getUsersCountByTariff() {
@@ -229,14 +228,13 @@ export async function getUsersCountByTariff() {
         WHEN premium_limit = 30 THEN 'Plus'
         WHEN premium_limit = 100 THEN 'Pro'
         WHEN premium_limit >= 10000 THEN 'Unlimited'
-        ELSE 'Other' -- Все остальные (старые, кастомные) тарифы
+        ELSE 'Other' -- Все, что не подходит под точные значения
       END as tariff,
       COUNT(id) as count
     FROM users
     WHERE active = TRUE
     GROUP BY tariff;
   `);
-  // Преобразуем в удобный объект, чтобы избежать ошибок
   const result = { Free: 0, Plus: 0, Pro: 0, Unlimited: 0, Other: 0 };
   rows.forEach(row => {
     result[row.tariff] = parseInt(row.count);
