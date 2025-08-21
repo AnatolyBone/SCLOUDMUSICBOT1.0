@@ -1,4 +1,4 @@
-// index.js
+// index.js (ФИНАЛЬНАЯ ВЕРСИЯ СО ВСЕМИ ФУНКЦИЯМИ И ИМПОРТАМИ)
 
 import express from 'express';
 import session from 'express-session';
@@ -12,6 +12,7 @@ import pLimit from 'p-limit';
 import fs from 'fs';
 import cron from 'node-cron';
 
+// Полный и правильный список импортов из db.js
 import { 
     pool, supabase, getUserById, resetDailyStats, getAllUsers, getPaginatedUsers, 
     getReferralSourcesStats, getDownloadsByDate, getRegistrationsByDate, 
@@ -19,11 +20,12 @@ import {
     getLatestReviews, getUserActivityByDayHour, getDownloadsByUserId, getReferralsByUserId, 
     getCachedTracksCount, getActiveFreeUsers, getActivePremiumUsers,
     createBroadcastTask, getPendingBroadcastTask, completeBroadcastTask, failBroadcastTask,
-    getAllBroadcastTasks, deleteBroadcastTask, getBroadcastTaskById, updateBroadcastTask, logEvent
+    getAllBroadcastTasks, deleteBroadcastTask, getBroadcastTaskById, updateBroadcastTask,
+    getUsersCountByTariff, getTopReferralSources, getDailyStats, getActivityByWeekday, logEvent
 } from './db.js';
 import { bot } from './bot.js';
 import redisService from './services/redisClient.js';
-import { WEBHOOK_URL, PORT, SESSION_SECRET, ADMIN_ID, ADMIN_LOGIN, ADMIN_PASSWORD, WEBHOOK_PATH, STORAGE_CHANNEL_ID } from './config.js';
+import { WEBHOOK_URL, PORT, SESSION_SECRET, ADMIN_ID, ADMIN_LOGIN, ADMIN_PASSWORD, WEBHOOK_PATH, STORAGE_CHANNEL_ID, CHANNEL_USERNAME } from './config.js';
 import { loadTexts } from './config/texts.js';
 import { downloadQueue } from './services/downloadManager.js';
 
@@ -114,6 +116,7 @@ function setupExpress() {
     
     app.get('/dashboard', requireAuth, async (req, res) => {
         try {
+            const period = req.query.period || 30;
             let storageStatus = { available: false, error: '' };
             if (STORAGE_CHANNEL_ID) {
                 try {
@@ -123,13 +126,12 @@ function setupExpress() {
                     storageStatus.error = e.message;
                 }
             }
-            const [users, registrationsRaw, cachedTracksCount, usersByTariff, topSources, dailyStats, weekdayActivity] = await Promise.all([
+            const [users, cachedTracksCount, usersByTariff, topSources, dailyStats, weekdayActivity] = await Promise.all([
                 getAllUsers(true), 
-                getRegistrationsByDate(),
                 getCachedTracksCount(),
                 getUsersCountByTariff(),
                 getTopReferralSources(),
-                getDailyStats(req.query.period || 30),
+                getDailyStats(period),
                 getActivityByWeekday()
             ]);
             const stats = {
@@ -159,7 +161,10 @@ function setupExpress() {
                 labels: weekdayActivity.map(d => d.weekday.trim()),
                 datasets: [{ label: 'Загрузки', data: weekdayActivity.map(d => d.count), backgroundColor: 'rgba(13, 110, 253, 0.5)' }]
             };
-            res.render('dashboard', { title: 'Дашборд', page: 'dashboard', stats, storageStatus, period: req.query.period || 30, chartDataCombined, chartDataTariffs, chartDataWeekday });
+            res.render('dashboard', { 
+                title: 'Дашборд', page: 'dashboard', stats, storageStatus, period,
+                chartDataCombined, chartDataTariffs, chartDataWeekday
+            });
         } catch (error) {
             console.error("Ошибка дашборда:", error);
             res.status(500).send("Ошибка сервера");
