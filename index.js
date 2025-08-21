@@ -114,44 +114,99 @@ function setupExpress() {
     });
     app.get('/logout', (req, res) => req.session.destroy(() => res.redirect('/admin')));
     
-    app.get('/dashboard', requireAuth, async (req, res) => {
-        try {
-            let storageStatus = { available: false, error: '' };
-            if (STORAGE_CHANNEL_ID) {
-                try {
-                    await bot.telegram.getChat(STORAGE_CHANNEL_ID);
-                    storageStatus.available = true;
-                } catch (e) {
-                    storageStatus.error = e.message;
-                }
+    // В ФАЙЛЕ index.js
+
+// >>>>> ЗАМЕНИТЕ ВЕСЬ БЛОК app.get('/dashboard', ...) НА ЭТОТ <<<<<
+
+app.get('/dashboard', requireAuth, async (req, res) => {
+    try {
+        const period = req.query.period || 30; // Период для главного графика
+        
+        let storageStatus = { available: false, error: '' };
+        if (STORAGE_CHANNEL_ID) {
+            try {
+                await bot.telegram.getChat(STORAGE_CHANNEL_ID);
+                storageStatus.available = true;
+            } catch (e) {
+                storageStatus.error = e.message;
             }
-            const [users, referralStats, downloadsRaw, registrationsRaw, activeRaw, cachedTracksCount] = await Promise.all([
-                getAllUsers(true), 
-                getReferralSourcesStats(), 
-                getDownloadsByDate(),
-                getRegistrationsByDate(), 
-                getActiveUsersByDate(),
-                getCachedTracksCount()
-            ]);
-            const stats = {
-                total_users: users.length,
-                active_users: users.filter(u => u.active).length,
-                total_downloads: users.reduce((sum, u) => sum + (u.total_downloads || 0), 0),
-                active_today: users.filter(u => u.last_active && new Date(u.last_active).toDateString() === new Date().toDateString()).length,
-                queueWaiting: downloadQueue.size,
-                queueActive: downloadQueue.active,
-                cachedTracksCount: cachedTracksCount
-            };
-            const prepareChartData = (registrations, downloads, active) => ({
-                labels: [...new Set([...Object.keys(registrations), ...Object.keys(downloads), ...Object.keys(active)])].sort(),
-                datasets: [ { label: 'Регистрации', data: Object.values(registrations), borderColor: '#198754' }, { label: 'Загрузки', data: Object.values(downloads), borderColor: '#fd7e14' }, { label: 'Активные', data: Object.values(active), borderColor: '#0d6efd' } ]
-            });
-            res.render('dashboard', { title: 'Дашборд', page: 'dashboard', stats, storageStatus, query: req.query, chartDataCombined: prepareChartData(registrationsRaw, downloadsRaw, activeRaw) });
-        } catch (error) {
-            console.error("Ошибка дашборда:", error);
-            res.status(500).send("Ошибка сервера");
         }
-    });
+        
+        // Получаем все необходимые данные для дашборда параллельно
+        const [
+            users,
+            cachedTracksCount,
+            usersByTariff,
+            topSources,
+            dailyStats,
+            weekdayActivity
+        ] = await Promise.all([
+            getAllUsers(true),
+            getCachedTracksCount(),
+            getUsersCountByTariff(),
+            getTopReferralSources(),
+            getDailyStats(period),
+            getActivityByWeekday()
+        ]);
+        
+        // Собираем все метрики в один объект для удобной передачи в шаблон
+        const stats = {
+            total_users: users.length,
+            active_users: users.filter(u => u.active).length,
+            total_downloads: users.reduce((sum, u) => sum + (u.total_downloads || 0), 0),
+            active_today: users.filter(u => u.last_active && new Date(u.last_active).toDateString() === new Date().toDateString()).length,
+            queueWaiting: downloadQueue.size,
+            queueActive: downloadQueue.active,
+            cachedTracksCount: cachedTracksCount,
+            usersByTariff: usersByTariff,
+            topSources: topSources
+        };
+        
+        // Подготовка данных для Графика 1: Динамика метрик
+        const chartDataCombined = {
+            labels: dailyStats.map(d => new Date(d.day).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })),
+            datasets: [
+                { label: 'Регистрации', data: dailyStats.map(d => d.registrations), borderColor: '#198754', tension: 0.1, fill: false },
+                { label: 'Активные юзеры', data: dailyStats.map(d => d.active_users), borderColor: '#0d6efd', tension: 0.1, fill: false },
+                { label: 'Загрузки', data: dailyStats.map(d => d.downloads), borderColor: '#fd7e14', tension: 0.1, fill: false }
+            ]
+        };
+        
+        // Подготовка данных для Графика 2: Распределение по тарифам
+        const chartDataTariffs = {
+            labels: Object.keys(usersByTariff),
+            datasets: [{
+                data: Object.values(usersByTariff),
+                backgroundColor: ['#6c757d', '#17a2b8', '#ffc107', '#007bff'] // Free, Plus, Pro, Unlimited
+            }]
+        };
+        
+        // Подготовка данных для Графика 3: Активность по дням недели
+        const chartDataWeekday = {
+            labels: weekdayActivity.map(d => d.weekday.trim()),
+            datasets: [{
+                label: 'Загрузки',
+                data: weekdayActivity.map(d => d.count),
+                backgroundColor: 'rgba(13, 110, 253, 0.5)'
+            }]
+        };
+        
+        // Рендерим шаблон, передавая все подготовленные данные
+        res.render('dashboard', {
+            title: 'Дашборд',
+            page: 'dashboard',
+            stats,
+            storageStatus,
+            period,
+            chartDataCombined,
+            chartDataTariffs,
+            chartDataWeekday
+        });
+    } catch (error) {
+        console.error("Ошибка дашборда:", error);
+        res.status(500).send("Ошибка сервера");
+    }
+});
 
     app.get('/users', requireAuth, async (req, res) => {
         try {
