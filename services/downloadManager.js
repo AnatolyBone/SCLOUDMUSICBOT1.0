@@ -1,8 +1,7 @@
-// services/downloadManager.js (ФИНАЛЬНАЯ КОРРЕКТНАЯ ВЕРСЯ)
-// services/downloadManager.js (вверху)
-import { STORAGE_CHANNEL_ID } from '../config.js';
+// services/downloadManager.js (ВАША ВЕРСИЯ + FORCE-IPV6)
+
+import { STORAGE_CHANNEL_ID, CHANNEL_USERNAME } from '../config.js';
 import { Markup } from 'telegraf';
-import { CHANNEL_USERNAME } from '../config.js';
 import path from 'path';
 import fs from 'fs';
 import ytdl from 'youtube-dl-exec';
@@ -53,10 +52,6 @@ async function safeSendMessage(userId, text, extra = {}) {
     }
 }
 
-// В ФАЙЛЕ services/downloadManager.js
-
-// >>>>> ЗАМЕНИТЕ ВСЮ ФУНКЦИЮ trackDownloadProcessor НА ЭТУ <<<<<
-
 async function trackDownloadProcessor(task) {
     const { userId, url, trackName, trackId, uploader } = task;
     let tempFilePath = null;
@@ -71,14 +66,14 @@ async function trackDownloadProcessor(task) {
             output: tempFilePath,
             extractAudio: true, audioFormat: 'mp3',
             retries: 3, "socket-timeout": YTDL_TIMEOUT,
-            'user-agent': FAKE_USER_AGENT
+            'user-agent': FAKE_USER_AGENT,
+            'force-ipv6': true // <--- ИЗМЕНЕНИЕ
         });
         
         if (!fs.existsSync(tempFilePath)) throw new Error(`Файл не был создан`);
         
         if (statusMessage) await bot.telegram.editMessageText(userId, statusMessage.message_id, undefined, `✅ Скачал. Отправляю...`).catch(()=>{});
         
-        // 1. Отправляем трек пользователю
         const sentToUserMessage = await bot.telegram.sendAudio(userId, { source: fs.createReadStream(tempFilePath) }, { 
             title: trackName, 
             performer: uploader || 'SoundCloud' 
@@ -86,28 +81,20 @@ async function trackDownloadProcessor(task) {
         
         if (statusMessage) await bot.telegram.deleteMessage(userId, statusMessage.message_id).catch(()=>{});
 
-        // 2. Обновляем статистику пользователя (делаем это сразу)
         if (sentToUserMessage?.audio?.file_id) {
             await incrementDownloadsAndSaveTrack(userId, trackName, sentToUserMessage.audio.file_id, url);
         }
 
-        // 3. Асинхронно кэшируем трек в фоне, не задерживая пользователя
         (async () => {
             if (STORAGE_CHANNEL_ID) {
                 try {
                     console.log(`[Cache] Отправляю "${trackName}" в канал-хранилище...`);
-                    // Отправляем копию в канал-хранилище
                     const sentToStorageMessage = await bot.telegram.sendAudio(
-    STORAGE_CHANNEL_ID,
-    { source: tempFilePath },
-    // >>>>> ДОБАВЬТЕ ЭТИ ПАРАМЕТРЫ <<<<<
-    {
-        title: trackName,
-        performer: uploader || 'SoundCloud'
-    }
-);
+                        STORAGE_CHANNEL_ID,
+                        { source: tempFilePath },
+                        { title: trackName, performer: uploader || 'SoundCloud' }
+                    );
                     
-                    // Если успешно, сохраняем file_id из хранилища в базу кэша
                     if (sentToStorageMessage?.audio?.file_id) {
                         await cacheTrack(url, sentToStorageMessage.audio.file_id, trackName);
                         console.log(`✅ [Cache] Трек "${trackName}" успешно закэширован.`);
@@ -115,13 +102,11 @@ async function trackDownloadProcessor(task) {
                 } catch (e) {
                     console.error(`❌ [Cache] Ошибка при кэшировании трека "${trackName}":`, e.message);
                 } finally {
-                    // Важно! Удаляем файл только после того, как обе отправки завершились.
                     if (fs.existsSync(tempFilePath)) {
                         await fs.promises.unlink(tempFilePath).catch(err => console.error("Ошибка удаления временного файла:", err));
                     }
                 }
             } else {
-                 // Если нет канала, просто удаляем файл
                  if (fs.existsSync(tempFilePath)) {
                     await fs.promises.unlink(tempFilePath).catch(err => console.error("Ошибка удаления временного файла:", err));
                 }
@@ -129,7 +114,6 @@ async function trackDownloadProcessor(task) {
         })();
 
     } catch (err) {
-        // ... (блок catch остается без изменений) ...
         let userErrorMessage = `❌ Не удалось обработать трек: "${trackName}"`;
         const errorDetails = err.stderr || err.message || '';
         if (err.name === 'TimeoutError' || errorDetails.includes('timed out')) {
@@ -142,27 +126,23 @@ async function trackDownloadProcessor(task) {
             await safeSendMessage(userId, userErrorMessage);
         }
 
-        // Если произошла ошибка, тоже нужно удалить временный файл
         if (tempFilePath && fs.existsSync(tempFilePath)) {
             await fs.promises.unlink(tempFilePath).catch(() => {});
         }
     } 
-    // Блок finally удален, т.к. логика удаления перенесена внутрь
 }
 export const downloadQueue = new TaskQueue({
-    maxConcurrent: 1, // Важное значение для стабильности
+    maxConcurrent: 1,
     taskProcessor: trackDownloadProcessor
 });
 
 export async function enqueue(ctx, userId, url) {
-    // В этой функции больше нет переменной processingMessage, т.к. мы убрали её обработку
     try {
         await resetDailyLimitIfNeeded(userId);
         
         const user = await getUser(userId);
         const remainingLimit = user.premium_limit - (user.downloads_today || 0);
 
-        // >>>>> НАЧАЛО ИЗМЕНЕНИЙ <<<<<
         if (remainingLimit <= 0) {
             let message = T('limitReached');
             let bonusMessageText = '';
@@ -180,13 +160,13 @@ export async function enqueue(ctx, userId, url) {
             }
             return await safeSendMessage(userId, message, extra);
         }
-        // >>>>> КОНЕЦ ИЗМЕНЕНИЙ <<<<<
 
         const info = await ytdlLimit(() => ytdl(url, {
             dumpSingleJson: true,
             retries: 2,
             "socket-timeout": YTDL_TIMEOUT,
-            'user-agent': FAKE_USER_AGENT
+            'user-agent': FAKE_USER_AGENT,
+            'force-ipv6': true // <--- ИЗМЕНЕНИЕ
         }));
         
         if (!info) throw new Error('Не удалось получить метаданные');
@@ -260,7 +240,8 @@ export async function enqueue(ctx, userId, url) {
                 }
             }
             if (sentFromCacheCount > 0) {
-                //await safeSendMessage(userId, `✅ ${sentFromCacheCount} трек(ов) отправлено мгновенно из кэша.`);
+                // Сообщение закомментировано, как мы и договаривались
+                // await safeSendMessage(userId, `✅ ${sentFromCacheCount} трек(ов) отправлено мгновенно из кэша.`);
             }
         }
         
@@ -285,7 +266,6 @@ export async function enqueue(ctx, userId, url) {
             }
         }
     } catch (err) {
-        // Мы убрали processingMessage, поэтому его не нужно удалять
         const errorMessage = err.stderr || err.message || '';
         if (err.name === 'TimeoutError' || errorMessage.includes('timed out')) {
             console.error(`❌ Таймаут в enqueue для ${userId}:`, errorMessage);
