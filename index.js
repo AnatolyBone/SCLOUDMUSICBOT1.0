@@ -21,7 +21,7 @@ import {
     getCachedTracksCount, getActiveFreeUsers, getActivePremiumUsers,
     createBroadcastTask, getPendingBroadcastTask, completeBroadcastTask, failBroadcastTask,
     getAllBroadcastTasks, deleteBroadcastTask, getBroadcastTaskById, updateBroadcastTask,
-    getUsersCountByTariff, getTopReferralSources, getDailyStats, getActivityByWeekday, logEvent
+    getUsersCountByTariff, getTopReferralSources, getDailyStats, getActivityByWeekday, logEvent, resetOtherTariffsToFree
 } from './db.js';
 import { bot } from './bot.js';
 import redisService from './services/redisClient.js';
@@ -180,7 +180,17 @@ app.get('/dashboard', requireAuth, async (req, res) => {
             res.status(500).send("Ошибка сервера");
         }
     });
+// В ФАЙЛЕ index.js
 
+// >>>>> ДОБАВЬТЕ ЭТОТ РОУТ <<<<<
+app.post('/admin/reset-other-tariffs', requireAuth, async (req, res) => {
+    try {
+        await resetOtherTariffsToFree();
+    } catch (e) {
+        console.error("Ошибка при сбросе тарифов:", e);
+    }
+    res.redirect('/dashboard'); // Возвращаемся на дашборд после сброса
+});
     app.get('/users', requireAuth, async (req, res) => {
         try {
             const { q = '', status = '', page = 1, limit = 25, sort = 'created_at', order = 'desc' } = req.query;
