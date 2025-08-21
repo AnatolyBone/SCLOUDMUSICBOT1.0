@@ -1,6 +1,6 @@
-// services/downloadManager.js (ВАША ВЕРСИЯ + FORCE-IPV6)
+// services/downloadManager.js (ФИНАЛЬНАЯ ВЕРСИЯ С ПРОКСИ)
 
-import { STORAGE_CHANNEL_ID, CHANNEL_USERNAME } from '../config.js';
+import { STORAGE_CHANNEL_ID, CHANNEL_USERNAME, PROXY_URL } from '../config.js';
 import { Markup } from 'telegraf';
 import path from 'path';
 import fs from 'fs';
@@ -67,7 +67,7 @@ async function trackDownloadProcessor(task) {
             extractAudio: true, audioFormat: 'mp3',
             retries: 3, "socket-timeout": YTDL_TIMEOUT,
             'user-agent': FAKE_USER_AGENT,
-            'force-ipv6': true // <--- ИЗМЕНЕНИЕ
+            proxy: PROXY_URL || undefined
         });
         
         if (!fs.existsSync(tempFilePath)) throw new Error(`Файл не был создан`);
@@ -131,6 +131,7 @@ async function trackDownloadProcessor(task) {
         }
     } 
 }
+
 export const downloadQueue = new TaskQueue({
     maxConcurrent: 1,
     taskProcessor: trackDownloadProcessor
@@ -166,7 +167,7 @@ export async function enqueue(ctx, userId, url) {
             retries: 2,
             "socket-timeout": YTDL_TIMEOUT,
             'user-agent': FAKE_USER_AGENT,
-            'force-ipv6': true // <--- ИЗМЕНЕНИЕ
+            proxy: PROXY_URL || undefined
         }));
         
         if (!info) throw new Error('Не удалось получить метаданные');
@@ -240,7 +241,6 @@ export async function enqueue(ctx, userId, url) {
                 }
             }
             if (sentFromCacheCount > 0) {
-                // Сообщение закомментировано, как мы и договаривались
                 // await safeSendMessage(userId, `✅ ${sentFromCacheCount} трек(ов) отправлено мгновенно из кэша.`);
             }
         }
