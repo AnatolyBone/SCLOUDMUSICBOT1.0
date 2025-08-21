@@ -219,13 +219,22 @@ export async function getReferralsByUserId(userId) {
   return rows;
 }
 
+// В ФАЙЛЕ db.js
+// >>>>> ЗАМЕНИТЕ ЭТУ ФУНКЦИЮ <<<<<
 export async function getUsersCountByTariff() {
   const { rows } = await query(`
-    SELECT CASE 
-        WHEN premium_limit <= 5 THEN 'Free' WHEN premium_limit = 30 THEN 'Plus'
-        WHEN premium_limit = 100 THEN 'Pro' ELSE 'Unlimited'
-      END as tariff, COUNT(id) as count
-    FROM users WHERE active = TRUE GROUP BY tariff;
+    SELECT 
+      CASE 
+        WHEN premium_limit <= 5 THEN 'Free'
+        WHEN premium_limit > 5 AND premium_limit <= 30 THEN 'Plus'
+        WHEN premium_limit > 30 AND premium_limit <= 100 THEN 'Pro'
+        WHEN premium_limit > 100 THEN 'Unlimited'
+        ELSE 'Unknown' -- На случай непредвиденных значений
+      END as tariff,
+      COUNT(id) as count
+    FROM users
+    WHERE active = TRUE
+    GROUP BY tariff;
   `);
   return rows.reduce((acc, row) => ({ ...acc, [row.tariff]: parseInt(row.count) }), {});
 }
