@@ -347,3 +347,13 @@ export async function getUserActivityByDayHour(days = 30) {
     });
     return activity;
 }
+
+export async function getActiveFreeUsers() {
+  const { rows } = await query(`SELECT id FROM users WHERE active = TRUE AND premium_limit <= 5`);
+  return rows;
+}
+
+export async function getActivePremiumUsers() {
+  const { rows } = await query(`SELECT id FROM users WHERE active = TRUE AND premium_limit > 5`);
+  return rows;
+}
