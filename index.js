@@ -1,4 +1,5 @@
 // index.js
+
 import express from 'express';
 import session from 'express-session';
 import compression from 'compression';
@@ -122,10 +123,14 @@ function setupExpress() {
                     storageStatus.error = e.message;
                 }
             }
-            const [users, registrationsRaw, cachedTracksCount] = await Promise.all([
+            const [users, registrationsRaw, cachedTracksCount, usersByTariff, topSources, dailyStats, weekdayActivity] = await Promise.all([
                 getAllUsers(true), 
                 getRegistrationsByDate(),
-                getCachedTracksCount()
+                getCachedTracksCount(),
+                getUsersCountByTariff(),
+                getTopReferralSources(),
+                getDailyStats(req.query.period || 30),
+                getActivityByWeekday()
             ]);
             const stats = {
                 total_users: users.length,
@@ -134,9 +139,27 @@ function setupExpress() {
                 active_today: users.filter(u => u.last_active && new Date(u.last_active).toDateString() === new Date().toDateString()).length,
                 queueWaiting: downloadQueue.size,
                 queueActive: downloadQueue.active,
-                cachedTracksCount: cachedTracksCount
+                cachedTracksCount: cachedTracksCount,
+                usersByTariff: usersByTariff,
+                topSources: topSources
             };
-            res.render('dashboard', { title: 'Дашборд', page: 'dashboard', stats, storageStatus, chartDataCombined: { labels: Object.keys(registrationsRaw), datasets: [{ label: 'Регистрации', data: Object.values(registrationsRaw) }] } });
+            const chartDataCombined = {
+                labels: dailyStats.map(d => new Date(d.day).toLocaleDateString('ru-RU', {day: '2-digit', month: '2-digit'})),
+                datasets: [
+                    { label: 'Регистрации', data: dailyStats.map(d => d.registrations), borderColor: '#198754', tension: 0.1, fill: false },
+                    { label: 'Активные юзеры', data: dailyStats.map(d => d.active_users), borderColor: '#0d6efd', tension: 0.1, fill: false },
+                    { label: 'Загрузки', data: dailyStats.map(d => d.downloads), borderColor: '#fd7e14', tension: 0.1, fill: false }
+                ]
+            };
+            const chartDataTariffs = {
+                labels: Object.keys(usersByTariff),
+                datasets: [{ data: Object.values(usersByTariff), backgroundColor: ['#6c757d', '#17a2b8', '#ffc107', '#007bff'] }]
+            };
+            const chartDataWeekday = {
+                labels: weekdayActivity.map(d => d.weekday.trim()),
+                datasets: [{ label: 'Загрузки', data: weekdayActivity.map(d => d.count), backgroundColor: 'rgba(13, 110, 253, 0.5)' }]
+            };
+            res.render('dashboard', { title: 'Дашборд', page: 'dashboard', stats, storageStatus, period: req.query.period || 30, chartDataCombined, chartDataTariffs, chartDataWeekday });
         } catch (error) {
             console.error("Ошибка дашборда:", error);
             res.status(500).send("Ошибка сервера");
