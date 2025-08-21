@@ -1,4 +1,4 @@
-// bot.js
+// bot.js (ФИНАЛЬНАЯ ВЕРСИЯ - БЕЗ ОШИБОК)
 
 import { Telegraf, Markup, TelegramError } from 'telegraf';
 import { ADMIN_ID, BOT_TOKEN, WEBHOOK_URL, CHANNEL_USERNAME, STORAGE_CHANNEL_ID } from './config.js';
@@ -186,7 +186,6 @@ bot.hears(T('mytracks'), async (ctx) => {
 
 bot.hears(T('help'), async (ctx) => await ctx.reply(T('helpInfo')));
 
-// >>>>>>>> ОБНОВЛЕННЫЙ ОБРАБОТЧИК <<<<<<<<<<
 bot.hears(T('upgrade'), async (ctx) => {
     const rawText = T('upgradeInfo');
 
