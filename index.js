@@ -1,5 +1,4 @@
-// index.js (ФИНАЛЬНАЯ ВЕРСИЯ - ВСЕ ИСПРАВЛЕНО)
-
+// index.js
 import express from 'express';
 import session from 'express-session';
 import compression from 'compression';
@@ -12,7 +11,6 @@ import pLimit from 'p-limit';
 import fs from 'fs';
 import cron from 'node-cron';
 
-// Полный и правильный список импортов из db.js
 import { 
     pool, supabase, getUserById, resetDailyStats, getAllUsers, getPaginatedUsers, 
     getReferralSourcesStats, getDownloadsByDate, getRegistrationsByDate, 
@@ -20,7 +18,7 @@ import {
     getLatestReviews, getUserActivityByDayHour, getDownloadsByUserId, getReferralsByUserId, 
     getCachedTracksCount, getActiveFreeUsers, getActivePremiumUsers,
     createBroadcastTask, getPendingBroadcastTask, completeBroadcastTask, failBroadcastTask,
-    getAllBroadcastTasks, deleteBroadcastTask, getBroadcastTaskById, updateBroadcastTask
+    getAllBroadcastTasks, deleteBroadcastTask, getBroadcastTaskById, updateBroadcastTask, logEvent
 } from './db.js';
 import { bot } from './bot.js';
 import redisService from './services/redisClient.js';
@@ -58,7 +56,7 @@ async function startApp() {
             await bot.telegram.deleteWebhook({ drop_pending_updates: true });
             bot.launch();
         }
-
+        
         app.listen(PORT, () => console.log(`✅ [App] Сервер запущен на порту ${PORT}.`));
         
         console.log('[App] Настройка фоновых задач...');
@@ -97,8 +95,7 @@ function setupExpress() {
     };
     
     app.get('/health', (req, res) => res.status(200).send('OK'));
-    app.get('/', requireAuth, (req, res) => res.redirect('/dashboard')); // Редирект с корневого URL на дашборд
-    
+    app.get('/', requireAuth, (req, res) => res.redirect('/dashboard'));
     app.get('/admin', (req, res) => {
         if (req.session.authenticated) return res.redirect('/dashboard');
         res.render('login', { title: 'Вход', page: 'login', layout: false, error: null });
@@ -114,99 +111,37 @@ function setupExpress() {
     });
     app.get('/logout', (req, res) => req.session.destroy(() => res.redirect('/admin')));
     
-    // В ФАЙЛЕ index.js
-
-// >>>>> ЗАМЕНИТЕ ВЕСЬ БЛОК app.get('/dashboard', ...) НА ЭТОТ <<<<<
-
-app.get('/dashboard', requireAuth, async (req, res) => {
-    try {
-        const period = req.query.period || 30; // Период для главного графика
-        
-        let storageStatus = { available: false, error: '' };
-        if (STORAGE_CHANNEL_ID) {
-            try {
-                await bot.telegram.getChat(STORAGE_CHANNEL_ID);
-                storageStatus.available = true;
-            } catch (e) {
-                storageStatus.error = e.message;
+    app.get('/dashboard', requireAuth, async (req, res) => {
+        try {
+            let storageStatus = { available: false, error: '' };
+            if (STORAGE_CHANNEL_ID) {
+                try {
+                    await bot.telegram.getChat(STORAGE_CHANNEL_ID);
+                    storageStatus.available = true;
+                } catch (e) {
+                    storageStatus.error = e.message;
+                }
             }
+            const [users, registrationsRaw, cachedTracksCount] = await Promise.all([
+                getAllUsers(true), 
+                getRegistrationsByDate(),
+                getCachedTracksCount()
+            ]);
+            const stats = {
+                total_users: users.length,
+                active_users: users.filter(u => u.active).length,
+                total_downloads: users.reduce((sum, u) => sum + (u.total_downloads || 0), 0),
+                active_today: users.filter(u => u.last_active && new Date(u.last_active).toDateString() === new Date().toDateString()).length,
+                queueWaiting: downloadQueue.size,
+                queueActive: downloadQueue.active,
+                cachedTracksCount: cachedTracksCount
+            };
+            res.render('dashboard', { title: 'Дашборд', page: 'dashboard', stats, storageStatus, chartDataCombined: { labels: Object.keys(registrationsRaw), datasets: [{ label: 'Регистрации', data: Object.values(registrationsRaw) }] } });
+        } catch (error) {
+            console.error("Ошибка дашборда:", error);
+            res.status(500).send("Ошибка сервера");
         }
-        
-        // Получаем все необходимые данные для дашборда параллельно
-        const [
-            users,
-            cachedTracksCount,
-            usersByTariff,
-            topSources,
-            dailyStats,
-            weekdayActivity
-        ] = await Promise.all([
-            getAllUsers(true),
-            getCachedTracksCount(),
-            getUsersCountByTariff(),
-            getTopReferralSources(),
-            getDailyStats(period),
-            getActivityByWeekday()
-        ]);
-        
-        // Собираем все метрики в один объект для удобной передачи в шаблон
-        const stats = {
-            total_users: users.length,
-            active_users: users.filter(u => u.active).length,
-            total_downloads: users.reduce((sum, u) => sum + (u.total_downloads || 0), 0),
-            active_today: users.filter(u => u.last_active && new Date(u.last_active).toDateString() === new Date().toDateString()).length,
-            queueWaiting: downloadQueue.size,
-            queueActive: downloadQueue.active,
-            cachedTracksCount: cachedTracksCount,
-            usersByTariff: usersByTariff,
-            topSources: topSources
-        };
-        
-        // Подготовка данных для Графика 1: Динамика метрик
-        const chartDataCombined = {
-            labels: dailyStats.map(d => new Date(d.day).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })),
-            datasets: [
-                { label: 'Регистрации', data: dailyStats.map(d => d.registrations), borderColor: '#198754', tension: 0.1, fill: false },
-                { label: 'Активные юзеры', data: dailyStats.map(d => d.active_users), borderColor: '#0d6efd', tension: 0.1, fill: false },
-                { label: 'Загрузки', data: dailyStats.map(d => d.downloads), borderColor: '#fd7e14', tension: 0.1, fill: false }
-            ]
-        };
-        
-        // Подготовка данных для Графика 2: Распределение по тарифам
-        const chartDataTariffs = {
-            labels: Object.keys(usersByTariff),
-            datasets: [{
-                data: Object.values(usersByTariff),
-                backgroundColor: ['#6c757d', '#17a2b8', '#ffc107', '#007bff'] // Free, Plus, Pro, Unlimited
-            }]
-        };
-        
-        // Подготовка данных для Графика 3: Активность по дням недели
-        const chartDataWeekday = {
-            labels: weekdayActivity.map(d => d.weekday.trim()),
-            datasets: [{
-                label: 'Загрузки',
-                data: weekdayActivity.map(d => d.count),
-                backgroundColor: 'rgba(13, 110, 253, 0.5)'
-            }]
-        };
-        
-        // Рендерим шаблон, передавая все подготовленные данные
-        res.render('dashboard', {
-            title: 'Дашборд',
-            page: 'dashboard',
-            stats,
-            storageStatus,
-            period,
-            chartDataCombined,
-            chartDataTariffs,
-            chartDataWeekday
-        });
-    } catch (error) {
-        console.error("Ошибка дашборда:", error);
-        res.status(500).send("Ошибка сервера");
-    }
-});
+    });
 
     app.get('/users', requireAuth, async (req, res) => {
         try {
@@ -352,33 +287,13 @@ app.get('/dashboard', requireAuth, async (req, res) => {
     });
 }
 
-// В ФАЙЛЕ index.js
-
-// >>>>> ЗАМЕНИТЕ ВСЮ ФУНКЦИЮ runSingleBroadcast <<<<<
 async function runSingleBroadcast(task, users, taskId = null) {
     console.log(`[Broadcast Worker] Запуск рассылки для ${users.length} пользователей.`);
     let successCount = 0, errorCount = 0;
-    
-    // ФИНАЛЬНЫЙ, НАДЕЖНЫЙ СПОСОБ ФОРМАТИРОВАНИЯ
-    let safeMessage = task.message
-        // 1. Экранируем базовые HTML-символы
-        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-        // 2. Превращаем *жирный* в <b>жирный</b>
-        .replace(/\*(.*?)\*/g, '<b>$1</b>')
-        // 3. Превращаем _курсив_ в <i>курсив</i>. ВАЖНО: не затрагиваем _ внутри слов.
-        .replace(/(?<!\w)_(.*?)_(?!\w)/g, '<i>$1</i>')
-        // 4. Оборачиваем ссылки в теги <a>, чтобы они были кликабельными
-        .replace(/(https?:\/\/[^\s]+)/g, '<a href="$1">$1</a>');
-
+    let safeMessage = task.message.replace(/\*(.*?)\*/g, '<b>$1</b>').replace(/_(.*?)_/g, '<i>$1</i>').replace(/(https?:\/\/[^\s]+)/g, '<a href="$1">$1</a>');
     for (const user of users) {
         try {
-            // Отправляем с parse_mode: 'HTML' и отключаем предпросмотр
-            const options = { 
-                parse_mode: 'HTML', 
-                disable_web_page_preview: true, 
-                disable_notification: task.disableNotification 
-            };
-            
+            const options = { parse_mode: 'HTML', disable_web_page_preview: true, disable_notification: task.disableNotification };
             if (task.audioPath || task.audio_path) {
                 options.caption = safeMessage;
                 await bot.telegram.sendAudio(user.id, { source: task.audioPath || task.audio_path }, options);
@@ -392,10 +307,8 @@ async function runSingleBroadcast(task, users, taskId = null) {
         }
         await new Promise(resolve => setTimeout(resolve, 50));
     }
-
     const report = { successCount, errorCount, totalUsers: users.length };
     console.log(`[Broadcast Worker] Рассылка завершена.`, report);
-
     if (users.length > 1 || (users.length === 1 && users[0].id !== ADMIN_ID)) {
         try {
             const audienceName = task.targetAudience.replace('_', ' ');
@@ -403,7 +316,6 @@ async function runSingleBroadcast(task, users, taskId = null) {
             await bot.telegram.sendMessage(ADMIN_ID, reportMessage, { parse_mode: 'Markdown' });
         } catch (e) { console.error('Не удалось отправить отчет админу:', e.message); }
     }
-    
     return report;
 }
 
