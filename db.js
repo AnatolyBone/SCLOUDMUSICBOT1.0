@@ -226,17 +226,22 @@ export async function getUsersCountByTariff() {
     SELECT 
       CASE 
         WHEN premium_limit <= 5 THEN 'Free'
-        WHEN premium_limit > 5 AND premium_limit <= 30 THEN 'Plus'
-        WHEN premium_limit > 30 AND premium_limit <= 100 THEN 'Pro'
-        WHEN premium_limit > 100 THEN 'Unlimited'
-        ELSE 'Unknown' -- На случай непредвиденных значений
+        WHEN premium_limit = 30 THEN 'Plus'
+        WHEN premium_limit = 100 THEN 'Pro'
+        WHEN premium_limit >= 10000 THEN 'Unlimited'
+        ELSE 'Other' -- Все остальные (старые, кастомные) тарифы
       END as tariff,
       COUNT(id) as count
     FROM users
     WHERE active = TRUE
     GROUP BY tariff;
   `);
-  return rows.reduce((acc, row) => ({ ...acc, [row.tariff]: parseInt(row.count) }), {});
+  // Преобразуем в удобный объект, чтобы избежать ошибок
+  const result = { Free: 0, Plus: 0, Pro: 0, Unlimited: 0, Other: 0 };
+  rows.forEach(row => {
+    result[row.tariff] = parseInt(row.count);
+  });
+  return result;
 }
 
 export async function getTopReferralSources(limit = 5) {
