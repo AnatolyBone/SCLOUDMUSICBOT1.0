@@ -1,4 +1,4 @@
-// db.js (ФИНАЛЬНАЯ ВЕРСЯ СО ВСЕМИ ФУНКЦИЯМИ)
+// db.js (ФИНАЛЬНАЯ ВЕРСИЯ СО ВСЕМИ ФУНКЦИЯМИ)
 
 import { Pool } from 'pg';
 import { createClient } from '@supabase/supabase-js';
@@ -19,6 +19,7 @@ async function query(text, params) {
   }
 }
 
+// --- Пользователи ---
 export async function getUserById(id) {
   const { rows } = await query('SELECT * FROM users WHERE id = $1', [id]);
   return rows[0] || null;
@@ -26,8 +27,8 @@ export async function getUserById(id) {
 
 export async function createUser(id, first_name = '', username = '', referral_source = null, referrer_id = null) {
   await query(
-    `INSERT INTO users (id, username, first_name, downloads_today, premium_limit, total_downloads, tracks_today, created_at, last_active, referral_source, referrer_id, active)
-     VALUES ($1, $2, $3, 0, 5, 0, '[]'::jsonb, NOW(), NOW(), $4, $5, TRUE)
+    `INSERT INTO users (id, username, first_name, downloads_today, premium_limit, total_downloads, tracks_today, created_at, last_active, referral_source, referrer_id, active, last_reset_date)
+     VALUES ($1, $2, $3, 0, 5, 0, '[]'::jsonb, NOW(), NOW(), $4, $5, TRUE, CURRENT_DATE)
      ON CONFLICT (id) DO NOTHING`,
     [id, username || '', first_name || '', referral_source, referrer_id]
   );
@@ -59,98 +60,15 @@ export async function updateUserField(id, field, value) {
   await query(`UPDATE users SET ${field} = $1 WHERE id = $2`, [value, id]);
 }
 
-export async function findCachedTrack(trackUrl) {
-  try {
-    const { data, error } = await supabase.from('track_cache').select('file_id, track_name').eq('url', trackUrl).single();
-    if (error && error.code !== 'PGRST116') console.error('Ошибка поиска в кэше Supabase:', error);
-    return data ? { fileId: data.file_id, trackName: data.track_name } : null;
-  } catch (e) {
-    console.error('Критическая ошибка в findCachedTrack:', e);
-    return null;
-  }
-}
-
-export async function cacheTrack(trackUrl, fileId, title) {
-  await pool.query(
-    'INSERT INTO track_cache (url, file_id, track_name) VALUES ($1, $2, $3) ON CONFLICT (url) DO UPDATE SET file_id = $2, track_name = $3',
-    [trackUrl, fileId, title]
-  );
-}
-
-export async function incrementDownloadsAndSaveTrack(userId, trackName, fileId, url) {
-  const newTrack = { title: trackName, fileId: fileId, url: url };
-  const res = await query(
-    `UPDATE users
-     SET downloads_today = downloads_today + 1, total_downloads = total_downloads + 1, tracks_today = COALESCE(tracks_today, '[]'::jsonb) || $1::jsonb
-     WHERE id = $2 AND downloads_today < premium_limit
-     RETURNING *`,
-    [newTrack, userId]
-  );
-  if (res.rowCount > 0) {
-    await logDownload(userId, trackName, url);
-  }
-  return res.rowCount > 0 ? res.rows[0] : null;
-}
-
-export async function setPremium(id, limit, days = 30) {
-  const until = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
-  await updateUserField(id, 'premium_limit', limit);
-  await updateUserField(id, 'premium_until', until);
-}
-
-export async function resetDailyLimitIfNeeded(userId) {
-  const { rows } = await query('SELECT last_reset_date FROM users WHERE id = $1', [userId]);
-  if (rows.length > 0) {
-      const lastReset = new Date(rows[0].last_reset_date);
-      const today = new Date();
-      if(lastReset.toDateString() !== today.toDateString()){
-          await query(`UPDATE users SET downloads_today = 0, tracks_today = '[]'::jsonb, last_reset_date = CURRENT_DATE WHERE id = $1`, [userId]);
-      }
-  }
-}
-
-export async function resetDailyStats() {
-  await query(`UPDATE users SET downloads_today = 0, tracks_today = '[]'::jsonb, last_reset_date = CURRENT_DATE`);
-}
-
 export async function getAllUsers(includeInactive = true) {
   const sql = includeInactive ? 'SELECT * FROM users ORDER BY created_at DESC' : 'SELECT * FROM users WHERE active = TRUE ORDER BY created_at DESC';
   const { rows } = await query(sql);
   return rows;
 }
 
-export async function logDownload(userId, trackTitle, url) { 
-  try {
-    await supabase.from('downloads_log').insert([{ user_id: userId, track_title: trackTitle, url: url }]);
-  } catch (e) {
-    console.error(`❌ Критическая ошибка вызова Supabase для logDownload:`, e.message);
-  }
-}
-
-// ВОССТАНОВЛЕНА ФУНКЦИЯ
-export async function logEvent(userId, event) {
-  try {
-    await supabase.from('events').insert([{ user_id: userId, event_type: event }]);
-  } catch (e) {
-    console.error(`❌ Критическая ошибка вызова Supabase для logEvent:`, e.message);
-  }
-}
-
-// ВОССТАНОВЛЕНА ФУНКЦИЯ
-export async function getActiveUsersByDate() {
-  const { rows } = await query(`SELECT TO_CHAR(last_active, 'YYYY-MM-DD') as date, COUNT(DISTINCT id) as count FROM users WHERE last_active IS NOT NULL GROUP BY date ORDER BY date`);
-  return rows.reduce((acc, row) => ({ ...acc, [row.date]: parseInt(row.count, 10) }), {});
-}
-
-// ВОССТАНОВЛЕНА ФУНКЦИЯ
-export async function getExpiringUsers(days = 3) {
-    const { rows } = await query( `SELECT * FROM users WHERE premium_until IS NOT NULL AND premium_until BETWEEN NOW() AND NOW() + INTERVAL '${days} days' ORDER BY premium_until ASC`);
-    return rows;
-}
-
 export async function getPaginatedUsers(options) {
     const { searchQuery = '', statusFilter = '', page = 1, limit = 25, sortBy = 'created_at', sortOrder = 'desc' } = options;
-    const allowedSortFields = ['id', 'total_downloads', 'created_at', 'last_active', 'premium_limit'];
+    const allowedSortFields = ['id', 'total_downloads', 'created_at', 'last_active', 'premium_limit', 'active'];
     const safeSortBy = allowedSortFields.includes(sortBy) ? `"${sortBy}"` : '"created_at"';
     const safeSortOrder = sortOrder.toLowerCase() === 'asc' ? 'ASC' : 'DESC';
     const offset = (page - 1) * limit;
@@ -176,6 +94,52 @@ export async function getPaginatedUsers(options) {
     return { users: usersResult.rows, totalPages, currentPage: page, totalUsers };
 }
 
+// --- Тарифы и лимиты ---
+export async function setPremium(id, limit, days = 30) {
+  const until = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
+  await updateUserField(id, 'premium_limit', limit);
+  await updateUserField(id, 'premium_until', until);
+}
+
+export async function resetDailyLimitIfNeeded(userId) {
+  const { rows } = await query('SELECT last_reset_date FROM users WHERE id = $1', [userId]);
+  if (rows.length > 0) {
+      const lastReset = new Date(rows[0].last_reset_date);
+      const today = new Date();
+      if(lastReset.toDateString() !== today.toDateString()){
+          await query(`UPDATE users SET downloads_today = 0, tracks_today = '[]'::jsonb, last_reset_date = CURRENT_DATE WHERE id = $1`, [userId]);
+      }
+  }
+}
+
+export async function resetDailyStats() {
+  await query(`UPDATE users SET downloads_today = 0, tracks_today = '[]'::jsonb, last_reset_date = CURRENT_DATE WHERE last_reset_date < CURRENT_DATE`);
+}
+
+export async function getExpiringUsers(days = 3) {
+    const { rows } = await query( `SELECT * FROM users WHERE premium_until IS NOT NULL AND premium_until BETWEEN NOW() AND NOW() + INTERVAL '${days} days' ORDER BY premium_until ASC`);
+    return rows;
+}
+
+// --- Кэш треков ---
+export async function findCachedTrack(trackUrl) {
+  try {
+    const { data, error } = await supabase.from('track_cache').select('file_id, track_name').eq('url', trackUrl).single();
+    if (error && error.code !== 'PGRST116') console.error('Ошибка поиска в кэше Supabase:', error);
+    return data ? { fileId: data.file_id, trackName: data.track_name } : null;
+  } catch (e) {
+    console.error('Критическая ошибка в findCachedTrack:', e);
+    return null;
+  }
+}
+
+export async function cacheTrack(trackUrl, fileId, title) {
+  await pool.query(
+    'INSERT INTO track_cache (url, file_id, track_name) VALUES ($1, $2, $3) ON CONFLICT (url) DO UPDATE SET file_id = $2, track_name = $3',
+    [trackUrl, fileId, title]
+  );
+}
+
 export async function getCachedTracksCount() {
   try {
     const { rows } = await query('SELECT COUNT(*) FROM track_cache');
@@ -184,6 +148,59 @@ export async function getCachedTracksCount() {
     console.error("Ошибка при подсчете кэшированных треков:", e.message);
     return 0;
   }
+}
+
+// --- Логирование ---
+export async function incrementDownloadsAndSaveTrack(userId, trackName, fileId, url) {
+  const newTrack = { title: trackName, fileId: fileId, url: url };
+  const res = await query(
+    `UPDATE users
+     SET downloads_today = downloads_today + 1, total_downloads = total_downloads + 1, tracks_today = COALESCE(tracks_today, '[]'::jsonb) || $1::jsonb
+     WHERE id = $2 AND downloads_today < premium_limit
+     RETURNING *`,
+    [newTrack, userId]
+  );
+  if (res.rowCount > 0) {
+    await logDownload(userId, trackName, url);
+  }
+  return res.rowCount > 0 ? res.rows[0] : null;
+}
+
+export async function logDownload(userId, trackTitle, url) { 
+  try {
+    await supabase.from('downloads_log').insert([{ user_id: userId, track_title: trackTitle, url: url }]);
+  } catch (e) {
+    console.error(`❌ Критическая ошибка вызова Supabase для logDownload:`, e.message);
+  }
+}
+
+export async function logEvent(userId, event) {
+  try {
+    await supabase.from('events').insert([{ user_id: userId, event_type: event }]);
+  } catch (e) {
+    console.error(`❌ Критическая ошибка вызова Supabase для logEvent:`, e.message);
+  }
+}
+
+// --- Статистика для дашборда ---
+export async function getReferralSourcesStats() {
+  const { rows } = await query(`SELECT referral_source, COUNT(*) as count FROM users WHERE referral_source IS NOT NULL GROUP BY referral_source ORDER BY count DESC`);
+  return rows.map(row => ({ source: row.referral_source, count: parseInt(row.count, 10) }));
+}
+
+export async function getRegistrationsByDate() {
+  const { rows } = await query(`SELECT TO_CHAR(created_at, 'YYYY-MM-DD') as date, COUNT(*) as count FROM users GROUP BY date ORDER BY date`);
+  return rows.reduce((acc, row) => ({ ...acc, [row.date]: parseInt(row.count, 10) }), {});
+}
+
+export async function getDownloadsByDate() {
+  const { rows } = await query(`SELECT TO_CHAR(downloaded_at, 'YYYY-MM-DD') as date, COUNT(*) as count FROM downloads_log GROUP BY date ORDER BY date`);
+  return rows.reduce((acc, row) => ({ ...acc, [row.date]: parseInt(row.count, 10) }), {});
+}
+
+export async function getActiveUsersByDate() {
+  const { rows } = await query(`SELECT TO_CHAR(last_active, 'YYYY-MM-DD') as date, COUNT(DISTINCT id) as count FROM users WHERE last_active IS NOT NULL GROUP BY date ORDER BY date`);
+  return rows.reduce((acc, row) => ({ ...acc, [row.date]: parseInt(row.count, 10) }), {});
 }
 
 export async function getDownloadsByUserId(userId, limit = 50) {
@@ -202,16 +219,59 @@ export async function getReferralsByUserId(userId) {
   return rows;
 }
 
-export async function getActiveFreeUsers() {
-  const { rows } = await query(`SELECT id FROM users WHERE active = TRUE AND premium_limit <= 5`);
+export async function getUsersCountByTariff() {
+  const { rows } = await query(`
+    SELECT CASE 
+        WHEN premium_limit <= 5 THEN 'Free' WHEN premium_limit = 30 THEN 'Plus'
+        WHEN premium_limit = 100 THEN 'Pro' ELSE 'Unlimited'
+      END as tariff, COUNT(id) as count
+    FROM users WHERE active = TRUE GROUP BY tariff;
+  `);
+  return rows.reduce((acc, row) => ({ ...acc, [row.tariff]: parseInt(row.count) }), {});
+}
+
+export async function getTopReferralSources(limit = 5) {
+  const { rows } = await query(
+    `SELECT referral_source, COUNT(id) as count 
+     FROM users WHERE referral_source IS NOT NULL AND referral_source != ''
+     GROUP BY referral_source ORDER BY count DESC LIMIT $1`,
+    [limit]
+  );
   return rows;
 }
 
-export async function getActivePremiumUsers() {
-  const { rows } = await query(`SELECT id FROM users WHERE active = TRUE AND premium_limit > 5`);
+export async function getDailyStats(days = 30) {
+  const { rows } = await query(`
+    WITH date_series AS (SELECT generate_series(CURRENT_DATE - INTERVAL '${days - 1} days', CURRENT_DATE, '1 day')::date AS day)
+    SELECT 
+      ds.day::text,
+      COUNT(DISTINCT u.id) FILTER (WHERE u.created_at::date = ds.day) AS registrations,
+      COUNT(DISTINCT d.user_id) FILTER (WHERE d.downloaded_at::date = ds.day) AS active_users,
+      COUNT(d.id) FILTER (WHERE d.downloaded_at::date = ds.day) AS downloads
+    FROM date_series ds
+    LEFT JOIN users u ON u.created_at::date <= ds.day
+    LEFT JOIN downloads_log d ON d.downloaded_at::date = ds.day
+    WHERE ds.day >= CURRENT_DATE - INTERVAL '${days - 1} days'
+    GROUP BY ds.day ORDER BY ds.day;
+  `);
   return rows;
 }
 
+export async function getActivityByWeekday() {
+  const { rows } = await query(`
+    SELECT TO_CHAR(downloaded_at, 'ID') as weekday_num, COUNT(*) as count
+    FROM downloads_log WHERE downloaded_at >= NOW() - INTERVAL '90 days'
+    GROUP BY 1 ORDER BY 1;
+  `);
+  const weekdays = ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота', 'Воскресенье'];
+  const result = Array(7).fill(0).map((_, i) => ({ weekday: weekdays[i], count: 0 }));
+  rows.forEach(row => {
+    result[parseInt(row.weekday_num) - 1].count = parseInt(row.count);
+  });
+  return result;
+}
+
+// --- Рассылки ---
 export async function createBroadcastTask(task) {
   const { message, audioPath, targetAudience, disableNotification, scheduledAt } = task;
   await query(
@@ -221,20 +281,14 @@ export async function createBroadcastTask(task) {
   );
 }
 
-// В ФАЙЛЕ db.js
-// >>>>> ЗАМЕНИТЕ ЭТУ ФУНКЦИЮ <<<<<
 export async function getPendingBroadcastTask() {
   const { rows } = await query(`
-    UPDATE broadcast_tasks
-    SET status = 'processing'
+    UPDATE broadcast_tasks SET status = 'processing'
     WHERE id = (
       SELECT id FROM broadcast_tasks
       WHERE status = 'pending' AND scheduled_at <= NOW() AT TIME ZONE 'UTC'
-      ORDER BY scheduled_at
-      LIMIT 1
-      FOR UPDATE SKIP LOCKED
-    )
-    RETURNING *;
+      ORDER BY scheduled_at LIMIT 1 FOR UPDATE SKIP LOCKED
+    ) RETURNING *;
   `);
   return rows[0] || null;
 }
@@ -272,85 +326,4 @@ export async function updateBroadcastTask(taskId, task) {
      WHERE id = $6`,
     [message, audioPath, targetAudience, disableNotification, scheduledAt, taskId]
   );
-}
-// В КОНЕЦ ФАЙЛА db.js
-
-// Для Графика 1
-export async function getDailyStats(days = 30) {
-  const { rows } = await query(`
-    WITH date_series AS (
-      SELECT generate_series(
-        CURRENT_DATE - INTERVAL '${days - 1} days',
-        CURRENT_DATE,
-        '1 day'
-      )::date AS day
-    )
-    SELECT 
-      ds.day::text,
-      COUNT(DISTINCT u.id) FILTER (WHERE u.created_at::date = ds.day) AS registrations,
-      COUNT(DISTINCT d.user_id) FILTER (WHERE d.downloaded_at::date = ds.day) AS active_users,
-      COUNT(d.id) FILTER (WHERE d.downloaded_at::date = ds.day) AS downloads
-    FROM date_series ds
-    LEFT JOIN users u ON u.created_at::date <= ds.day
-    LEFT JOIN downloads_log d ON d.downloaded_at::date = ds.day
-    WHERE ds.day >= CURRENT_DATE - INTERVAL '${days - 1} days'
-    GROUP BY ds.day
-    ORDER BY ds.day;
-  `);
-  return rows;
-}
-
-// Для Графика 3
-export async function getActivityByWeekday() {
-  const { rows } = await query(`
-    SELECT 
-      TO_CHAR(downloaded_at, 'ID') as weekday_num, -- ISO 8601: 1 = Пн, 7 = Вс
-      TO_CHAR(downloaded_at, 'Day') as weekday_name,
-      COUNT(*) as count
-    FROM downloads_log
-    WHERE downloaded_at >= NOW() - INTERVAL '90 days'
-    GROUP BY 1, 2
-    ORDER BY 1;
-  `);
-  // Приводим к формату [ { weekday: 'Понедельник', count: 123 }, ... ]
-  const weekdays = ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота', 'Воскресенье'];
-  const result = Array(7).fill(0).map((_, i) => ({ weekday: weekdays[i], count: 0 }));
-  rows.forEach(row => {
-    result[parseInt(row.weekday_num) - 1].count = parseInt(row.count);
-  });
-  return result;
-}
-// Эти функции были в вашем старом коде, восстанавливаю их
-export async function getReferralSourcesStats() {
-  const { rows } = await query(`SELECT referral_source, COUNT(*) as count FROM users WHERE referral_source IS NOT NULL GROUP BY referral_source ORDER BY count DESC`);
-  return rows.map(row => ({ source: row.referral_source, count: parseInt(row.count, 10) }));
-}
-
-export async function getRegistrationsByDate() {
-  const { rows } = await query(`SELECT TO_CHAR(created_at, 'YYYY-MM-DD') as date, COUNT(*) as count FROM users GROUP BY date ORDER BY date`);
-  return rows.reduce((acc, row) => ({ ...acc, [row.date]: parseInt(row.count, 10) }), {});
-}
-
-export async function getDownloadsByDate() {
-  const { rows } = await query(`SELECT TO_CHAR(downloaded_at, 'YYYY-MM-DD') as date, COUNT(*) as count FROM downloads_log GROUP BY date ORDER BY date`);
-  return rows.reduce((acc, row) => ({ ...acc, [row.date]: parseInt(row.count, 10) }), {});
-}
-
-export async function getLatestReviews(limit = 10) {
-  const { data } = await supabase.from('reviews').select('*').order('time', { ascending: false }).limit(limit);
-  return data || [];
-}
-
-export async function getUserActivityByDayHour(days = 30) {
-    const { rows } = await query(`
-        SELECT TO_CHAR(last_active, 'YYYY-MM-DD') AS day, EXTRACT(HOUR FROM last_active) AS hour, COUNT(*) AS count
-        FROM users WHERE last_active >= CURRENT_DATE - INTERVAL '${days} days'
-        GROUP BY day, hour ORDER BY day, hour
-    `);
-    const activity = {};
-    rows.forEach(row => {
-        if (!activity[row.day]) activity[row.day] = Array(24).fill(0);
-        activity[row.day][parseInt(row.hour, 10)] = parseInt(row.count, 10);
-    });
-    return activity;
 }
