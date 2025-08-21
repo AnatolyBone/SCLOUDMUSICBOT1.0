@@ -48,11 +48,16 @@
       <div class="card-header">Пользователи по тарифам</div>
       <div class="card-body">
         <ul class="list-group list-group-flush">
-          <li class="list-group-item d-flex justify-content-between align-items-center px-0"><span>🆓 Free</span><span class="fw-bold"><%= stats.usersByTariff.Free || 0 %></span></li>
-          <li class="list-group-item d-flex justify-content-between align-items-center px-0"><span>🎯 Plus</span><span class="fw-bold"><%= stats.usersByTariff.Plus || 0 %></span></li>
-          <li class="list-group-item d-flex justify-content-between align-items-center px-0"><span>💪 Pro</span><span class="fw-bold"><%= stats.usersByTariff.Pro || 0 %></span></li>
-          <li class="list-group-item d-flex justify-content-between align-items-center px-0"><span>💎 Unlimited</span><span class="fw-bold"><%= stats.usersByTariff.Unlimited || 0 %></span></li>
-        </ul>
+          <!-- В ФАЙЛЕ views/dashboard.ejs, в карточке "Пользователи по тарифам" -->
+<ul class="list-group list-group-flush">
+  <li class="list-group-item d-flex justify-content-between align-items-center px-0"><span>🆓 Free</span><span class="fw-bold"><%= stats.usersByTariff.Free || 0 %></span></li>
+  <li class="list-group-item d-flex justify-content-between align-items-center px-0"><span>🎯 Plus</span><span class="fw-bold"><%= stats.usersByTariff.Plus || 0 %></span></li>
+  <li class="list-group-item d-flex justify-content-between align-items-center px-0"><span>💪 Pro</span><span class="fw-bold"><%= stats.usersByTariff.Pro || 0 %></span></li>
+  <li class="list-group-item d-flex justify-content-between align-items-center px-0"><span>💎 Unlimited</span><span class="fw-bold"><%= stats.usersByTariff.Unlimited || 0 %></span></li>
+  <% if (stats.usersByTariff.Other) { %>
+    <li class="list-group-item d-flex justify-content-between align-items-center px-0"><span>⚙️ Другие</span><span class="fw-bold"><%= stats.usersByTariff.Other %></span></li>
+  <% } %>
+</ul>
       </div>
     </div>
   </div>
