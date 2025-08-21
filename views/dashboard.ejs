@@ -1,4 +1,4 @@
-<% // views/dashboard.ejs (ФИНАЛЬНАЯ ВЕРСИЯ) %>
+<% // views/dashboard.ejs (ФИНАЛЬНАЯ ВЕРСИЯ СО ВСЕМ) %>
 
 <%- contentFor('styles') %>
 <style>
@@ -47,13 +47,12 @@
     <div class="card shadow-sm h-100">
       <div class="card-header">Пользователи по тарифам</div>
       <div class="card-body">
-        <!-- >>>>> ИСПРАВЛЕНИЕ: Убран лишний вложенный <ul> <<<<< -->
         <ul class="list-group list-group-flush">
           <li class="list-group-item d-flex justify-content-between align-items-center px-0"><span>🆓 Free</span><span class="fw-bold"><%= stats.usersByTariff.Free || 0 %></span></li>
           <li class="list-group-item d-flex justify-content-between align-items-center px-0"><span>🎯 Plus</span><span class="fw-bold"><%= stats.usersByTariff.Plus || 0 %></span></li>
           <li class="list-group-item d-flex justify-content-between align-items-center px-0"><span>💪 Pro</span><span class="fw-bold"><%= stats.usersByTariff.Pro || 0 %></span></li>
           <li class="list-group-item d-flex justify-content-between align-items-center px-0"><span>💎 Unlimited</span><span class="fw-bold"><%= stats.usersByTariff.Unlimited || 0 %></span></li>
-          <% if (stats.usersByTariff.Other) { %>
+          <% if (stats.usersByTariff.Other > 0) { %>
             <li class="list-group-item d-flex justify-content-between align-items-center px-0"><span>⚙️ Другие</span><span class="fw-bold"><%= stats.usersByTariff.Other %></span></li>
           <% } %>
         </ul>
