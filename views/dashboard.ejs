@@ -1,9 +1,10 @@
-<% // views/dashboard.ejs %>
+<% // views/dashboard.ejs (ФИНАЛЬНАЯ ВЕРСЯ СО ВСЕМ) %>
 
 <%- contentFor('styles') %>
 <style>
   .card-metric { transition: transform 0.2s; }
   .card-metric:hover { transform: translateY(-5px); }
+  .chart-container { position: relative; height: 300px; width: 100%; }
 </style>
 
 <%- contentFor('body') %>
@@ -11,124 +12,124 @@
 <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
   <h1 class="h2">Дашборд</h1>
   <div class="btn-toolbar mb-2 mb-md-0">
-    <form id="filterForm" class="d-flex gap-2">
-      <select id="rangeSelect" class="form-select form-select-sm" onchange="this.form.submit()">
-        <option value="7" <%= (typeof period !== 'undefined' && period == '7') ? 'selected' : '' %>>7 дней</option>
-        <option value="30" <%= (typeof period !== 'undefined' && period == '30') ? 'selected' : '' %>>30 дней</option>
-        <option value="90" <%= (typeof period !== 'undefined' && period == '90') ? 'selected' : '' %>>90 дней</option>
+    <form class="d-flex gap-2">
+      <select name="period" class="form-select form-select-sm" onchange="this.form.submit()">
+        <option value="7" <%= period == '7' ? 'selected' : '' %>>За 7 дней</option>
+        <option value="30" <%= period == '30' ? 'selected' : '' %>>За 30 дней</option>
+        <option value="90" <%= period == '90' ? 'selected' : '' %>>За 90 дней</option>
       </select>
     </form>
   </div>
 </div>
 
-<!-- Метрики -->
+<!-- Верхние метрики -->
 <div class="row g-4 mb-4">
-  <div class="col-md-3 col-sm-6">
-    <div class="card card-metric shadow-sm text-center">
-      <div class="card-body">
-        <h5 class="card-title text-muted">Пользователей</h5>
-        <p class="h2 mb-0"><%= (locals.stats && stats.total_users) ? stats.total_users : '0' %></p>
-      </div>
-    </div>
-  </div>
-  <div class="col-md-3 col-sm-6">
-    <div class="card card-metric shadow-sm text-center">
-      <div class="card-body">
-        <h5 class="card-title text-muted">Активных сегодня</h5>
-        <p class="h2 mb-0"><%= (locals.stats && stats.active_today) ? stats.active_today : '0' %></p>
-      </div>
-    </div>
-  </div>
-  <div class="col-md-3 col-sm-6">
-    <div class="card card-metric shadow-sm text-center">
-      <div class="card-body">
-        <h5 class="card-title text-muted">Загрузок (всего)</h5>
-        <p class="h2 mb-0"><%= (locals.stats && stats.total_downloads) ? stats.total_downloads : '0' %></p>
-      </div>
-    </div>
-  </div>
-    <div class="col-md-3 col-sm-6">
-    <div class="card card-metric shadow-sm text-center">
-      <div class="card-body">
-        <h5 class="card-title text-muted">Активных / Всего</h5>
-        <p class="h2 mb-0"><%= (locals.stats && stats.active_users) ? stats.active_users : '0' %> / <%= (locals.stats && stats.total_users) ? stats.total_users : '0' %></p>
-      </div>
-    </div>
-  </div>
+  <div class="col-xl-3 col-md-6"><div class="card card-metric shadow-sm text-center h-100"><div class="card-body"><h5 class="card-title text-muted">Пользователей</h5><p class="h2 mb-0"><%= stats.total_users || '0' %></p></div></div></div>
+  <div class="col-xl-3 col-md-6"><div class="card card-metric shadow-sm text-center h-100"><div class="card-body"><h5 class="card-title text-muted">Активных сегодня</h5><p class="h2 mb-0"><%= stats.active_today || '0' %></p></div></div></div>
+  <div class="col-xl-3 col-md-6"><div class="card card-metric shadow-sm text-center h-100"><div class="card-body"><h5 class="card-title text-muted">Загрузок (всего)</h5><p class="h2 mb-0"><%= stats.total_downloads || '0' %></p></div></div></div>
+  <div class="col-xl-3 col-md-6"><div class="card card-metric shadow-sm text-center h-100"><div class="card-body"><h5 class="card-title text-muted">Треков в кэше</h5><p class="h2 mb-0"><%= stats.cachedTracksCount || '0' %></p></div></div></div>
 </div>
 
-<!-- БЛОК СО СТАТУСОМ СИСТЕМ -->
+<!-- Информационные блоки -->
 <div class="row g-4 mb-4">
-  <div class="col-lg-6">
+  <div class="col-lg-4">
     <div class="card shadow-sm h-100">
       <div class="card-header">Статус систем</div>
       <div class="card-body">
         <ul class="list-group list-group-flush">
-          <li class="list-group-item d-flex justify-content-between align-items-center px-0">
-            <span>Очередь загрузок</span>
-            <span class="badge bg-primary rounded-pill">
-              <%= (locals.stats && stats.queueWaiting) ? stats.queueWaiting : '0' %> в ож. / <%= (locals.stats && stats.queueActive) ? stats.queueActive : '0' %> в раб.
-            </span>
-          </li>
-          <li class="list-group-item d-flex justify-content-between align-items-center px-0">
-            <span>Канал-хранилище (кэш)</span>
-            <% if (locals.storageStatus && storageStatus.available) { %>
-              <span class="badge bg-success">Доступен</span>
-            <% } else { %>
-              <span class="badge bg-danger" data-bs-toggle="tooltip" title="<%= (locals.storageStatus && storageStatus.error) ? storageStatus.error : 'ID канала не указан' %>">
-                Ошибка
-              </span>
-            <% } %>
-          </li>
-          <!-- >>>>>>>> ДОБАВЛЕНА СТРОКА С КОЛИЧЕСТВОМ ТРЕКОВ В КЭШЕ <<<<<<<<<< -->
-          <li class="list-group-item d-flex justify-content-between align-items-center px-0">
-            <span>Треков в базе (кэше)</span>
-            <span class="badge bg-info rounded-pill">
-              <%= (locals.stats && stats.cachedTracksCount) ? stats.cachedTracksCount : '0' %>
-            </span>
-          </li>
+          <li class="list-group-item d-flex justify-content-between align-items-center px-0"><span>Очередь загрузок</span><span class="badge bg-primary rounded-pill"><%= stats.queueWaiting || 0 %> в ож. / <%= stats.queueActive || 0 %> в раб.</span></li>
+          <li class="list-group-item d-flex justify-content-between align-items-center px-0"><span>Канал-хранилище</span><% if (storageStatus.available) { %><span class="badge bg-success">Доступен</span><% } else { %><span class="badge bg-danger" data-bs-toggle="tooltip" title="<%= storageStatus.error || 'ID не указан' %>">Ошибка</span><% } %></li>
         </ul>
       </div>
     </div>
   </div>
-  <div class="col-lg-6">
-    <!-- Здесь можно добавить еще одну информационную карточку в будущем -->
+  <div class="col-lg-4">
+    <div class="card shadow-sm h-100">
+      <div class="card-header">Пользователи по тарифам</div>
+      <div class="card-body">
+        <ul class="list-group list-group-flush">
+          <li class="list-group-item d-flex justify-content-between align-items-center px-0"><span>🆓 Free</span><span class="fw-bold"><%= stats.usersByTariff.Free || 0 %></span></li>
+          <li class="list-group-item d-flex justify-content-between align-items-center px-0"><span>🎯 Plus</span><span class="fw-bold"><%= stats.usersByTariff.Plus || 0 %></span></li>
+          <li class="list-group-item d-flex justify-content-between align-items-center px-0"><span>💪 Pro</span><span class="fw-bold"><%= stats.usersByTariff.Pro || 0 %></span></li>
+          <li class="list-group-item d-flex justify-content-between align-items-center px-0"><span>💎 Unlimited</span><span class="fw-bold"><%= stats.usersByTariff.Unlimited || 0 %></span></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-4">
+    <div class="card shadow-sm h-100">
+      <div class="card-header">Топ-5 источников трафика</div>
+      <div class="card-body">
+         <% if (stats.topSources && stats.topSources.length > 0) { %>
+          <ul class="list-group list-group-flush">
+            <% stats.topSources.forEach(source => { %>
+              <li class="list-group-item d-flex justify-content-between align-items-center px-0">
+                <span class="text-truncate" title="<%= source.referral_source %>"><%= source.referral_source %></span>
+                <span class="badge bg-secondary rounded-pill"><%= source.count %></span>
+              </li>
+            <% }) %>
+          </ul>
+        <% } else { %>
+          <p class="text-muted text-center my-4">Нет данных по источникам.</p>
+        <% } %>
+      </div>
+    </div>
   </div>
 </div>
 
-<!-- Графики -->
+<!-- ГРАФИКИ -->
 <div class="card shadow-sm mb-4">
-  <div class="card-header">Активность</div>
-  <div class="card-body" style="height: 350px;">
+  <div class="card-header">Динамика метрик (за <%= period %> дней)</div>
+  <div class="card-body chart-container">
     <canvas id="mainChart"></canvas>
   </div>
 </div>
 
+<div class="row g-4">
+  <div class="col-lg-4">
+    <div class="card shadow-sm">
+      <div class="card-header">Распределение по тарифам</div>
+      <div class="card-body d-flex justify-content-center align-items-center" style="height: 300px;">
+          <canvas id="tariffsChart"></canvas>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-8">
+    <div class="card shadow-sm">
+      <div class="card-header">Активность по дням недели (загрузки)</div>
+      <div class="card-body chart-container" style="height: 300px;">
+          <canvas id="weekdayChart"></canvas>
+      </div>
+    </div>
+  </div>
+</div>
+
 <%- contentFor('scripts') %>
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-<!-- Важно! Добавляем скрипт для Bootstrap, чтобы работали всплывающие подсказки -->
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
   document.addEventListener('DOMContentLoaded', () => {
-    // Инициализация всплывающих подсказок Bootstrap
-    var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'))
-    var tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {
-      return new bootstrap.Tooltip(tooltipTriggerEl)
-    })
-
-    // Ваш код для инициализации графика
-    const chartData = <%- JSON.stringify(locals.chartDataCombined || {}) %>;
-    if (chartData && chartData.labels && chartData.labels.length) {
-      const ctx = document.getElementById('mainChart').getContext('2d');
-      new Chart(ctx, {
-        type: 'line',
-        data: chartData,
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          scales: { y: { beginAtZero: true } },
-        }
+    new bootstrap.Tooltip(document.body, { selector: "[data-bs-toggle='tooltip']" });
+    // График 1: Динамика
+    const chartDataCombined = <%- JSON.stringify(locals.chartDataCombined || {}) %>;
+    if (chartDataCombined.labels?.length) {
+      new Chart(document.getElementById('mainChart'), {
+        type: 'line', data: chartDataCombined, options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true } } }
       });
+    }
+    // График 2: Тарифы
+    const chartDataTariffs = <%- JSON.stringify(locals.chartDataTariffs || {}) %>;
+    if (chartDataTariffs.labels?.length) {
+        new Chart(document.getElementById('tariffsChart'), {
+            type: 'doughnut', data: chartDataTariffs, options: { responsive: true, maintainAspectRatio: true, plugins: { legend: { position: 'top' } } }
+        });
+    }
+    // График 3: Дни недели
+    const chartDataWeekday = <%- JSON.stringify(locals.chartDataWeekday || {}) %>;
+    if (chartDataWeekday.labels?.length) {
+        new Chart(document.getElementById('weekdayChart'), {
+            type: 'bar', data: chartDataWeekday, options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true } }, plugins: { legend: { display: false } } }
+        });
     }
   });
 </script>
