@@ -327,3 +327,23 @@ export async function updateBroadcastTask(taskId, task) {
     [message, audioPath, targetAudience, disableNotification, scheduledAt, taskId]
   );
 }
+
+// ВОССТАНОВЛЕННЫЕ ФУНКЦИИ
+export async function getLatestReviews(limit = 10) {
+  const { data } = await supabase.from('reviews').select('*').order('time', { ascending: false }).limit(limit);
+  return data || [];
+}
+
+export async function getUserActivityByDayHour(days = 30) {
+    const { rows } = await query(`
+        SELECT TO_CHAR(last_active, 'YYYY-MM-DD') AS day, EXTRACT(HOUR FROM last_active) AS hour, COUNT(*) AS count
+        FROM users WHERE last_active >= CURRENT_DATE - INTERVAL '${days} days'
+        GROUP BY day, hour ORDER BY day, hour
+    `);
+    const activity = {};
+    rows.forEach(row => {
+        if (!activity[row.day]) activity[row.day] = Array(24).fill(0);
+        activity[row.day][parseInt(row.hour, 10)] = parseInt(row.count, 10);
+    });
+    return activity;
+}
