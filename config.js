@@ -13,6 +13,7 @@ export const STORAGE_CHANNEL_ID = process.env.STORAGE_CHANNEL_ID;
 export const DATABASE_URL = process.env.DATABASE_URL;
 export const REDIS_URL = process.env.REDIS_URL;
 export const SUPABASE_URL = process.env.SUPABASE_URL;
+export const PROXY_URL = process.env.PROXY_URL;
 export const SUPABASE_KEY = process.env.SUPABASE_KEY;
 let rawChannelIdentifier = process.env.CHANNEL_URL || '';
 // Если в переменной полная ссылка, извлекаем username
