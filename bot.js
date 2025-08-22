@@ -1,4 +1,4 @@
-// bot.js
+// bot.js (ФИНАЛЬНАЯ ВЕРСИЯ - БЕЗ ОШИБОК)
 
 import { Telegraf, Markup, TelegramError } from 'telegraf';
 import { ADMIN_ID, BOT_TOKEN, WEBHOOK_URL, CHANNEL_USERNAME, STORAGE_CHANNEL_ID } from './config.js';
@@ -188,6 +188,7 @@ bot.hears(T('help'), async (ctx) => await ctx.reply(T('helpInfo')));
 
 bot.hears(T('upgrade'), async (ctx) => {
     const rawText = T('upgradeInfo');
+
     const safeHtml = rawText
         .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
         .replace(/```math
@@ -196,8 +197,12 @@ bot.hears(T('upgrade'), async (ctx) => {
         .replace(/(?<![a-zA-Z0-9])@([a-zA-Z0-9_]{5,32})/g, '<a href="https://t.me/$1">@$1</a>')
         .replace(/\*(.*?)\*/g, '<b>$1</b>')
         .replace(/(?<!\w)_(.*?)_(?!\w)/g, '<i>$1</i>');
+
     try {
-        await ctx.reply(safeHtml, { parse_mode: 'HTML', disable_web_page_preview: true });
+        await ctx.reply(safeHtml, { 
+            parse_mode: 'HTML',
+            disable_web_page_preview: true 
+        });
     } catch (e) {
         console.error("Ошибка отправки upgradeInfo:", e.message);
         await ctx.reply(rawText);
