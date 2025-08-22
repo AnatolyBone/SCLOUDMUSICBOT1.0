@@ -1,4 +1,4 @@
-// index.js (ФИНАЛЬНАЯ ВЕРСИЯ СО ВСЕМИ ФУНКЦИЯМИ И ИМПОРТАМИ)
+// index.js (ФИНАЛЬНАЯ ВЕРСИЯ)
 
 import express from 'express';
 import session from 'express-session';
@@ -20,12 +20,11 @@ import {
     getLatestReviews, getUserActivityByDayHour, getDownloadsByUserId, getReferralsByUserId, 
     getCachedTracksCount, getActiveFreeUsers, getActivePremiumUsers,
     createBroadcastTask, getPendingBroadcastTask, completeBroadcastTask, failBroadcastTask,
-    getAllBroadcastTasks, deleteBroadcastTask, getBroadcastTaskById, updateBroadcastTask,
-    getUsersCountByTariff, getTopReferralSources, getDailyStats, getActivityByWeekday, logEvent, resetOtherTariffsToFree
+    getAllBroadcastTasks, deleteBroadcastTask, getBroadcastTaskById, updateBroadcastTask
 } from './db.js';
 import { bot } from './bot.js';
 import redisService from './services/redisClient.js';
-import { WEBHOOK_URL, PORT, SESSION_SECRET, ADMIN_ID, ADMIN_LOGIN, ADMIN_PASSWORD, WEBHOOK_PATH, STORAGE_CHANNEL_ID, CHANNEL_USERNAME } from './config.js';
+import { WEBHOOK_URL, PORT, SESSION_SECRET, ADMIN_ID, ADMIN_LOGIN, ADMIN_PASSWORD, WEBHOOK_PATH, STORAGE_CHANNEL_ID } from './config.js';
 import { loadTexts } from './config/texts.js';
 import { downloadQueue } from './services/downloadManager.js';
 
@@ -59,7 +58,7 @@ async function startApp() {
             await bot.telegram.deleteWebhook({ drop_pending_updates: true });
             bot.launch();
         }
-        
+
         app.listen(PORT, () => console.log(`✅ [App] Сервер запущен на порту ${PORT}.`));
         
         console.log('[App] Настройка фоновых задач...');
@@ -114,13 +113,8 @@ function setupExpress() {
     });
     app.get('/logout', (req, res) => req.session.destroy(() => res.redirect('/admin')));
     
-    // В ФАЙЛЕ index.js
-
-// >>>>> ЗАМЕНИТЕ ВЕСЬ БЛОК app.get('/dashboard', ...) НА ЭТОТ <<<<<
-
-app.get('/dashboard', requireAuth, async (req, res) => {
+    app.get('/dashboard', requireAuth, async (req, res) => {
         try {
-            const period = req.query.period || 30;
             let storageStatus = { available: false, error: '' };
             if (STORAGE_CHANNEL_ID) {
                 try {
@@ -130,16 +124,15 @@ app.get('/dashboard', requireAuth, async (req, res) => {
                     storageStatus.error = e.message;
                 }
             }
-            
-            const [users, cachedTracksCount, usersByTariff, topSources, dailyStats, weekdayActivity] = await Promise.all([
+            const [users, registrationsRaw, cachedTracksCount, usersByTariff, topSources, dailyStats, weekdayActivity] = await Promise.all([
                 getAllUsers(true), 
+                getRegistrationsByDate(),
                 getCachedTracksCount(),
                 getUsersCountByTariff(),
                 getTopReferralSources(),
-                getDailyStats(period),
+                getDailyStats(req.query.period || 30),
                 getActivityByWeekday()
             ]);
-            
             const stats = {
                 total_users: users.length,
                 active_users: users.filter(u => u.active).length,
@@ -151,7 +144,6 @@ app.get('/dashboard', requireAuth, async (req, res) => {
                 usersByTariff: usersByTariff,
                 topSources: topSources
             };
-
             const chartDataCombined = {
                 labels: dailyStats.map(d => new Date(d.day).toLocaleDateString('ru-RU', {day: '2-digit', month: '2-digit'})),
                 datasets: [
@@ -160,37 +152,21 @@ app.get('/dashboard', requireAuth, async (req, res) => {
                     { label: 'Загрузки', data: dailyStats.map(d => d.downloads), borderColor: '#fd7e14', tension: 0.1, fill: false }
                 ]
             };
-
             const chartDataTariffs = {
                 labels: Object.keys(usersByTariff),
                 datasets: [{ data: Object.values(usersByTariff), backgroundColor: ['#6c757d', '#17a2b8', '#ffc107', '#007bff', '#dc3545'] }]
             };
-
             const chartDataWeekday = {
                 labels: weekdayActivity.map(d => d.weekday.trim()),
                 datasets: [{ label: 'Загрузки', data: weekdayActivity.map(d => d.count), backgroundColor: 'rgba(13, 110, 253, 0.5)' }]
             };
-
-            res.render('dashboard', { 
-                title: 'Дашборд', page: 'dashboard', stats, storageStatus, period,
-                chartDataCombined, chartDataTariffs, chartDataWeekday
-            });
+            res.render('dashboard', { title: 'Дашборд', page: 'dashboard', stats, storageStatus, period: req.query.period || 30, chartDataCombined, chartDataTariffs, chartDataWeekday });
         } catch (error) {
             console.error("Ошибка дашборда:", error);
             res.status(500).send("Ошибка сервера");
         }
     });
-// В ФАЙЛЕ index.js
 
-// >>>>> ДОБАВЬТЕ ЭТОТ РОУТ <<<<<
-app.post('/admin/reset-other-tariffs', requireAuth, async (req, res) => {
-    try {
-        await resetOtherTariffsToFree();
-    } catch (e) {
-        console.error("Ошибка при сбросе тарифов:", e);
-    }
-    res.redirect('/dashboard'); // Возвращаемся на дашборд после сброса
-});
     app.get('/users', requireAuth, async (req, res) => {
         try {
             const { q = '', status = '', page = 1, limit = 25, sort = 'created_at', order = 'desc' } = req.query;
