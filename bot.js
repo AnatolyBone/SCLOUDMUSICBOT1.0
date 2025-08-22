@@ -1,4 +1,4 @@
-// bot.js (ФИНАЛЬНАЯ ВЕРСИЯ - БЕЗ ОШИБОК)
+// bot.js (ВОССТАНОВЛЕННАЯ СТАБИЛЬНАЯ ВЕРСИЯ)
 
 import { Telegraf, Markup, TelegramError } from 'telegraf';
 import { ADMIN_ID, BOT_TOKEN, WEBHOOK_URL, CHANNEL_USERNAME, STORAGE_CHANNEL_ID } from './config.js';
@@ -45,6 +45,7 @@ function formatMenuMessage(user, ctx) {
 🎧 Сегодня скачано: *${downloadsToday}* из *${user.premium_limit}*
     `.trim();
     if (!user.subscribed_bonus_used) {
+        // Используем Markdown-ссылку
         const cleanUsername = CHANNEL_USERNAME.replace('@', '');
         const channelLink = `[наш канал](https://t.me/${cleanUsername})`;
         message += `\n\n🎁 *Бонус!* Подпишись на ${channelLink} и получи *7 дней тарифа Plus* бесплатно!`;
@@ -186,27 +187,10 @@ bot.hears(T('mytracks'), async (ctx) => {
 
 bot.hears(T('help'), async (ctx) => await ctx.reply(T('helpInfo')));
 
+// >>>>>>>> ВОССТАНОВЛЕННАЯ СТАБИЛЬНАЯ ВЕРСИЯ <<<<<<<<<<
 bot.hears(T('upgrade'), async (ctx) => {
-    const rawText = T('upgradeInfo');
-
-    const safeHtml = rawText
-        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-        .replace(/```math
-(.*?)```KATEX_INLINE_OPEN(.*?)KATEX_INLINE_CLOSE/g, '<a href="$2">$1</a>')
-        .replace(/(?<!href=")(https?:\/\/[^\s]+)/g, '<a href="$1">$1</a>')
-        .replace(/(?<![a-zA-Z0-9])@([a-zA-Z0-9_]{5,32})/g, '<a href="https://t.me/$1">@$1</a>')
-        .replace(/\*(.*?)\*/g, '<b>$1</b>')
-        .replace(/(?<!\w)_(.*?)_(?!\w)/g, '<i>$1</i>');
-
-    try {
-        await ctx.reply(safeHtml, { 
-            parse_mode: 'HTML',
-            disable_web_page_preview: true 
-        });
-    } catch (e) {
-        console.error("Ошибка отправки upgradeInfo:", e.message);
-        await ctx.reply(rawText);
-    }
+    // Просто отправляем текст из базы с базовым Markdown
+    await ctx.reply(T('upgradeInfo'), { parse_mode: 'Markdown' });
 });
 
 bot.on('text', async (ctx) => {
