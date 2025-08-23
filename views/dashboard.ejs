@@ -1,4 +1,4 @@
-<% // views/dashboard.ejs (ИСПРАВЛЕННАЯ ВЕРСИЯ) %>
+<% // views/dashboard.ejs (ФИНАЛЬНАЯ ЧИСТОВАЯ ВЕРСИЯ) %>
 
 <%- contentFor('styles') %>
 <style>
@@ -49,11 +49,11 @@
       <div class="card-header">Пользователи по тарифам</div>
       <div class="card-body">
         <ul class="list-group list-group-flush">
-          <li class="list-group-item d-flex justify-content-between align-items-center px-0"><span>🆓 Free</span><span class="fw-bold"><%= stats.usersByTariff.Free || 0 %></span></li>
-          <li class="list-group-item d-flex justify-content-between align-items-center px-0"><span>🎯 Plus</span><span class="fw-bold"><%= stats.usersByTariff.Plus || 0 %></span></li>
-          <li class="list-group-item d-flex justify-content-between align-items-center px-0"><span>💪 Pro</span><span class="fw-bold"><%= stats.usersByTariff.Pro || 0 %></span></li>
-          <li class="list-group-item d-flex justify-content-between align-items-center px-0"><span>💎 Unlimited</span><span class="fw-bold"><%= stats.usersByTariff.Unlimited || 0 %></span></li>
-          <% if (stats.usersByTariff.Other && stats.usersByTariff.Other > 0) { %>
+          <li class="list-group-item d-flex justify-content-between align-items-center px-0"><span>🆓 Free</span><span class="fw-bold"><%= (stats.usersByTariff && stats.usersByTariff.Free) || 0 %></span></li>
+          <li class="list-group-item d-flex justify-content-between align-items-center px-0"><span>🎯 Plus</span><span class="fw-bold"><%= (stats.usersByTariff && stats.usersByTariff.Plus) || 0 %></span></li>
+          <li class="list-group-item d-flex justify-content-between align-items-center px-0"><span>💪 Pro</span><span class="fw-bold"><%= (stats.usersByTariff && stats.usersByTariff.Pro) || 0 %></span></li>
+          <li class="list-group-item d-flex justify-content-between align-items-center px-0"><span>💎 Unlimited</span><span class="fw-bold"><%= (stats.usersByTariff && stats.usersByTariff.Unlimited) || 0 %></span></li>
+          <% if (stats.usersByTariff && stats.usersByTariff.Other > 0) { %>
             <li class="list-group-item d-flex justify-content-between align-items-center px-0 bg-light-warning">
               <span class="fw-bold">⚙️ Другие (старые)</span>
               <span class="fw-bold"><%= stats.usersByTariff.Other %></span>
@@ -61,7 +61,7 @@
           <% } %>
         </ul>
       </div>
-      <% if (stats.usersByTariff.Other && stats.usersByTariff.Other > 0) { %>
+      <% if (stats.usersByTariff && stats.usersByTariff.Other > 0) { %>
         <div class="card-footer text-center">
             <form method="POST" action="/admin/reset-other-tariffs" onsubmit="return confirm('Вы уверены? Это действие сбросит <%= stats.usersByTariff.Other %> пользователей на тариф Free. Отменить будет невозможно.')">
                 <button type="submit" class="btn btn-sm btn-outline-danger">Сбросить "другие" тарифы на Free</button>
@@ -120,40 +120,54 @@
 
 <%- contentFor('scripts') %>
 <script>
-  document.addEventListener('DOMContentLoaded', () => {
-    // Инициализация всплывающих подсказок Bootstrap
-    try {
-      new bootstrap.Tooltip(document.body, { selector: "[data-bs-toggle='tooltip']" });
-    } catch(e) { console.error("Ошибка инициализации Tooltip:", e); }
-    
-    // Функция-обертка для отрисовки графиков
-    function drawChart(canvasId, chartData, chartType, options = {}) {
-        const ctx = document.getElementById(canvasId);
-        if (ctx && chartData && chartData.labels && chartData.labels.length > 0) {
-            try {
-                new Chart(ctx, { type: chartType, data: chartData, options: options });
-            } catch(e) {
-                console.error(`Ошибка отрисовки графика #${canvasId}:`, e);
-            }
-        } else {
-            console.warn(`Данные для графика #${canvasId} отсутствуют или некорректны.`);
-        }
-    }
+  // Ждем полной загрузки страницы, включая все скрипты и стили
+  window.addEventListener('load', function() {
+    // Небольшая задержка, чтобы гарантировать инициализацию Chart.js
+    setTimeout(() => {
+      // Проверяем, что библиотека Chart.js действительно загрузилась
+      if (typeof Chart === 'undefined') {
+        console.error('Библиотека Chart.js не загружена!');
+        document.querySelectorAll('.chart-container').forEach(el => {
+            el.innerHTML = '<div class="d-flex justify-content-center align-items-center h-100 fw-bold text-danger">Ошибка: библиотека графиков не загружена.</div>';
+        });
+        return;
+      }
 
-    const commonLineBarOptions = { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true } } };
-    
-    // ВАЖНО: Убираем `locals.` и передаем данные напрямую
-    drawChart('mainChart', <%- JSON.stringify(chartDataCombined || {}) %>, 'line', commonLineBarOptions);
-    
-    drawChart('tariffsChart', <%- JSON.stringify(chartDataTariffs || {}) %>, 'doughnut', { 
-        responsive: true, 
-        maintainAspectRatio: true,
-        plugins: { legend: { position: 'top' } } 
-    });
-    
-    drawChart('weekdayChart', <%- JSON.stringify(chartDataWeekday || {}) %>, 'bar', { 
-        ...commonLineBarOptions, 
-        plugins: { legend: { display: false } } 
-    });
+      // Функция-обертка для отрисовки графиков
+      function drawChart(canvasId, chartData, chartType, options = {}) {
+          const canvas = document.getElementById(canvasId);
+          if (!canvas) return;
+
+          if (chartData && chartData.labels && chartData.labels.length > 0 && chartData.datasets) {
+              try {
+                  new Chart(canvas.getContext('2d'), { type: chartType, data: chartData, options: options });
+              } catch(e) {
+                  console.error(`Ошибка отрисовки графика #${canvasId}:`, e);
+                  canvas.parentElement.innerHTML = `<div class="d-flex justify-content-center align-items-center h-100 text-danger">Ошибка при построении графика.</div>`;
+              }
+          } else {
+              console.warn(`Данные для графика #${canvasId} отсутствуют.`);
+              canvas.parentElement.innerHTML = `<div class="d-flex justify-content-center align-items-center h-100 text-muted">Нет данных для отображения.</div>`;
+          }
+      }
+
+      // Опции для графиков
+      const commonLineBarOptions = { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true } } };
+      
+      // Вызываем отрисовку для каждого графика, передавая данные из EJS
+      drawChart('mainChart', <%- JSON.stringify(chartDataCombined) %>, 'line', commonLineBarOptions);
+      
+      drawChart('tariffsChart', <%- JSON.stringify(chartDataTariffs) %>, 'doughnut', { 
+          responsive: true, 
+          maintainAspectRatio: true,
+          plugins: { legend: { position: 'top' } } 
+      });
+      
+      drawChart('weekdayChart', <%- JSON.stringify(chartDataWeekday) %>, 'bar', { 
+          ...commonLineBarOptions, 
+          plugins: { legend: { display: false } } 
+      });
+      
+    }, 100); 
   });
 </script>
