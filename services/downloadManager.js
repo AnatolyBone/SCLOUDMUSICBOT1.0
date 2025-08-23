@@ -1,4 +1,4 @@
-// services/downloadManager.js (ФИНАЛЬНАЯ ВЕРСИЯ С ПОЛНЫМИ МЕТАДАННЫМИ)
+// services/downloadManager.js (ФИНАЛЬНАЯ ВЕРСИЯ 2.0 С ОКРУГЛЕНИЕМ)
 
 import { STORAGE_CHANNEL_ID, CHANNEL_USERNAME, PROXY_URL, ADMIN_ID } from '../config.js';
 import { Markup } from 'telegraf';
@@ -13,13 +13,8 @@ import { bot } from '../bot.js';
 import { T } from '../config/texts.js';
 import { TaskQueue } from '../lib/TaskQueue.js';
 import {
-    getUser,
-    resetDailyLimitIfNeeded,
-    logEvent,
-    updateUserField,
-    findCachedTrack,
-    cacheTrack, // Ожидает объект { url, fileId, title, artist, duration, thumbnail }
-    incrementDownloadsAndSaveTrack
+    getUser, resetDailyLimitIfNeeded, logEvent, updateUserField,
+    findCachedTrack, cacheTrack, incrementDownloadsAndSaveTrack
 } from '../db.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -55,6 +50,8 @@ async function safeSendMessage(userId, text, extra = {}) {
 async function trackDownloadProcessor(task) {
     const { userId, url, metadata } = task;
     const { title, uploader, id: trackId, duration, thumbnail } = metadata;
+    const roundedDuration = duration ? Math.round(duration) : undefined;
+
     let tempFilePath = null;
     let statusMessage = null;
     
@@ -78,7 +75,7 @@ async function trackDownloadProcessor(task) {
         const sentToUserMessage = await bot.telegram.sendAudio(userId, { source: fs.createReadStream(tempFilePath) }, { 
             title: title, 
             performer: uploader || 'SoundCloud',
-            duration: duration,
+            duration: roundedDuration,
             thumb: thumbnail ? { url: thumbnail } : undefined
         });
         
@@ -104,7 +101,7 @@ async function trackDownloadProcessor(task) {
                             fileId: sentToStorageMessage.audio.file_id,
                             title: title,
                             artist: uploader,
-                            duration: duration,
+                            duration: roundedDuration,
                             thumbnail: thumbnail
                         });
                         console.log(`✅ [Cache] Трек "${title}" успешно закэширован.`);
@@ -176,13 +173,13 @@ export async function enqueue(ctx, userId, url) {
 
         const isPlaylist = Array.isArray(info.entries);
         const entries = isPlaylist ? info.entries : [info];
-        const tracksToProcess = entries
+        let tracksToProcess = entries
             .filter(e => e && e.webpage_url)
             .map(e => ({
                 url: e.webpage_url,
                 metadata: {
                     id: e.id,
-                    title: sanitizeFilename(e.title).slice(0, TRACK_TITLE_LIMIT),
+                    title: sanitizeFilename(e.title || 'Unknown Title').slice(0, TRACK_TITLE_LIMIT),
                     uploader: e.uploader,
                     duration: e.duration,
                     thumbnail: e.thumbnail,
@@ -194,13 +191,14 @@ export async function enqueue(ctx, userId, url) {
         }
 
         // Логика плейлистов
-        let playlistLimit = Infinity;
-        let originalCount = tracksToProcess.length;
         if (isPlaylist) {
+            let playlistLimit = Infinity;
+            let originalCount = tracksToProcess.length;
             if (user.premium_limit <= 10) playlistLimit = 5;
             else if (user.premium_limit >= 10000) playlistLimit = UNLIMITED_PLAYLIST_LIMIT;
             
-            const limitToProcess = Math.min(originalCount, playlistLimit, (user.premium_limit - user.downloads_today));
+            const remainingDailyLimit = user.premium_limit - user.downloads_today;
+            const limitToProcess = Math.min(originalCount, playlistLimit, remainingDailyLimit);
 
             if (limitToProcess < originalCount) {
                  await safeSendMessage(userId, `ℹ️ В плейлисте ${originalCount} треков. С учетом вашего тарифа и дневного лимита будет загружено: ${limitToProcess}.`);
@@ -226,7 +224,7 @@ export async function enqueue(ctx, userId, url) {
         let sentFromCacheCount = 0;
         if (tasksFromCache.length > 0) {
             for (const track of tasksFromCache) {
-                user = await getUser(userId); // Обновляем данные пользователя перед каждой отправкой
+                user = await getUser(userId);
                 if (user.downloads_today >= user.premium_limit) break;
                 try {
                     await bot.telegram.sendAudio(userId, track.fileId, { title: track.metadata.title, performer: track.metadata.uploader });
@@ -246,7 +244,7 @@ export async function enqueue(ctx, userId, url) {
         }
         
         if (tasksToDownload.length > 0) {
-            user = await getUser(userId); // Финальная проверка лимита
+            user = await getUser(userId);
             const remainingLimit = user.premium_limit - user.downloads_today;
             
             if (remainingLimit > 0) {
@@ -259,7 +257,7 @@ export async function enqueue(ctx, userId, url) {
                     downloadQueue.add({ userId, url: track.url, metadata: track.metadata, priority: user.premium_limit });
                     if (!isPlaylist) await logEvent(userId, 'download');
                 }
-            } else {
+            } else if (sentFromCacheCount === 0) {
                 finalMessage += `🚫 Ваш дневной лимит исчерпан.`;
             }
         }
