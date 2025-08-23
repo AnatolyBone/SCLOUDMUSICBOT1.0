@@ -120,9 +120,27 @@ export async function getExpiringUsers(days = 3) {
     const { rows } = await query( `SELECT * FROM users WHERE premium_until IS NOT NULL AND premium_until BETWEEN NOW() AND NOW() + INTERVAL '${days} days' ORDER BY premium_until ASC`);
     return rows;
 }
-// db.js -> ДОБАВИТЬ ЭТУ ФУНКЦИЮ
+// db.js -> ВСТАВИТЬ ЭТОТ БЛОК ПЕРЕД РАЗДЕЛОМ "--- Кэш треков ---"
 
-// db.js -> ЗАМЕНИТЬ СТАРУЮ ФУНКЦИЮ cacheTrack
+export async function searchTracksInCache(query, limit = 7) {
+  try {
+    // Ищем по названию И по исполнителю, без учета регистра
+    const { data, error } = await supabase
+      .from('track_cache')
+      .select('title, artist, duration, thumbnail, file_id')
+      .or(`title.ilike.%${query}%,artist.ilike.%${query}%`)
+      .limit(limit);
+    
+    if (error) {
+      console.error('[DB Search] Ошибка при поиске в кэше Supabase:', error);
+      return [];
+    }
+    return data;
+  } catch (e) {
+    console.error('[DB Search] Критическая ошибка при поиске в кэше:', e);
+    return [];
+  }
+}
 
 export async function cacheTrack(trackData) {
   const { url, fileId, title, artist, duration, thumbnail } = trackData;
