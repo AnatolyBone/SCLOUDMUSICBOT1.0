@@ -4,6 +4,7 @@ import { Telegraf, Markup, TelegramError } from 'telegraf';
 import { ADMIN_ID, BOT_TOKEN, WEBHOOK_URL, CHANNEL_USERNAME, STORAGE_CHANNEL_ID } from './config.js';
 import { updateUserField, getUser, createUser, setPremium, getAllUsers, resetDailyLimitIfNeeded, getCachedTracksCount } from './db.js';
 import { T, allTextsSync } from './config/texts.js';
+import { searchSoundCloud } from './services/searchManager.js';
 import { enqueue, downloadQueue } from './services/downloadManager.js';
 
 async function isSubscribed(userId) {
@@ -192,7 +193,39 @@ bot.hears(T('upgrade'), async (ctx) => {
     // Просто отправляем текст из базы с базовым Markdown
     await ctx.reply(T('upgradeInfo'), { parse_mode: 'Markdown' });
 });
+// bot.js (вставить ПЕРЕД bot.on('text', ...))
 
+bot.on('inline_query', async (ctx) => {
+    const query = ctx.inlineQuery.query;
+
+    if (!query || query.trim().length < 2) {
+        // Если запрос пустой, предлагаем пользователю начать печатать
+        return await ctx.answerInlineQuery([], {
+            switch_pm_text: 'Введите название трека для поиска...',
+            switch_pm_parameter: 'start', // Просто параметр для старта
+        });
+    }
+
+    try {
+        const results = await searchSoundCloud(query);
+
+        if (results.length === 0) {
+            // Если ничего не найдено
+            return await ctx.answerInlineQuery([], {
+                switch_pm_text: 'Ничего не найдено. Попробуйте другой запрос.',
+                switch_pm_parameter: 'not_found',
+            });
+        }
+        
+        // Отправляем результаты пользователю. cache_time - время, на которое клиент Telegram кэширует результаты
+        await ctx.answerInlineQuery(results, { cache_time: 300 });
+
+    } catch (error) {
+        console.error('[Inline Query] Глобальная ошибка обработчика:', error);
+        // В случае непредвиденной ошибки, можно ничего не отвечать или ответить пустым массивом
+        await ctx.answerInlineQuery([]);
+    }
+});
 bot.on('text', async (ctx) => {
     const userText = ctx.message.text;
     if (Object.values(allTextsSync()).includes(userText)) {
