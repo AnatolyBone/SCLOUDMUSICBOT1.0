@@ -1,4 +1,4 @@
-// index.js (ФИНАЛЬНАЯ ВЕРСИЯ)
+// index.js (ФИНАЛЬНАЯ ЧИСТАЯ ВЕРСИЯ)
 
 import express from 'express';
 import session from 'express-session';
@@ -18,10 +18,10 @@ import {
     getActiveUsersByDate, getExpiringUsers, setPremium, updateUserField, 
     getLatestReviews, getUserActivityByDayHour, getDownloadsByUserId, getReferralsByUserId, 
     getCachedTracksCount, getActiveFreeUsers, getActivePremiumUsers,
-    getUsersCountByTariff, // Для блока "Пользователи по тарифам" и графика
-    getTopReferralSources, // Для блока "Топ-5 источников трафика"
-    getDailyStats,         // Для основного графика динамики
-    getActivityByWeekday,  // Для графика активности по дням недели
+    getUsersCountByTariff,
+    getTopReferralSources,
+    getDailyStats,
+    getActivityByWeekday,
     createBroadcastTask, getPendingBroadcastTask, completeBroadcastTask, failBroadcastTask,
     getAllBroadcastTasks, deleteBroadcastTask, getBroadcastTaskById, updateBroadcastTask
 } from './db.js';
@@ -46,21 +46,33 @@ async function startApp() {
         setupExpress();
         startBroadcastWorker();
 
+        // =================== ИСПРАВЛЕННЫЙ БЛОК ЗАПУСКА БОТА ===================
         if (process.env.NODE_ENV === 'production') {
             const fullWebhookUrl = (WEBHOOK_URL.endsWith('/') ? WEBHOOK_URL.slice(0, -1) : WEBHOOK_URL) + WEBHOOK_PATH;
+            const allowedUpdates = ['message', 'callback_query', 'inline_query'];
             const webhookInfo = await bot.telegram.getWebhookInfo();
-            if (webhookInfo.url !== fullWebhookUrl) {
-                await bot.telegram.setWebhook(fullWebhookUrl, { drop_pending_updates: true });
-                console.log('[App] Вебхук установлен.');
+            const needsUpdate = webhookInfo.url !== fullWebhookUrl || 
+                                JSON.stringify(webhookInfo.allowed_updates?.sort()) !== JSON.stringify(allowedUpdates.sort());
+
+            if (needsUpdate) {
+                console.log('[App] Устанавливаю или обновляю вебхук...');
+                await bot.telegram.setWebhook(fullWebhookUrl, {
+                    drop_pending_updates: true,
+                    allowed_updates: allowedUpdates
+                });
+                console.log('[App] Вебхук успешно настроен на получение:', allowedUpdates.join(', '));
             } else {
-                console.log('[App] Вебхук уже установлен.');
+                console.log('[App] Вебхук уже корректно установлен.');
             }
             app.use(bot.webhookCallback(WEBHOOK_PATH));
         } else {
             console.log('[App] Запуск бота в режиме long-polling...');
             await bot.telegram.deleteWebhook({ drop_pending_updates: true });
-            bot.launch();
+            bot.launch({
+                allowedUpdates: ['message', 'callback_query', 'inline_query']
+            });
         }
+        // ======================================================================
 
         app.listen(PORT, () => console.log(`✅ [App] Сервер запущен на порту ${PORT}.`));
         
@@ -116,6 +128,7 @@ function setupExpress() {
     });
     app.get('/logout', (req, res) => req.session.destroy(() => res.redirect('/admin')));
     
+    // ... (весь остальной код роутов остается без изменений) ...
     app.get('/dashboard', requireAuth, async (req, res) => {
         try {
             let storageStatus = { available: false, error: '' };
@@ -144,24 +157,24 @@ function setupExpress() {
                 queueWaiting: downloadQueue.size,
                 queueActive: downloadQueue.active,
                 cachedTracksCount: cachedTracksCount,
-                usersByTariff: usersByTariff,
-                topSources: topSources
+                usersByTariff: usersByTariff || {},
+                topSources: topSources || []
             };
             const chartDataCombined = {
-                labels: dailyStats.map(d => new Date(d.day).toLocaleDateString('ru-RU', {day: '2-digit', month: '2-digit'})),
+                labels: (dailyStats || []).map(d => new Date(d.day).toLocaleDateString('ru-RU', {day: '2-digit', month: '2-digit'})),
                 datasets: [
-                    { label: 'Регистрации', data: dailyStats.map(d => d.registrations), borderColor: '#198754', tension: 0.1, fill: false },
-                    { label: 'Активные юзеры', data: dailyStats.map(d => d.active_users), borderColor: '#0d6efd', tension: 0.1, fill: false },
-                    { label: 'Загрузки', data: dailyStats.map(d => d.downloads), borderColor: '#fd7e14', tension: 0.1, fill: false }
+                    { label: 'Регистрации', data: (dailyStats || []).map(d => d.registrations), borderColor: '#198754', tension: 0.1, fill: false },
+                    { label: 'Активные юзеры', data: (dailyStats || []).map(d => d.active_users), borderColor: '#0d6efd', tension: 0.1, fill: false },
+                    { label: 'Загрузки', data: (dailyStats || []).map(d => d.downloads), borderColor: '#fd7e14', tension: 0.1, fill: false }
                 ]
             };
             const chartDataTariffs = {
-                labels: Object.keys(usersByTariff),
-                datasets: [{ data: Object.values(usersByTariff), backgroundColor: ['#6c757d', '#17a2b8', '#ffc107', '#007bff', '#dc3545'] }]
+                labels: Object.keys(usersByTariff || {}),
+                datasets: [{ data: Object.values(usersByTariff || {}), backgroundColor: ['#6c757d', '#17a2b8', '#ffc107', '#007bff', '#dc3545'] }]
             };
             const chartDataWeekday = {
-                labels: weekdayActivity.map(d => d.weekday.trim()),
-                datasets: [{ label: 'Загрузки', data: weekdayActivity.map(d => d.count), backgroundColor: 'rgba(13, 110, 253, 0.5)' }]
+                labels: (weekdayActivity || []).map(d => d.weekday.trim()),
+                datasets: [{ label: 'Загрузки', data: (weekdayActivity || []).map(d => d.count), backgroundColor: 'rgba(13, 110, 253, 0.5)' }]
             };
             res.render('dashboard', { title: 'Дашборд', page: 'dashboard', stats, storageStatus, period: req.query.period || 30, chartDataCombined, chartDataTariffs, chartDataWeekday });
         } catch (error) {
