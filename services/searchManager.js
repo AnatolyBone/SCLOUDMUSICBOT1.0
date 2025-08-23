@@ -1,12 +1,12 @@
-// services/searchManager.js (НОВАЯ ГИБРИДНАЯ ВЕРСИЯ)
+// services/searchManager.js (ФИНАЛЬНАЯ РАБОЧАЯ ВЕРСИЯ 2.0)
 
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { PROXY_URL } from '../config.js';
-import { searchTracksInCache } from '../db.js'; // Импортируем нашу новую функцию
+import { searchTracksInCache } from '../db.js';
 
 const execAsync = promisify(exec);
-const SEARCH_TIMEOUT_MS = 8000; // Вернем таймаут обратно, т.к. это запасной вариант
+const SEARCH_TIMEOUT_MS = 8000;
 
 function escapeQuery(query) {
     return query.replace(/"/g, '\\"').replace(/`/g, '\\`').replace(/\$/g, '\\$');
@@ -29,7 +29,6 @@ async function searchLiveOnSoundCloud(query) {
         const searchData = JSON.parse(stdout);
         if (!searchData || !searchData.entries) return [];
 
-        // ВАЖНО: Результаты живого поиска - это статьи, отправляющие ссылку
         return searchData.entries.map(track => ({
             type: 'article',
             id: `url_${track.id}`,
@@ -47,24 +46,24 @@ async function searchLiveOnSoundCloud(query) {
 }
 
 export async function performInlineSearch(query) {
-    // 1. СНАЧАЛА ИЩЕМ В НАШЕЙ БАЗЕ (КЭШЕ)
     console.log(`[Search Hybrid] INFO: Поиск в кэше по запросу: "${query}"`);
     const cachedTracks = await searchTracksInCache(query);
 
     if (cachedTracks && cachedTracks.length > 0) {
         console.log(`[Search Hybrid] OK: Найдено ${cachedTracks.length} треков в кэше.`);
-        // ВАЖНО: Результаты из кэша - это аудиофайлы, отправляемые по file_id
+        
+        // ======================= ГЛАВНОЕ ИСПРАВЛЕНИЕ ЗДЕСЬ =======================
+        // Формируем правильный объект типа InlineQueryResultCachedAudio
+        // У него НЕТ полей title и performer, но есть caption.
         return cachedTracks.map(track => ({
             type: 'audio',
-            id: `cache_${track.file_id}`,
+            id: `cache_${track.file_id.slice(-20)}_${Math.random()}`, // Уникальный ID
             audio_file_id: track.file_id,
-            title: track.title || 'Без названия',
-            performer: track.artist || 'Unknown',
-            // audio_duration: track.duration, // Можно добавить, если есть в базе
+            caption: `${track.title || 'Трек без названия'} - ${track.artist || 'Неизвестный исполнитель'}`
         }));
+        // =========================================================================
     }
 
-    // 2. ЕСЛИ В КЭШЕ НИЧЕГО НЕТ, ИЩЕМ В SOUNDCLOUD
     console.log(`[Search Hybrid] WARN: В кэше ничего нет, переключаюсь на живой поиск.`);
     return await searchLiveOnSoundCloud(query);
 }
