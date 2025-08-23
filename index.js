@@ -20,7 +20,7 @@ import {
     getLatestReviews, getUserActivityByDayHour, getDownloadsByUserId, getReferralsByUserId, 
     getCachedTracksCount, getActiveFreeUsers, getActivePremiumUsers,
     createBroadcastTask, getPendingBroadcastTask, completeBroadcastTask, failBroadcastTask,
-    getAllBroadcastTasks, deleteBroadcastTask, getBroadcastTaskById, updateBroadcastTask
+    getAllBroadcastTasks, deleteBroadcastTask, getBroadcastTaskById, getUsersCountByTariff, updateBroadcastTask
 } from './db.js';
 import { bot } from './bot.js';
 import redisService from './services/redisClient.js';
