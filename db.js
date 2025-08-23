@@ -122,24 +122,22 @@ export async function getExpiringUsers(days = 3) {
 }
 // db.js -> ДОБАВИТЬ ЭТУ ФУНКЦИЮ
 
-export async function searchTracksInCache(query, limit = 7) {
-    try {
-        // Ищем по названию И по исполнителю, без учета регистра
-        const { data, error } = await supabase
-            .from('track_cache')
-            .select('title, artist, duration, thumbnail, file_id')
-            .or(`title.ilike.%${query}%,artist.ilike.%${query}%`)
-            .limit(limit);
+// db.js -> ЗАМЕНИТЬ СТАРУЮ ФУНКЦИЮ cacheTrack
 
-        if (error) {
-            console.error('[DB Search] Ошибка при поиске в кэше Supabase:', error);
-            return [];
-        }
-        return data;
-    } catch (e) {
-        console.error('[DB Search] Критическая ошибка при поиске в кэше:', e);
-        return [];
-    }
+export async function cacheTrack(trackData) {
+  const { url, fileId, title, artist, duration, thumbnail } = trackData;
+  
+  await pool.query(
+    `INSERT INTO track_cache (url, file_id, title, artist, duration, thumbnail)
+     VALUES ($1, $2, $3, $4, $5, $6)
+     ON CONFLICT (url) DO UPDATE SET
+       file_id = EXCLUDED.file_id,
+       title = EXCLUDED.title,
+       artist = EXCLUDED.artist,
+       duration = EXCLUDED.duration,
+       thumbnail = EXCLUDED.thumbnail;`,
+    [url, fileId, title, artist, duration, thumbnail]
+  );
 }
 // --- Кэш треков ---
 export async function findCachedTrack(trackUrl) {
