@@ -158,11 +158,15 @@ export async function cacheTrack(trackData) {
   );
 }
 // --- Кэш треков ---
+// db.js -> ЗАМЕНИТЬ СТАРУЮ findCachedTrack
+
 export async function findCachedTrack(trackUrl) {
   try {
-    const { data, error } = await supabase.from('track_cache').select('file_id, track_name').eq('url', trackUrl).single();
+    // ИЗМЕНЕНИЕ: Ищем 'title' вместо 'track_name'
+    const { data, error } = await supabase.from('track_cache').select('file_id, title').eq('url', trackUrl).single();
     if (error && error.code !== 'PGRST116') console.error('Ошибка поиска в кэше Supabase:', error);
-    return data ? { fileId: data.file_id, trackName: data.track_name } : null;
+    // ИЗМЕНЕНИЕ: Возвращаем 'trackName' для совместимости со старым кодом
+    return data ? { fileId: data.file_id, trackName: data.title } : null;
   } catch (e) {
     console.error('Критическая ошибка в findCachedTrack:', e);
     return null;
