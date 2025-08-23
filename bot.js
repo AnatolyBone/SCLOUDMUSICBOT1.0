@@ -1,4 +1,4 @@
-// bot.js (ВОССТАНОВЛЕННАЯ СТАБИЛЬНАЯ ВЕРСИЯ)
+// bot.js (ФИНАЛЬНАЯ ВЕРСИЯ)
 
 import { Telegraf, Markup, TelegramError } from 'telegraf';
 import { ADMIN_ID, BOT_TOKEN, WEBHOOK_URL, CHANNEL_USERNAME, STORAGE_CHANNEL_ID } from './config.js';
@@ -8,10 +8,7 @@ import { performInlineSearch } from './services/searchManager.js';
 import { enqueue, downloadQueue } from './services/downloadManager.js';
 
 async function isSubscribed(userId) {
-    if (!CHANNEL_USERNAME) {
-        console.warn('CHANNEL_USERNAME не указан в конфиге.');
-        return false;
-    }
+    if (!CHANNEL_USERNAME) return false;
     try {
         const member = await bot.telegram.getChatMember(CHANNEL_USERNAME, userId);
         return ['creator', 'administrator', 'member'].includes(member.status);
@@ -46,7 +43,6 @@ function formatMenuMessage(user, ctx) {
 🎧 Сегодня скачано: *${downloadsToday}* из *${user.premium_limit}*
     `.trim();
     if (!user.subscribed_bonus_used) {
-        // Используем Markdown-ссылку
         const cleanUsername = CHANNEL_USERNAME.replace('@', '');
         const channelLink = `[наш канал](https://t.me/${cleanUsername})`;
         message += `\n\n🎁 *Бонус!* Подпишись на ${channelLink} и получи *7 дней тарифа Plus* бесплатно!`;
@@ -61,7 +57,7 @@ async function handleSendMessageError(e, userId, ctx = null) {
         await updateUserField(userId, 'active', false);
         console.log(`- Пользователь ${userId} заблокировал бота.`);
     } else if (ctx) {
-        try { await ctx.reply('Произошла ошибка при выполнении вашего запроса.'); } catch (sendError) { console.error(`- Не удалось отправить сообщение об ошибке пользователю ${userId}.`); }
+        try { await ctx.reply('Произошла ошибка при выполнении вашего запроса.'); } catch (sendError) {}
     }
 }
 
@@ -90,49 +86,21 @@ bot.start(async (ctx) => {
 bot.command('admin', async (ctx) => {
     if (ctx.from.id !== ADMIN_ID) return;
     try {
-        let storageStatusText = '';
-        if (STORAGE_CHANNEL_ID) {
-            try {
-                await bot.telegram.getChat(STORAGE_CHANNEL_ID);
-                storageStatusText = '✅ Доступен';
-            } catch (e) {
-                storageStatusText = '❌ Ошибка';
-            }
-        } else {
-            storageStatusText = '⚠️ Не настроен';
-        }
-        const [users, cachedTracksCount] = await Promise.all([
-            getAllUsers(true),
-            getCachedTracksCount()
-        ]);
+        let storageStatusText = STORAGE_CHANNEL_ID ? '✅ Доступен' : '⚠️ Не настроен';
+        const [users, cachedTracksCount] = await Promise.all([ getAllUsers(true), getCachedTracksCount() ]);
         const totalUsers = users.length;
         const activeUsers = users.filter(u => u.active).length;
         const totalDownloads = users.reduce((sum, u) => sum + (u.total_downloads || 0), 0);
-        const now = new Date();
-        const activeToday = users.filter(u => u.last_active && new Date(u.last_active).toDateString() === now.toDateString()).length;
-        const statsMessage = `
-📊 **Статистика Бота**
-
-👤 **Пользователи:**
-   - Всего: *${totalUsers}*
-   - Активных (в целом): *${activeUsers}*
-   - Активных сегодня: *${activeToday}*
-
-📥 **Загрузки:**
-   - Всего за все время: *${totalDownloads}*
-
-⚙️ **Система:**
-   - Очередь: *${downloadQueue.size}* в ож. / *${downloadQueue.active}* в раб.
-   - Канал-хранилище: *${storageStatusText}*
-   - Треков в базе (кэше): *${cachedTracksCount}*
-
-🔗 **Админ-панель:**
-[Открыть дашборд](${WEBHOOK_URL.replace(/\/$/, '')}/dashboard)
-        `.trim();
+        const activeToday = users.filter(u => u.last_active && new Date(u.last_active).toDateString() === new Date().toDateString()).length;
+        const statsMessage = `📊 **Статистика Бота**\n\n` +
+            `👤 **Пользователи:**\n   - Всего: *${totalUsers}*\n   - Активных: *${activeUsers}*\n   - Активных сегодня: *${activeToday}*\n\n` +
+            `📥 **Загрузки:**\n   - Всего за все время: *${totalDownloads}*\n\n` +
+            `⚙️ **Система:**\n   - Очередь: *${downloadQueue.size}* в ож. / *${downloadQueue.active}* в раб.\n` +
+            `   - Канал-хранилище: *${storageStatusText}*\n   - Треков в кэше: *${cachedTracksCount}*\n\n` +
+            `🔗 **Админ-панель:**\n[Открыть дашборд](${WEBHOOK_URL.replace(/\/$/, '')}/dashboard)`;
         await ctx.reply(statsMessage, { parse_mode: 'Markdown' });
     } catch (e) {
         console.error('❌ Ошибка в команде /admin:', e);
-        try { await ctx.reply('⚠️ Произошла ошибка при получении статистики.'); } catch (adminBlockError) { console.log('Админ заблокировал бота.'); }
     }
 });
 
@@ -145,25 +113,18 @@ bot.action('check_subscription', async (ctx) => {
     if (subscribed) {
         await setPremium(ctx.from.id, 30, 7); 
         await updateUserField(ctx.from.id, 'subscribed_bonus_used', true);
-        await ctx.editMessageText('🎉 Поздравляем! Вам начислено 7 дней тарифа Plus. Спасибо за подписку!\n\nМожете проверить свой новый статус в меню.');
-        await ctx.answerCbQuery('Бонус успешно активирован!');
+        await ctx.editMessageText('🎉 Поздравляем! Вам начислено 7 дней тарифа Plus. Спасибо за подписку!');
     } else {
-        const escapedChannelUsername = CHANNEL_USERNAME.replace(/_/g, '\\_');
-        await ctx.answerCbQuery(`Вы еще не подписаны на канал ${escapedChannelUsername}. Пожалуйста, подпишитесь и нажмите кнопку снова.`, { show_alert: true });
+        await ctx.answerCbQuery(`Вы еще не подписаны. Пожалуйста, подпишитесь и нажмите кнопку снова.`, { show_alert: true });
     }
 });
 
 bot.hears(T('menu'), async (ctx) => {
     const user = await getUser(ctx.from.id);
     const message = formatMenuMessage(user, ctx);
-    
-    await ctx.reply(T('menu'), Markup.keyboard([[T('menu'), T('upgrade')], [T('mytracks'), T('help')]]).resize());
-
     const extraOptions = { parse_mode: 'Markdown' };
     if (!user.subscribed_bonus_used) {
-        extraOptions.reply_markup = {
-            inline_keyboard: [[ Markup.button.callback('✅ Я подписался и хочу бонус!', 'check_subscription') ]]
-        };
+        extraOptions.reply_markup = { inline_keyboard: [[ Markup.button.callback('✅ Я подписался и хочу бонус!', 'check_subscription') ]] };
     }
     await ctx.reply(message, extraOptions);
 });
@@ -187,61 +148,35 @@ bot.hears(T('mytracks'), async (ctx) => {
 });
 
 bot.hears(T('help'), async (ctx) => await ctx.reply(T('helpInfo')));
+bot.hears(T('upgrade'), async (ctx) => await ctx.reply(T('upgradeInfo'), { parse_mode: 'Markdown' }));
 
-// >>>>>>>> ВОССТАНОВЛЕННАЯ СТАБИЛЬНАЯ ВЕРСИЯ <<<<<<<<<<
-bot.hears(T('upgrade'), async (ctx) => {
-    // Просто отправляем текст из базы с базовым Markdown
-    await ctx.reply(T('upgradeInfo'), { parse_mode: 'Markdown' });
-});
-// bot.js (вставить ПЕРЕД bot.on('text', ...))
-
+// === ОБРАБОТЧИК ИНЛАЙН-РЕЖИМА ===
 bot.on('inline_query', async (ctx) => {
     const query = ctx.inlineQuery.query;
-
     if (!query || query.trim().length < 2) {
-        // Если запрос пустой, предлагаем пользователю начать печатать
         return await ctx.answerInlineQuery([], {
             switch_pm_text: 'Введите название трека для поиска...',
-            switch_pm_parameter: 'start', // Просто параметр для старта
+            switch_pm_parameter: 'start',
         });
     }
-
     try {
         const results = await performInlineSearch(query);
-
-        if (results.length === 0) {
-            // Если ничего не найдено
-            return await ctx.answerInlineQuery([], {
-                switch_pm_text: 'Ничего не найдено. Попробуйте другой запрос.',
-                switch_pm_parameter: 'not_found',
-            });
-        }
-        
-        // Отправляем результаты пользователю. cache_time - время, на которое клиент Telegram кэширует результаты
-        await ctx.answerInlineQuery(results, { cache_time: 300 });
-
+        await ctx.answerInlineQuery(results, { cache_time: 60 });
     } catch (error) {
         console.error('[Inline Query] Глобальная ошибка обработчика:', error);
-        // В случае непредвиденной ошибки, можно ничего не отвечать или ответить пустым массивом
         await ctx.answerInlineQuery([]);
     }
 });
+
+// === ОСНОВНОЙ ОБРАБОТЧИК ТЕКСТА (ССЫЛОК) ===
 bot.on('text', async (ctx) => {
     const userText = ctx.message.text;
-    if (Object.values(allTextsSync()).includes(userText)) {
-        return;
-    }
+    if (Object.values(allTextsSync()).includes(userText)) return;
+
     const url = userText.match(/(https?:\/\/[^\s]+)/g)?.find(u => u.includes('soundcloud.com'));
     if (url) {
-        try {
-            await ctx.reply('🔍 Анализирую ссылку...');
-        } catch (e) {
-            console.warn(`[Pre-send] Не удалось отправить 'Анализирую' пользователю ${ctx.from.id}. Вероятно, бот заблокирован.`);
-            return;
-        }
         enqueue(ctx, ctx.from.id, url).catch(err => {
             console.error(`[Background Enqueue Error] Ошибка для user ${ctx.from.id}:`, err.message);
-            ctx.reply('❌ Не удалось обработать вашу ссылку. Попробуйте другую.').catch(() => {});
         });
     } else {
         await ctx.reply('Я не понял. Пришлите ссылку или используйте меню.');
