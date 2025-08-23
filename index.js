@@ -12,15 +12,18 @@ import pLimit from 'p-limit';
 import fs from 'fs';
 import cron from 'node-cron';
 
-// Полный и правильный список импортов из db.js
 import { 
     pool, supabase, getUserById, resetDailyStats, getAllUsers, getPaginatedUsers, 
     getReferralSourcesStats, getDownloadsByDate, getRegistrationsByDate, 
     getActiveUsersByDate, getExpiringUsers, setPremium, updateUserField, 
     getLatestReviews, getUserActivityByDayHour, getDownloadsByUserId, getReferralsByUserId, 
     getCachedTracksCount, getActiveFreeUsers, getActivePremiumUsers,
+    getUsersCountByTariff, // Для блока "Пользователи по тарифам" и графика
+    getTopReferralSources, // Для блока "Топ-5 источников трафика"
+    getDailyStats,         // Для основного графика динамики
+    getActivityByWeekday,  // Для графика активности по дням недели
     createBroadcastTask, getPendingBroadcastTask, completeBroadcastTask, failBroadcastTask,
-    getAllBroadcastTasks, deleteBroadcastTask, getBroadcastTaskById, getUsersCountByTariff, updateBroadcastTask
+    getAllBroadcastTasks, deleteBroadcastTask, getBroadcastTaskById, updateBroadcastTask
 } from './db.js';
 import { bot } from './bot.js';
 import redisService from './services/redisClient.js';
