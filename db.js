@@ -151,12 +151,6 @@ export async function findCachedTrack(trackUrl) {
   }
 }
 
-export async function cacheTrack(trackUrl, fileId, title) {
-  await pool.query(
-    'INSERT INTO track_cache (url, file_id, track_name) VALUES ($1, $2, $3) ON CONFLICT (url) DO UPDATE SET file_id = $2, track_name = $3',
-    [trackUrl, fileId, title]
-  );
-}
 
 export async function getCachedTracksCount() {
   try {
