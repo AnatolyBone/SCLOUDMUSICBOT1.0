@@ -4,7 +4,7 @@ import { Telegraf, Markup, TelegramError } from 'telegraf';
 import { ADMIN_ID, BOT_TOKEN, WEBHOOK_URL, CHANNEL_USERNAME, STORAGE_CHANNEL_ID } from './config.js';
 import { updateUserField, getUser, createUser, setPremium, getAllUsers, resetDailyLimitIfNeeded, getCachedTracksCount } from './db.js';
 import { T, allTextsSync } from './config/texts.js';
-import { searchSoundCloud } from './services/searchManager.js';
+import { performInlineSearch } from './services/searchManager.js';
 import { enqueue, downloadQueue } from './services/downloadManager.js';
 
 async function isSubscribed(userId) {
@@ -207,7 +207,7 @@ bot.on('inline_query', async (ctx) => {
     }
 
     try {
-        const results = await searchSoundCloud(query);
+        const results = await performInlineSearch(query);
 
         if (results.length === 0) {
             // Если ничего не найдено
