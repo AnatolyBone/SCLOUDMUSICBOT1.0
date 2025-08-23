@@ -1,4 +1,4 @@
-<% // views/dashboard.ejs (ВЕРСИЯ ДЛЯ ОТЛАДКИ С ALERT) %>
+<% // views/dashboard.ejs (ФИНАЛЬНЫЙ ЧИСТЫЙ КОД) %>
 
 <%- contentFor('styles') %>
 <style>
@@ -23,7 +23,6 @@
   </div>
 </div>
 
-<!-- ... (весь остальной HTML-код остается без изменений) ... -->
 <!-- Верхние метрики -->
 <div class="row g-4 mb-4">
   <div class="col-xl-3 col-md-6"><div class="card card-metric shadow-sm text-center h-100"><div class="card-body"><h5 class="card-title text-muted">Пользователей</h5><p class="h2 mb-0"><%= stats.total_users || '0' %></p></div></div></div>
@@ -91,6 +90,7 @@
     </div>
   </div>
 </div>
+
 <!-- ГРАФИКИ -->
 <div class="card shadow-sm mb-4">
   <div class="card-header">Динамика метрик (за <%= period %> дней)</div>
@@ -120,44 +120,36 @@
 
 <%- contentFor('scripts') %>
 <script>
-  alert('ШАГ 1: Скрипт начал выполняться.');
-
   window.addEventListener('load', function() {
-    alert('ШАГ 2: Страница полностью загружена.');
-    
     setTimeout(() => {
-      alert('ШАГ 3: Таймаут сработал.');
-
       if (typeof Chart === 'undefined') {
-        alert('ОШИБКА: Библиотека Chart.js НЕ найдена!');
+        document.querySelectorAll('.chart-container').forEach(el => {
+            el.innerHTML = '<div class="d-flex justify-content-center align-items-center h-100 fw-bold text-danger">Ошибка: библиотека графиков не загружена.</div>';
+        });
         return;
-      } else {
-        alert('ШАГ 4: Библиотека Chart.js найдена.');
       }
 
       function drawChart(canvasId, chartData, chartType, options = {}) {
-        alert(`ШАГ 5: Пытаюсь нарисовать график #${canvasId}`);
-        const canvas = document.getElementById(canvasId);
-        if (!canvas) {
-            alert(`ОШИБКА: Не найден canvas для #${canvasId}`);
-            return;
-        }
+          const canvas = document.getElementById(canvasId);
+          if (!canvas) return;
 
-        if (chartData && chartData.labels && chartData.labels.length > 0 && chartData.datasets) {
-          new Chart(canvas.getContext('2d'), { type: chartType, data: chartData, options: options });
-          alert(`УСПЕХ: График #${canvasId} должен был нарисоваться.`);
-        } else {
-          alert(`ИНФО: Нет данных для графика #${canvasId}.`);
-          canvas.parentElement.innerHTML = `<div class="d-flex justify-content-center align-items-center h-100 text-muted">Нет данных для отображения.</div>`;
-        }
+          if (chartData && chartData.labels && chartData.labels.length > 0 && chartData.datasets) {
+              try {
+                  new Chart(canvas.getContext('2d'), { type: chartType, data: chartData, options: options });
+              } catch(e) {
+                  canvas.parentElement.innerHTML = `<div class="d-flex justify-content-center align-items-center h-100 text-danger">Ошибка при построении графика.</div>`;
+              }
+          } else {
+              canvas.parentElement.innerHTML = `<div class="d-flex justify-content-center align-items-center h-100 text-muted">Нет данных для отображения.</div>`;
+          }
       }
-      
+
       const commonLineBarOptions = { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true } } };
       
       drawChart('mainChart', <%- JSON.stringify(chartDataCombined) %>, 'line', commonLineBarOptions);
       drawChart('tariffsChart', <%- JSON.stringify(chartDataTariffs) %>, 'doughnut', { responsive: true, maintainAspectRatio: true, plugins: { legend: { position: 'top' } } });
       drawChart('weekdayChart', <%- JSON.stringify(chartDataWeekday) %>, 'bar', { ...commonLineBarOptions, plugins: { legend: { display: false } } });
       
-    }, 100); 
+    }, 100);
   });
 </script>
