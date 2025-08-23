@@ -1,4 +1,4 @@
-<% // views/dashboard.ejs (ФИНАЛЬНАЯ ЧИСТОВАЯ ВЕРСИЯ) %>
+<% // views/dashboard.ejs (ВЕРСИЯ ДЛЯ ОТЛАДКИ С ALERT) %>
 
 <%- contentFor('styles') %>
 <style>
@@ -23,6 +23,7 @@
   </div>
 </div>
 
+<!-- ... (весь остальной HTML-код остается без изменений) ... -->
 <!-- Верхние метрики -->
 <div class="row g-4 mb-4">
   <div class="col-xl-3 col-md-6"><div class="card card-metric shadow-sm text-center h-100"><div class="card-body"><h5 class="card-title text-muted">Пользователей</h5><p class="h2 mb-0"><%= stats.total_users || '0' %></p></div></div></div>
@@ -90,7 +91,6 @@
     </div>
   </div>
 </div>
-
 <!-- ГРАФИКИ -->
 <div class="card shadow-sm mb-4">
   <div class="card-header">Динамика метрик (за <%= period %> дней)</div>
@@ -120,53 +120,43 @@
 
 <%- contentFor('scripts') %>
 <script>
-  // Ждем полной загрузки страницы, включая все скрипты и стили
+  alert('ШАГ 1: Скрипт начал выполняться.');
+
   window.addEventListener('load', function() {
-    // Небольшая задержка, чтобы гарантировать инициализацию Chart.js
+    alert('ШАГ 2: Страница полностью загружена.');
+    
     setTimeout(() => {
-      // Проверяем, что библиотека Chart.js действительно загрузилась
+      alert('ШАГ 3: Таймаут сработал.');
+
       if (typeof Chart === 'undefined') {
-        console.error('Библиотека Chart.js не загружена!');
-        document.querySelectorAll('.chart-container').forEach(el => {
-            el.innerHTML = '<div class="d-flex justify-content-center align-items-center h-100 fw-bold text-danger">Ошибка: библиотека графиков не загружена.</div>';
-        });
+        alert('ОШИБКА: Библиотека Chart.js НЕ найдена!');
         return;
+      } else {
+        alert('ШАГ 4: Библиотека Chart.js найдена.');
       }
 
-      // Функция-обертка для отрисовки графиков
       function drawChart(canvasId, chartData, chartType, options = {}) {
-          const canvas = document.getElementById(canvasId);
-          if (!canvas) return;
+        alert(`ШАГ 5: Пытаюсь нарисовать график #${canvasId}`);
+        const canvas = document.getElementById(canvasId);
+        if (!canvas) {
+            alert(`ОШИБКА: Не найден canvas для #${canvasId}`);
+            return;
+        }
 
-          if (chartData && chartData.labels && chartData.labels.length > 0 && chartData.datasets) {
-              try {
-                  new Chart(canvas.getContext('2d'), { type: chartType, data: chartData, options: options });
-              } catch(e) {
-                  console.error(`Ошибка отрисовки графика #${canvasId}:`, e);
-                  canvas.parentElement.innerHTML = `<div class="d-flex justify-content-center align-items-center h-100 text-danger">Ошибка при построении графика.</div>`;
-              }
-          } else {
-              console.warn(`Данные для графика #${canvasId} отсутствуют.`);
-              canvas.parentElement.innerHTML = `<div class="d-flex justify-content-center align-items-center h-100 text-muted">Нет данных для отображения.</div>`;
-          }
+        if (chartData && chartData.labels && chartData.labels.length > 0 && chartData.datasets) {
+          new Chart(canvas.getContext('2d'), { type: chartType, data: chartData, options: options });
+          alert(`УСПЕХ: График #${canvasId} должен был нарисоваться.`);
+        } else {
+          alert(`ИНФО: Нет данных для графика #${canvasId}.`);
+          canvas.parentElement.innerHTML = `<div class="d-flex justify-content-center align-items-center h-100 text-muted">Нет данных для отображения.</div>`;
+        }
       }
-
-      // Опции для графиков
+      
       const commonLineBarOptions = { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true } } };
       
-      // Вызываем отрисовку для каждого графика, передавая данные из EJS
       drawChart('mainChart', <%- JSON.stringify(chartDataCombined) %>, 'line', commonLineBarOptions);
-      
-      drawChart('tariffsChart', <%- JSON.stringify(chartDataTariffs) %>, 'doughnut', { 
-          responsive: true, 
-          maintainAspectRatio: true,
-          plugins: { legend: { position: 'top' } } 
-      });
-      
-      drawChart('weekdayChart', <%- JSON.stringify(chartDataWeekday) %>, 'bar', { 
-          ...commonLineBarOptions, 
-          plugins: { legend: { display: false } } 
-      });
+      drawChart('tariffsChart', <%- JSON.stringify(chartDataTariffs) %>, 'doughnut', { responsive: true, maintainAspectRatio: true, plugins: { legend: { position: 'top' } } });
+      drawChart('weekdayChart', <%- JSON.stringify(chartDataWeekday) %>, 'bar', { ...commonLineBarOptions, plugins: { legend: { display: false } } });
       
     }, 100); 
   });
