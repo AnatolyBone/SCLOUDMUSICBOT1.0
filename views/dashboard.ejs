@@ -1,4 +1,4 @@
-<% // views/dashboard.ejs %>
+<% // views/dashboard.ejs (ИСПРАВЛЕННАЯ ВЕРСИЯ) %>
 
 <%- contentFor('styles') %>
 <style>
@@ -119,30 +119,39 @@
 </div>
 
 <%- contentFor('scripts') %>
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
   document.addEventListener('DOMContentLoaded', () => {
-    new bootstrap.Tooltip(document.body, { selector: "[data-bs-toggle='tooltip']" });
-
+    // Инициализация всплывающих подсказок Bootstrap
+    try {
+      new bootstrap.Tooltip(document.body, { selector: "[data-bs-toggle='tooltip']" });
+    } catch(e) { console.error("Ошибка инициализации Tooltip:", e); }
+    
+    // Функция-обертка для отрисовки графиков
     function drawChart(canvasId, chartData, chartType, options = {}) {
         const ctx = document.getElementById(canvasId);
         if (ctx && chartData && chartData.labels && chartData.labels.length > 0) {
-            new Chart(ctx, { type: chartType, data: chartData, options: options });
+            try {
+                new Chart(ctx, { type: chartType, data: chartData, options: options });
+            } catch(e) {
+                console.error(`Ошибка отрисовки графика #${canvasId}:`, e);
+            }
+        } else {
+            console.warn(`Данные для графика #${canvasId} отсутствуют или некорректны.`);
         }
     }
 
     const commonLineBarOptions = { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true } } };
     
-    drawChart('mainChart', <%- JSON.stringify(locals.chartDataCombined || {}) %>, 'line', commonLineBarOptions);
+    // ВАЖНО: Убираем `locals.` и передаем данные напрямую
+    drawChart('mainChart', <%- JSON.stringify(chartDataCombined || {}) %>, 'line', commonLineBarOptions);
     
-    drawChart('tariffsChart', <%- JSON.stringify(locals.chartDataTariffs || {}) %>, 'doughnut', { 
+    drawChart('tariffsChart', <%- JSON.stringify(chartDataTariffs || {}) %>, 'doughnut', { 
         responsive: true, 
         maintainAspectRatio: true,
         plugins: { legend: { position: 'top' } } 
     });
     
-    drawChart('weekdayChart', <%- JSON.stringify(locals.chartDataWeekday || {}) %>, 'bar', { 
+    drawChart('weekdayChart', <%- JSON.stringify(chartDataWeekday || {}) %>, 'bar', { 
         ...commonLineBarOptions, 
         plugins: { legend: { display: false } } 
     });
