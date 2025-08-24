@@ -391,7 +391,51 @@ export async function getPendingBroadcastTask() {
   `);
   return rows[0] || null;
 }
+// db.js -> ДОБАВИТЬ ЭТУ ФУНКЦИЮ
 
+// Хелпер для экранирования данных в CSV
+function escapeCsv(str) {
+    if (str === null || str === undefined) return '';
+    const s = String(str);
+    if (s.includes(',')) {
+        return `"${s.replace(/"/g, '""')}"`;
+    }
+    return s;
+}
+
+export async function getUsersAsCsv(options) {
+    const { searchQuery = '', statusFilter = '' } = options;
+    
+    // Почти тот же код, что и в getPaginatedUsers, но без пагинации
+    let whereClauses = [];
+    let queryParams = [];
+    let paramIndex = 1;
+    if (statusFilter === 'active') { whereClauses.push('active = TRUE'); } 
+    else if (statusFilter === 'inactive') { whereClauses.push('active = FALSE'); }
+    if (searchQuery) {
+        queryParams.push(`%${searchQuery}%`);
+        whereClauses.push(`(CAST(id AS TEXT) ILIKE $${paramIndex} OR first_name ILIKE $${paramIndex} OR username ILIKE $${paramIndex})`);
+    }
+    const whereString = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+
+    const { rows } = await query(`SELECT * FROM users ${whereString} ORDER BY created_at DESC`, queryParams);
+
+    // Формируем CSV
+    const headers = 'ID,FirstName,Username,Status,TotalDownloads,PremiumLimit,PremiumUntil,CreatedAt,LastActive\n';
+    const csvRows = rows.map(u => [
+        u.id,
+        escapeCsv(u.first_name),
+        escapeCsv(u.username),
+        u.active ? 'active' : 'inactive',
+        u.total_downloads || 0,
+        u.premium_limit || 0,
+        u.premium_until ? new Date(u.premium_until).toISOString() : '',
+        new Date(u.created_at).toISOString(),
+        u.last_active ? new Date(u.last_active).toISOString() : ''
+    ].join(','));
+
+    return headers + csvRows.join('\n');
+}
 export async function completeBroadcastTask(taskId, report) {
   await query(
     `UPDATE broadcast_tasks SET status = 'completed', report = $1, completed_at = NOW() WHERE id = $2`,
