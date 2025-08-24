@@ -220,7 +220,34 @@ export async function getReferralSourcesStats() {
   const { rows } = await query(`SELECT referral_source, COUNT(*) as count FROM users WHERE referral_source IS NOT NULL GROUP BY referral_source ORDER BY count DESC`);
   return rows.map(row => ({ source: row.referral_source, count: parseInt(row.count, 10) }));
 }
+// db.js -> ДОБАВИТЬ ЭТИ ДВЕ ФУНКЦИИ
 
+export async function logUserAction(userId, actionType, details = null) {
+  try {
+    await supabase.from('user_actions_log').insert([
+      { user_id: userId, action_type: actionType, details: details }
+    ]);
+  } catch (e) {
+    console.error(`❌ Ошибка логирования действия для пользователя ${userId}:`, e.message);
+  }
+}
+
+export async function getUserActions(userId, limit = 20) {
+  try {
+    const { data, error } = await supabase
+      .from('user_actions_log')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(limit);
+
+    if (error) throw error;
+    return data;
+  } catch (e) {
+    console.error(`❌ Ошибка получения лога действий для ${userId}:`, e.message);
+    return [];
+  }
+}
 export async function getRegistrationsByDate() {
   const { rows } = await query(`SELECT TO_CHAR(created_at, 'YYYY-MM-DD') as date, COUNT(*) as count FROM users GROUP BY date ORDER BY date`);
   return rows.reduce((acc, row) => ({ ...acc, [row.date]: parseInt(row.count, 10) }), {});
