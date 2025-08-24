@@ -117,6 +117,15 @@
     </div>
   </div>
 </div>
+<!-- views/dashboard.ejs -> ВСТАВИТЬ ПОСЛЕ РЯДА С ДВУМЯ ГРАФИКАМИ -->
+
+<!-- График активности по часам -->
+<div class="card shadow-sm mb-4">
+  <div class="card-header">Активность по часам (за последние 7 дней)</div>
+  <div class="card-body chart-container" style="height: 300px;">
+    <canvas id="hourlyChart"></canvas>
+  </div>
+</div>
 <!-- views/dashboard.ejs -> ВСТАВИТЬ ПЕРЕД СЕКЦИЕЙ С 'scripts' -->
 
 <!-- Дополнительная аналитика -->
@@ -200,7 +209,10 @@
       drawChart('mainChart', <%- JSON.stringify(chartDataCombined) %>, 'line', commonLineBarOptions);
       drawChart('tariffsChart', <%- JSON.stringify(chartDataTariffs) %>, 'doughnut', { responsive: true, maintainAspectRatio: true, plugins: { legend: { position: 'top' } } });
       drawChart('weekdayChart', <%- JSON.stringify(chartDataWeekday) %>, 'bar', { ...commonLineBarOptions, plugins: { legend: { display: false } } });
-      
+      drawChart('hourlyChart', <%- JSON.stringify(chartDataHourly) %>, 'bar', {
+    ...commonLineBarOptions,
+    plugins: { legend: { display: false } }
+});
     }, 100);
   });
 </script>
