@@ -25,7 +25,7 @@ import {
     createBroadcastTask, getPendingBroadcastTask, completeBroadcastTask, failBroadcastTask,
     getAllBroadcastTasks, deleteBroadcastTask, getBroadcastTaskById,
     getTopTracks,
-    getTopUsers,  updateBroadcastTask
+    getTopUsers, getHourlyActivity,  updateBroadcastTask
 } from './db.js';
 import { bot } from './bot.js';
 import redisService from './services/redisClient.js';
@@ -152,8 +152,8 @@ function setupExpress() {
     getActivityByWeekday(),
     getTopTracks(), // <-- ДОБАВЛЕНО
     getTopUsers(),
-    getTopTracks(), // <-- ВЫЗОВ ДОБАВЛЕН
-            getTopUsers()// <-- ДОБАВЛЕНО
+    getTopTracks(),
+            getTopUsers(), getHourlyActivity()
 ]);
             const stats = {
                 total_users: users.length,
@@ -182,7 +182,17 @@ function setupExpress() {
                 labels: (weekdayActivity || []).map(d => d.weekday.trim()),
                 datasets: [{ label: 'Загрузки', data: (weekdayActivity || []).map(d => d.count), backgroundColor: 'rgba(13, 110, 253, 0.5)' }]
             };
-            res.render('dashboard', { title: 'Дашборд', page: 'dashboard', stats, storageStatus, period: req.query.period || 30, chartDataCombined, chartDataTariffs, chartDataWeekday, topTracks, topUsers });
+            const chartDataHourly = {
+    labels: Array.from({ length: 24 }, (_, i) => `${i.toString().padStart(2, '0')}:00`),
+    datasets: [{
+        label: 'Загрузки',
+        data: hourlyActivity,
+        backgroundColor: 'rgba(255, 99, 132, 0.5)',
+        borderColor: 'rgba(255, 99, 132, 1)',
+        borderWidth: 1
+    }]
+};
+            res.render('dashboard', { title: 'Дашборд', page: 'dashboard', stats, storageStatus, period: req.query.period || 30, chartDataCombined, chartDataTariffs, chartDataWeekday, topTracks, topUsers, chartDataHourly });
         } catch (error) {
             console.error("Ошибка дашборда:", error);
             res.status(500).send("Ошибка сервера");
