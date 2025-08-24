@@ -1,4 +1,4 @@
-<% // views/dashboard.ejs (ФИНАЛЬНЫЙ ЧИСТЫЙ КОД) %>
+<% // views/dashboard.ejs (ФИНАЛЬНАЯ ВЕРСИЯ С ГИБРИДНЫМ ВЫБОРОМ ПЕРИОДА) %>
 
 <%- contentFor('styles') %>
 <style>
@@ -13,12 +13,16 @@
 <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
   <h1 class="h2">Дашборд</h1>
   <div class="btn-toolbar mb-2 mb-md-0">
-    <form class="d-flex gap-2">
-      <select name="period" class="form-select form-select-sm" onchange="this.form.submit()">
-        <option value="7" <%= period == '7' ? 'selected' : '' %>>За 7 дней</option>
-        <option value="30" <%= period == '30' ? 'selected' : '' %>>За 30 дней</option>
-        <option value="90" <%= period == '90' ? 'selected' : '' %>>За 90 дней</option>
-      </select>
+    <form id="periodForm" class="d-flex align-items-center flex-wrap gap-2">
+        <input type="hidden" name="startDate" id="startDateInput">
+        <input type="hidden" name="endDate" id="endDateInput">
+        <div class="btn-group btn-group-sm">
+            <a href="#" class="btn btn-outline-secondary" data-days="7">7 дней</a>
+            <a href="#" class="btn btn-outline-secondary" data-days="30">30 дней</a>
+            <a href="#" class="btn btn-outline-secondary" data-days="90">90 дней</a>
+        </div>
+        <input type="text" id="date-range-picker" class="form-control form-control-sm" style="width: 220px; text-align: center;">
+        <button type="submit" class="btn btn-sm btn-primary">Применить</button>
     </form>
   </div>
 </div>
@@ -61,13 +65,6 @@
           <% } %>
         </ul>
       </div>
-      <% if (stats.usersByTariff && stats.usersByTariff.Other > 0) { %>
-        <div class="card-footer text-center">
-            <form method="POST" action="/admin/reset-other-tariffs" onsubmit="return confirm('Вы уверены? Это действие сбросит <%= stats.usersByTariff.Other %> пользователей на тариф Free. Отменить будет невозможно.')">
-                <button type="submit" class="btn btn-sm btn-outline-danger">Сбросить "другие" тарифы на Free</button>
-            </form>
-        </div>
-      <% } %>
     </div>
   </div>
   <div class="col-lg-4">
@@ -93,7 +90,7 @@
 
 <!-- ГРАФИКИ -->
 <div class="card shadow-sm mb-4">
-  <div class="card-header">Динамика метрик (за <%= period %> дней)</div>
+  <div class="card-header">Динамика метрик</div>
   <div class="card-body chart-container" style="height: 350px;">
     <canvas id="mainChart"></canvas>
   </div>
@@ -110,27 +107,23 @@
   </div>
   <div class="col-lg-8">
     <div class="card shadow-sm">
-      <div class="card-header">Активность по дням недели (загрузки)</div>
+      <div class="card-header">Активность по дням недели</div>
       <div class="card-body chart-container" style="height: 300px;">
           <canvas id="weekdayChart"></canvas>
       </div>
     </div>
   </div>
 </div>
-<!-- views/dashboard.ejs -> ВСТАВИТЬ ПОСЛЕ РЯДА С ДВУМЯ ГРАФИКАМИ -->
 
-<!-- График активности по часам -->
-<div class="card shadow-sm mb-4">
+<div class="card shadow-sm my-4">
   <div class="card-header">Активность по часам (за последние 7 дней)</div>
   <div class="card-body chart-container" style="height: 300px;">
     <canvas id="hourlyChart"></canvas>
   </div>
 </div>
-<!-- views/dashboard.ejs -> ВСТАВИТЬ ПЕРЕД СЕКЦИЕЙ С 'scripts' -->
 
 <!-- Дополнительная аналитика -->
 <div class="row g-4 mb-4">
-  <!-- Топ треков -->
   <div class="col-lg-6">
     <div class="card shadow-sm h-100">
       <div class="card-header">🎵 Топ-10 популярных треков</div>
@@ -152,8 +145,6 @@
       </div>
     </div>
   </div>
-
-  <!-- Топ пользователей -->
   <div class="col-lg-6">
     <div class="card shadow-sm h-100">
       <div class="card-header">🏆 Топ-10 активных пользователей</div>
@@ -178,15 +169,58 @@
     </div>
   </div>
 </div>
+
 <%- contentFor('scripts') %>
 <script>
   window.addEventListener('load', function() {
     setTimeout(() => {
-      if (typeof Chart === 'undefined') {
-        document.querySelectorAll('.chart-container').forEach(el => {
-            el.innerHTML = '<div class="d-flex justify-content-center align-items-center h-100 fw-bold text-danger">Ошибка: библиотека графиков не загружена.</div>';
-        });
+      try { new bootstrap.Tooltip(document.body, { selector: "[data-bs-toggle='tooltip']" }); } catch(e) {}
+
+      if (typeof Chart === 'undefined' || typeof Litepicker === 'undefined') {
+        console.error('Необходимые библиотеки (Chart.js или Litepicker) не загружены!');
         return;
+      }
+
+      const form = document.getElementById('periodForm');
+      const startDateInput = document.getElementById('startDateInput');
+      const endDateInput = document.getElementById('endDateInput');
+      const dateRangePickerElement = document.getElementById('date-range-picker');
+      
+      const picker = new Litepicker({
+          element: dateRangePickerElement,
+          singleMode: false,
+          format: 'DD.MM.YYYY',
+          startDate: '<%= startDate || new Date(new Date().setDate(new Date().getDate() - 29)).toISOString().slice(0, 10) %>',
+          endDate: '<%= endDate || new Date().toISOString().slice(0, 10) %>',
+          setup: (picker) => {
+              picker.on('selected', (date1, date2) => {
+                  if (date1 && date2) {
+                    startDateInput.value = date1.format('YYYY-MM-DD');
+                    endDateInput.value = date2.format('YYYY-MM-DD');
+                  }
+              });
+          }
+      });
+      
+      form.querySelectorAll('.btn-group .btn').forEach(button => {
+        button.addEventListener('click', (event) => {
+            event.preventDefault();
+            const days = parseInt(event.target.dataset.days, 10);
+            const endDate = new Date();
+            const startDate = new Date();
+            startDate.setDate(endDate.getDate() - (days - 1));
+            
+            picker.setDateRange(startDate, endDate, true); // true - чтобы не вызывать событие on:selected
+            startDateInput.value = startDate.toISOString().slice(0, 10);
+            endDateInput.value = endDate.toISOString().slice(0, 10);
+
+            form.submit();
+        });
+      });
+      
+      if (picker.getStartDate() && picker.getEndDate()) {
+          startDateInput.value = picker.getStartDate().format('YYYY-MM-DD');
+          endDateInput.value = picker.getEndDate().format('YYYY-MM-DD');
       }
 
       function drawChart(canvasId, chartData, chartType, options = {}) {
@@ -195,6 +229,10 @@
 
           if (chartData && chartData.labels && chartData.labels.length > 0 && chartData.datasets) {
               try {
+                  // Уничтожаем старый график перед отрисовкой нового, если он есть
+                  if (Chart.getChart(canvas)) {
+                      Chart.getChart(canvas).destroy();
+                  }
                   new Chart(canvas.getContext('2d'), { type: chartType, data: chartData, options: options });
               } catch(e) {
                   canvas.parentElement.innerHTML = `<div class="d-flex justify-content-center align-items-center h-100 text-danger">Ошибка при построении графика.</div>`;
@@ -209,10 +247,8 @@
       drawChart('mainChart', <%- JSON.stringify(chartDataCombined) %>, 'line', commonLineBarOptions);
       drawChart('tariffsChart', <%- JSON.stringify(chartDataTariffs) %>, 'doughnut', { responsive: true, maintainAspectRatio: true, plugins: { legend: { position: 'top' } } });
       drawChart('weekdayChart', <%- JSON.stringify(chartDataWeekday) %>, 'bar', { ...commonLineBarOptions, plugins: { legend: { display: false } } });
-      drawChart('hourlyChart', <%- JSON.stringify(chartDataHourly) %>, 'bar', {
-    ...commonLineBarOptions,
-    plugins: { legend: { display: false } }
-});
+      drawChart('hourlyChart', <%- JSON.stringify(chartDataHourly) %>, 'bar', { ...commonLineBarOptions, plugins: { legend: { display: false } } });
+      
     }, 100);
   });
 </script>
