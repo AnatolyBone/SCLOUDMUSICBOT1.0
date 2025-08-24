@@ -23,7 +23,9 @@ import {
     getDailyStats,
     getActivityByWeekday,
     createBroadcastTask, getPendingBroadcastTask, completeBroadcastTask, failBroadcastTask,
-    getAllBroadcastTasks, deleteBroadcastTask, getBroadcastTaskById, updateBroadcastTask
+    getAllBroadcastTasks, deleteBroadcastTask, getBroadcastTaskById,
+    getTopTracks,
+    getTopUsers,  updateBroadcastTask
 } from './db.js';
 import { bot } from './bot.js';
 import redisService from './services/redisClient.js';
@@ -149,7 +151,9 @@ function setupExpress() {
     getDailyStats(req.query.period || 30),
     getActivityByWeekday(),
     getTopTracks(), // <-- ДОБАВЛЕНО
-    getTopUsers() // <-- ДОБАВЛЕНО
+    getTopUsers(),
+    getTopTracks(), // <-- ВЫЗОВ ДОБАВЛЕН
+            getTopUsers()// <-- ДОБАВЛЕНО
 ]);
             const stats = {
                 total_users: users.length,
