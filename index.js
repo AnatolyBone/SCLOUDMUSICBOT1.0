@@ -375,7 +375,25 @@ app.post('/texts/update', requireAuth, async (req, res) => {
         res.redirect(req.get('Referrer') || '/users');
     });
 }
+// index.js -> ДОБАВИТЬ ЭТОТ РОУТ
 
+app.post('/user/set-status', requireAuth, async (req, res) => {
+    const { userId, newStatus } = req.body;
+    if (userId && (newStatus === 'true' || newStatus === 'false')) {
+        try {
+            const isActive = newStatus === 'true';
+            await updateUserField(userId, 'active', isActive);
+
+            // Опционально: уведомить пользователя, если мы его разбанили
+            if (isActive) {
+                await bot.telegram.sendMessage(userId, '✅ Ваш аккаунт снова активен.').catch(() => {});
+            }
+        } catch (error) {
+            console.error(`[Admin] Ошибка при смене статуса для ${userId}:`, error.message);
+        }
+    }
+    res.redirect(req.get('Referrer') || '/users');
+});
 async function runSingleBroadcast(task, users, taskId = null) {
     console.log(`[Broadcast Worker] Запуск рассылки для ${users.length} пользователей.`);
     let successCount = 0, errorCount = 0;
