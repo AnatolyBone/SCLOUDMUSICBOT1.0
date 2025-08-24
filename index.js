@@ -264,11 +264,11 @@ app.post('/texts/update', requireAuth, async (req, res) => {
     app.get('/user/:id', requireAuth, async (req, res) => {
         try {
             const userId = req.params.id;
-            const [userProfile, downloads, referrals] = await Promise.all([ getUserById(userId), getDownloadsByUserId(userId), getReferralsByUserId(userId) ]);
+            const [userProfile, downloads, referrals] = await Promise.all([ getUserById(userId), getDownloadsByUserId(userId), getReferralsByUserId(userId), getUserActions(userId) ]);
             if (!userProfile) {
                 return res.status(404).render('user-profile', { title: 'Пользователь не найден', page: 'users', userProfile: null, downloads: [], referrals: [] });
             }
-            res.render('user-profile', { title: `Профиль: ${userProfile.first_name || userId}`, page: 'users', userProfile, downloads, referrals });
+            res.render('user-profile', { title: `Профиль: ${userProfile.first_name || userId}`, page: 'users', userProfile, downloads, referrals, actions });
         } catch (error) {
             console.error(`Ошибка при получении профиля пользователя ${req.params.id}:`, error);
             res.status(500).send("Ошибка сервера");
@@ -361,6 +361,10 @@ app.post('/texts/update', requireAuth, async (req, res) => {
         const { userId, limit, days } = req.body;
         try {
             await setPremium(userId, parseInt(limit), parseInt(days) || 30);
+            await logUserAction(userId, 'tariff_changed_by_admin', {
+    new_limit: parseInt(limit),
+    days: parseInt(days) || 30
+});
             let tariffName = '';
             const newLimit = parseInt(limit);
             if (newLimit <= 5) tariffName = 'Free';
