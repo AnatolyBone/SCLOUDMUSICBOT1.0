@@ -120,15 +120,31 @@ export async function getExpiringUsers(days = 3) {
     const { rows } = await query( `SELECT * FROM users WHERE premium_until IS NOT NULL AND premium_until BETWEEN NOW() AND NOW() + INTERVAL '${days} days' ORDER BY premium_until ASC`);
     return rows;
 }
-// db.js -> ВСТАВИТЬ ЭТОТ БЛОК ПЕРЕД РАЗДЕЛОМ "--- Кэш треков ---"
+// db.js -> ЗАМЕНИТЬ СТАРУЮ ФУНКЦИЮ searchTracksInCache
 
 export async function searchTracksInCache(query, limit = 7) {
   try {
-    // Ищем по названию И по исполнителю, без учета регистра
+    // 1. Разбиваем запрос на отдельные слова и очищаем их
+    const searchTerms = query.split(' ')
+      .map(term => term.trim())
+      .filter(term => term.length > 0);
+    
+    if (searchTerms.length === 0) {
+      return [];
+    }
+    
+    // 2. Для каждого слова создаем условие "title ILIKE '%слово%' OR artist ILIKE '%слово%'"
+    const orFilters = searchTerms.map(term =>
+      `or(title.ilike.%${term}%,artist.ilike.%${term}%)`
+    );
+    
+    // 3. Объединяем все условия через "И" (AND)
+    const filterString = `and(${orFilters.join(',')})`;
+    
     const { data, error } = await supabase
       .from('track_cache')
       .select('title, artist, duration, thumbnail, file_id')
-      .or(`title.ilike.%${query}%,artist.ilike.%${query}%`)
+      .filter(filterString) // Используем новый, умный фильтр
       .limit(limit);
     
     if (error) {
