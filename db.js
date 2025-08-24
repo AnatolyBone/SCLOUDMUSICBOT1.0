@@ -308,7 +308,31 @@ export async function getActivityByWeekday() {
   });
   return result;
 }
+// db.js -> ДОБАВИТЬ ЭТИ ДВЕ ФУНКЦИИ
 
+export async function getTopTracks(limit = 10) {
+  const { rows } = await query(
+    `SELECT track_title, COUNT(*) as count 
+     FROM downloads_log
+     GROUP BY track_title 
+     ORDER BY count DESC 
+     LIMIT $1`,
+    [limit]
+  );
+  return rows;
+}
+
+export async function getTopUsers(limit = 10) {
+  const { rows } = await query(
+    `SELECT id, first_name, username, total_downloads 
+     FROM users 
+     WHERE total_downloads > 0
+     ORDER BY total_downloads DESC 
+     LIMIT $1`,
+    [limit]
+  );
+  return rows;
+}
 // --- Рассылки ---
 export async function createBroadcastTask(task) {
   const { message, audioPath, targetAudience, disableNotification, scheduledAt } = task;
