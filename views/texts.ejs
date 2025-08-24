@@ -1,0 +1,39 @@
+<% // views/texts.ejs %>
+<%- contentFor('body') %>
+
+<div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+  <h1 class="h2">Редактор текстов бота</h1>
+</div>
+
+<% if (success) { %>
+  <div class="alert alert-success alert-dismissible fade show" role="alert" data-autohide="true">
+    Текст успешно сохранен! Изменения вступят в силу в течение минуты.
+    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+  </div>
+<% } %>
+
+<p class="text-muted">Здесь можно изменить тексты, которые отправляет бот. Поддерживается Markdown-разметка Telegram: `*жирный*`, `_курсив_`, `[ссылка](url.com)`.</p>
+
+<div class="accordion" id="textsAccordion">
+  <% Object.entries(texts).forEach(([key, value], index) => { %>
+    <div class="accordion-item">
+      <h2 class="accordion-header" id="heading-<%= key %>">
+        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapse-<%= key %>" aria-expanded="false" aria-controls="collapse-<%= key %>">
+          <span class="fw-bold me-2"><%= key %>:</span>
+          <span class="text-truncate"><%= value.replace(/\n/g, ' ').slice(0, 80) %>...</span>
+        </button>
+      </h2>
+      <div id="collapse-<%= key %>" class="accordion-collapse collapse" aria-labelledby="heading-<%= key %>" data-bs-parent="#textsAccordion">
+        <div class="accordion-body">
+          <form action="/texts/update" method="POST">
+            <input type="hidden" name="key" value="<%= key %>">
+            <div class="mb-3">
+              <textarea class="form-control" name="value" rows="6"><%= value %></textarea>
+            </div>
+            <button type="submit" class="btn btn-primary">Сохранить</button>
+          </form>
+        </div>
+      </div>
+    </div>
+  <% }) %>
+</div>
