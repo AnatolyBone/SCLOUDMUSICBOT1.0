@@ -21,7 +21,7 @@ import {
     getUsersCountByTariff, getTopReferralSources, getDailyStats,
     getActivityByWeekday, getTopTracks, getTopUsers, getHourlyActivity,
     createBroadcastTask, getPendingBroadcastTask, completeBroadcastTask, failBroadcastTask,
-    getAllBroadcastTasks, deleteBroadcastTask, getBroadcastTaskById, updateBroadcastTask, getUsersAsCsv
+    getAllBroadcastTasks, deleteBroadcastTask, getBroadcastTaskById, updateBroadcastTask, getUsersAsCsv, logUserAction
 } from './db.js';
 import { bot } from './bot.js';
 import redisService from './services/redisClient.js';
