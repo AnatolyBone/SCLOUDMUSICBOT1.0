@@ -18,14 +18,10 @@ import {
     getActiveUsersByDate, getExpiringUsers, setPremium, updateUserField, 
     getLatestReviews, getUserActivityByDayHour, getDownloadsByUserId, getReferralsByUserId, 
     getCachedTracksCount, getActiveFreeUsers, getActivePremiumUsers,
-    getUsersCountByTariff,
-    getTopReferralSources,
-    getDailyStats,
-    getActivityByWeekday,
+    getUsersCountByTariff, getTopReferralSources, getDailyStats,
+    getActivityByWeekday, getTopTracks, getTopUsers, getHourlyActivity,
     createBroadcastTask, getPendingBroadcastTask, completeBroadcastTask, failBroadcastTask,
-    getAllBroadcastTasks, deleteBroadcastTask, getBroadcastTaskById,
-    getTopTracks,
-    getTopUsers, getHourlyActivity,  updateBroadcastTask
+    getAllBroadcastTasks, deleteBroadcastTask, getBroadcastTaskById, updateBroadcastTask
 } from './db.js';
 import { bot } from './bot.js';
 import redisService from './services/redisClient.js';
@@ -142,7 +138,11 @@ function setupExpress() {
                     storageStatus.error = e.message;
                 }
             }
-            const [users, registrationsRaw, cachedTracksCount, usersByTariff, topSources, dailyStats, weekdayActivity, topTracks, topUsers] = await Promise.all([
+            const [
+    users, registrationsRaw, cachedTracksCount, usersByTariff,
+    topSources, dailyStats, weekdayActivity, topTracks,
+    topUsers, hourlyActivity
+] = await Promise.all([
     getAllUsers(true),
     getRegistrationsByDate(),
     getCachedTracksCount(),
@@ -150,10 +150,9 @@ function setupExpress() {
     getTopReferralSources(),
     getDailyStats(req.query.period || 30),
     getActivityByWeekday(),
-    getTopTracks(), // <-- ДОБАВЛЕНО
-    getTopUsers(),
     getTopTracks(),
-            getTopUsers(), getHourlyActivity()
+    getTopUsers(),
+    getHourlyActivity()
 ]);
             const stats = {
                 total_users: users.length,
