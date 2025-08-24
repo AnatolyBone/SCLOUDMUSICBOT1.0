@@ -264,7 +264,7 @@ app.post('/texts/update', requireAuth, async (req, res) => {
     app.get('/user/:id', requireAuth, async (req, res) => {
         try {
             const userId = req.params.id;
-            const [userProfile, downloads, referrals] = await Promise.all([ getUserById(userId), getDownloadsByUserId(userId), getReferralsByUserId(userId), getUserActions(userId) ]);
+            const [userProfile, downloads, referrals, actions] = await Promise.all([ getUserById(userId), getDownloadsByUserId(userId), getReferralsByUserId(userId), getUserActions(userId) ]);
             if (!userProfile) {
                 return res.status(404).render('user-profile', { title: 'Пользователь не найден', page: 'users', userProfile: null, downloads: [], referrals: [] });
             }
