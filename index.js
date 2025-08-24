@@ -182,7 +182,7 @@ app.post('/texts/update', requireAuth, async (req, res) => {
     getCachedTracksCount(),
     getUsersCountByTariff(),
     getTopReferralSources(),
-    getDailyStats(req.query.period || 30),
+    getDailyStats({ startDate: req.query.startDate, endDate: req.query.endDate }),
     getActivityByWeekday(),
     getTopTracks(),
     getTopUsers(),
@@ -225,7 +225,8 @@ app.post('/texts/update', requireAuth, async (req, res) => {
         borderWidth: 1
     }]
 };
-            res.render('dashboard', { title: 'Дашборд', page: 'dashboard', stats, storageStatus, period: req.query.period || 30, chartDataCombined, chartDataTariffs, chartDataWeekday, topTracks, topUsers, chartDataHourly });
+            res.render('dashboard', { title: 'Дашборд', page: 'dashboard', stats, storageStatus, period: req.query.period || 30, chartDataCombined, chartDataTariffs, chartDataWeekday, topTracks, topUsers, chartDataHourly, startDate: req.query.startDate,
+    endDate: req.query.endDate});
         } catch (error) {
             console.error("Ошибка дашборда:", error);
             res.status(500).send("Ошибка сервера");
