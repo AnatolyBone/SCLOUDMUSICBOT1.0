@@ -21,7 +21,7 @@ import {
     getUsersCountByTariff, getTopReferralSources, getDailyStats,
     getActivityByWeekday, getTopTracks, getTopUsers, getHourlyActivity,
     createBroadcastTask, getPendingBroadcastTask, completeBroadcastTask, failBroadcastTask,
-    getAllBroadcastTasks, deleteBroadcastTask, getBroadcastTaskById, updateBroadcastTask
+    getAllBroadcastTasks, deleteBroadcastTask, getBroadcastTaskById, updateBroadcastTask, getUsersAsCsv
 } from './db.js';
 import { bot } from './bot.js';
 import redisService from './services/redisClient.js';
@@ -273,7 +273,21 @@ app.post('/texts/update', requireAuth, async (req, res) => {
             res.status(500).send("Ошибка сервера");
         }
     });
-    
+    app.get('/users/export.csv', requireAuth, async (req, res) => {
+    try {
+        const { q = '', status = '' } = req.query;
+        const csvData = await getUsersAsCsv({ searchQuery: q, statusFilter: status });
+
+        // Устанавливаем правильные заголовки, чтобы браузер предложил скачать файл
+        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+        res.setHeader('Content-Disposition', `attachment; filename="users_${new Date().toISOString().slice(0, 10)}.csv"`);
+        res.send(csvData);
+
+    } catch (error) {
+        console.error("Ошибка при экспорте пользователей:", error);
+        res.status(500).send("Не удалось сгенерировать CSV-файл");
+    }
+});
     app.get('/broadcasts', requireAuth, async (req, res) => {
         const tasks = await getAllBroadcastTasks();
         res.render('broadcasts', { title: 'Управление рассылками', page: 'broadcasts', tasks });
@@ -376,21 +390,7 @@ app.post('/texts/update', requireAuth, async (req, res) => {
     });
     // index.js -> ДОБАВИТЬ ЭТОТ РОУТ ВНУТРИ setupExpress
 
-app.get('/users/export.csv', requireAuth, async (req, res) => {
-    try {
-        const { q = '', status = '' } = req.query;
-        const csvData = await getUsersAsCsv({ searchQuery: q, statusFilter: status });
 
-        // Устанавливаем правильные заголовки, чтобы браузер предложил скачать файл
-        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-        res.setHeader('Content-Disposition', `attachment; filename="users_${new Date().toISOString().slice(0, 10)}.csv"`);
-        res.send(csvData);
-
-    } catch (error) {
-        console.error("Ошибка при экспорте пользователей:", error);
-        res.status(500).send("Не удалось сгенерировать CSV-файл");
-    }
-});
     app.post('/user/set-status', requireAuth, async (req, res) => {
     const { userId, newStatus } = req.body;
     if (userId && (newStatus === 'true' || newStatus === 'false')) {
