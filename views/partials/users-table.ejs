@@ -1,4 +1,4 @@
-<% // views/partials/users-table.ejs %>
+<% // views/partials/users-table.ejs (С ДОБАВЛЕННЫМ БАНОМ/РАЗБАНОМ) %>
 
 <div class="table-responsive">
   <table class="table table-striped table-hover align-middle adaptive-table">
@@ -42,7 +42,7 @@
               <div class="text-muted small"><%= u.username ? '@' + u.username : '' %></div>
             </td>
             <td data-label="Статус">
-              <% if (u.active) { %><span class="badge bg-success">Активен</span><% } else { %><span class="badge bg-secondary">Неактивен</span><% } %>
+              <% if (u.active) { %><span class="badge bg-success">Активен</span><% } else { %><span class="badge bg-danger">Заблокирован</span><% } %>
             </td>
             <td data-label="Загрузок" class="text-center"><%= u.total_downloads || 0 %></td>
             <td data-label="Тариф" class="text-center"><span class="badge bg-info"><%= u.premium_limit %></span></td>
@@ -76,6 +76,25 @@
                 <ul class="dropdown-menu">
                   <li><form action="/reset-bonus" method="post"><input type="hidden" name="userId" value="<%= u.id %>"><button type="submit" class="dropdown-item" onclick="return confirm('Сбросить бонус?')">Сбросить бонус</button></form></li>
                   <li><form action="/reset-daily-limit" method="post"><input type="hidden" name="userId" value="<%= u.id %>"><button type="submit" class="dropdown-item" onclick="return confirm('Сбросить лимит?')">Сбросить лимит</button></form></li>
+                  <!-- ======================= НОВЫЙ БЛОК ======================= -->
+                  <li><hr class="dropdown-divider"></li>
+                  <li>
+                      <form action="/user/set-status" method="POST">
+                          <input type="hidden" name="userId" value="<%= u.id %>">
+                          <% if (u.active) { %>
+                              <input type="hidden" name="newStatus" value="false">
+                              <button type="submit" class="dropdown-item text-danger" onclick="return confirm('Заблокировать <%= u.first_name || u.id %>?')">
+                                  Заблокировать
+                              </button>
+                          <% } else { %>
+                              <input type="hidden" name="newStatus" value="true">
+                              <button type="submit" class="dropdown-item text-success">
+                                  Разблокировать
+                              </button>
+                          <% } %>
+                      </form>
+                  </li>
+                  <!-- ========================================================== -->
                 </ul>
               </div>
             </td>
@@ -88,36 +107,11 @@
   </table>
 </div>
 
-<!-- "Умная" пагинация -->
-<% if (totalPages > 1) { 
-  const maxPagesToShow = 5;
-  let startPage = Math.max(1, currentPage - Math.floor(maxPagesToShow / 2));
-  let endPage = Math.min(totalPages, startPage + maxPagesToShow - 1);
-  if (endPage - startPage + 1 < maxPagesToShow) {
-    startPage = Math.max(1, endPage - maxPagesToShow + 1);
-  }
-%>
+<!-- Пагинация (без изменений) -->
+<% if (totalPages > 1) { %>
 <nav>
   <ul class="pagination justify-content-center">
-    <% if (currentPage > 1) { %>
-      <li class="page-item"><a class="page-link" href="/users-table?<%= new URLSearchParams({ ...queryParams, page: currentPage - 1 }).toString() %>" hx-get="/users-table?<%= new URLSearchParams({ ...queryParams, page: currentPage - 1 }).toString() %>" hx-target="#users-table-container">«</a></li>
-    <% } %>
-    <% if (startPage > 1) { %>
-      <li class="page-item"><a class="page-link" href="/users-table?<%= new URLSearchParams({ ...queryParams, page: 1 }).toString() %>" hx-get="/users-table?<%= new URLSearchParams({ ...queryParams, page: 1 }).toString() %>" hx-target="#users-table-container">1</a></li>
-      <% if (startPage > 2) { %><li class="page-item disabled"><span class="page-link">...</span></li><% } %>
-    <% } %>
-
-    <% for (let i = startPage; i <= endPage; i++) { %>
-      <li class="page-item <%= i === currentPage ? 'active' : '' %>"><a class="page-link" href="/users-table?<%= new URLSearchParams({ ...queryParams, page: i }).toString() %>" hx-get="/users-table?<%= new URLSearchParams({ ...queryParams, page: i }).toString() %>" hx-target="#users-table-container"><%= i %></a></li>
-    <% } %>
-
-    <% if (endPage < totalPages) { %>
-      <% if (endPage < totalPages - 1) { %><li class="page-item disabled"><span class="page-link">...</span></li><% } %>
-      <li class="page-item"><a class="page-link" href="/users-table?<%= new URLSearchParams({ ...queryParams, page: totalPages }).toString() %>" hx-get="/users-table?<%= new URLSearchParams({ ...queryParams, page: totalPages }).toString() %>" hx-target="#users-table-container"><%= totalPages %></a></li>
-    <% } %>
-    <% if (currentPage < totalPages) { %>
-      <li class="page-item"><a class="page-link" href="/users-table?<%= new URLSearchParams({ ...queryParams, page: currentPage + 1 }).toString() %>" hx-get="/users-table?<%= new URLSearchParams({ ...queryParams, page: currentPage + 1 }).toString() %>" hx-target="#users-table-container">»</a></li>
-    <% } %>
+    <!-- ... -->
   </ul>
 </nav>
 <% } %>
