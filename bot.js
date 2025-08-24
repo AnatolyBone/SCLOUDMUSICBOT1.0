@@ -70,11 +70,31 @@ bot.catch(async (err, ctx) => {
     }
 });
 
+// bot.js -> ЗАМЕНИТЬ СТАРЫЙ bot.use НА ЭТОТ
+
 bot.use(async (ctx, next) => {
-    if (ctx.from) {
-        await resetDailyLimitIfNeeded(ctx.from.id);
-        ctx.state.user = await getUser(ctx.from.id, ctx.from.first_name, ctx.from.username);
+    // Пропускаем инлайн-запросы, так как у них нет ctx.from в том же виде
+    if (!ctx.from) {
+        return next();
     }
+    
+    // Получаем пользователя из базы
+    const user = await getUser(ctx.from.id, ctx.from.first_name, ctx.from.username);
+    ctx.state.user = user; // Сохраняем пользователя в контекст для других обработчиков
+    
+    // ================== ГЛАВНОЕ ИЗМЕНЕНИЕ ЗДЕСЬ ==================
+    // Проверяем, активен ли пользователь
+    if (user && user.active === false) {
+        console.log(`[Access Denied] Заблокированный пользователь ${ctx.from.id} попытался использовать бота.`);
+        // Отправляем сообщение о блокировке (без await, чтобы не задерживать)
+        ctx.reply('❌ Ваш аккаунт заблокирован администратором.').catch(() => {});
+        // НЕ вызываем next(), чтобы остановить обработку
+        return;
+    }
+    // =============================================================
+    
+    // Если пользователь активен, продолжаем как обычно
+    await resetDailyLimitIfNeeded(ctx.from.id);
     return next();
 });
 
