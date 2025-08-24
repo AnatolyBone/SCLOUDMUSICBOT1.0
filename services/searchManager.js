@@ -1,4 +1,4 @@
-// services/searchManager.js (ФИНАЛЬНАЯ РАБОЧАЯ ВЕРСИЯ 2.0)
+// services/searchManager.js (ФИНАЛЬНАЯ ВЕРСИЯ 2.1 - С КРАСИВЫМ CAPTION)
 
 import { exec } from 'child_process';
 import { promisify } from 'util';
@@ -52,16 +52,13 @@ export async function performInlineSearch(query) {
     if (cachedTracks && cachedTracks.length > 0) {
         console.log(`[Search Hybrid] OK: Найдено ${cachedTracks.length} треков в кэше.`);
         
-        // ======================= ГЛАВНОЕ ИСПРАВЛЕНИЕ ЗДЕСЬ =======================
-        // Формируем правильный объект типа InlineQueryResultCachedAudio
-        // У него НЕТ полей title и performer, но есть caption.
         return cachedTracks.map(track => ({
             type: 'audio',
-            id: `cache_${track.file_id.slice(-20)}_${Math.random()}`, // Уникальный ID
+            id: `cache_${track.file_id.slice(-20)}_${Math.random()}`,
             audio_file_id: track.file_id,
-            caption: `${track.title || 'Трек без названия'} - ${track.artist || 'Неизвестный исполнитель'}`
+            // ИЗМЕНЕНИЕ: Аккуратная подпись вместо дублирования названия
+            caption: `via @SCloudMusicBot` // <-- ЗАМЕНИ SCloudMusicBot на реальный юзернейм твоего бота
         }));
-        // =========================================================================
     }
 
     console.log(`[Search Hybrid] WARN: В кэше ничего нет, переключаюсь на живой поиск.`);
