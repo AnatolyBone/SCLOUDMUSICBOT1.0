@@ -374,10 +374,7 @@ app.post('/texts/update', requireAuth, async (req, res) => {
         }
         res.redirect(req.get('Referrer') || '/users');
     });
-}
-// index.js -> ДОБАВИТЬ ЭТОТ РОУТ
-
-app.post('/user/set-status', requireAuth, async (req, res) => {
+    app.post('/user/set-status', requireAuth, async (req, res) => {
     const { userId, newStatus } = req.body;
     if (userId && (newStatus === 'true' || newStatus === 'false')) {
         try {
@@ -394,6 +391,10 @@ app.post('/user/set-status', requireAuth, async (req, res) => {
     }
     res.redirect(req.get('Referrer') || '/users');
 });
+}
+// index.js -> ДОБАВИТЬ ЭТОТ РОУТ
+
+
 async function runSingleBroadcast(task, users, taskId = null) {
     console.log(`[Broadcast Worker] Запуск рассылки для ${users.length} пользователей.`);
     let successCount = 0, errorCount = 0;
