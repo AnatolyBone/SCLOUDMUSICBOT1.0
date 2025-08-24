@@ -117,7 +117,58 @@
     </div>
   </div>
 </div>
+<!-- views/dashboard.ejs -> ВСТАВИТЬ ПЕРЕД СЕКЦИЕЙ С 'scripts' -->
 
+<!-- Дополнительная аналитика -->
+<div class="row g-4 mb-4">
+  <!-- Топ треков -->
+  <div class="col-lg-6">
+    <div class="card shadow-sm h-100">
+      <div class="card-header">🎵 Топ-10 популярных треков</div>
+      <div class="card-body">
+        <% if (topTracks && topTracks.length > 0) { %>
+          <ul class="list-group list-group-flush">
+            <% topTracks.forEach((track, index) => { %>
+              <li class="list-group-item d-flex justify-content-between align-items-center px-0">
+                <div class="text-truncate">
+                  <span class="text-muted"><%= index + 1 %>.</span> <%= track.track_title %>
+                </div>
+                <span class="badge bg-primary rounded-pill"><%= track.count %></span>
+              </li>
+            <% }) %>
+          </ul>
+        <% } else { %>
+          <p class="text-muted text-center my-4">Недостаточно данных.</p>
+        <% } %>
+      </div>
+    </div>
+  </div>
+
+  <!-- Топ пользователей -->
+  <div class="col-lg-6">
+    <div class="card shadow-sm h-100">
+      <div class="card-header">🏆 Топ-10 активных пользователей</div>
+      <div class="card-body">
+        <% if (topUsers && topUsers.length > 0) { %>
+          <ul class="list-group list-group-flush">
+            <% topUsers.forEach((user, index) => { %>
+              <li class="list-group-item d-flex justify-content-between align-items-center px-0">
+                <div class="text-truncate">
+                  <span class="text-muted"><%= index + 1 %>.</span>
+                  <a href="/user/<%= user.id %>" class="text-decoration-none"><%= user.first_name || 'ID: ' + user.id %></a>
+                  <% if (user.username) { %><small class="text-muted">@<%= user.username %></small><% } %>
+                </div>
+                <span class="badge bg-success rounded-pill"><%= user.total_downloads %></span>
+              </li>
+            <% }) %>
+          </ul>
+        <% } else { %>
+          <p class="text-muted text-center my-4">Недостаточно данных.</p>
+        <% } %>
+      </div>
+    </div>
+  </div>
+</div>
 <%- contentFor('scripts') %>
 <script>
   window.addEventListener('load', function() {
