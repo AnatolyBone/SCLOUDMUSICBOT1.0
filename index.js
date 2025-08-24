@@ -140,15 +140,17 @@ function setupExpress() {
                     storageStatus.error = e.message;
                 }
             }
-            const [users, registrationsRaw, cachedTracksCount, usersByTariff, topSources, dailyStats, weekdayActivity] = await Promise.all([
-                getAllUsers(true), 
-                getRegistrationsByDate(),
-                getCachedTracksCount(),
-                getUsersCountByTariff(),
-                getTopReferralSources(),
-                getDailyStats(req.query.period || 30),
-                getActivityByWeekday()
-            ]);
+            const [users, registrationsRaw, cachedTracksCount, usersByTariff, topSources, dailyStats, weekdayActivity, topTracks, topUsers] = await Promise.all([
+    getAllUsers(true),
+    getRegistrationsByDate(),
+    getCachedTracksCount(),
+    getUsersCountByTariff(),
+    getTopReferralSources(),
+    getDailyStats(req.query.period || 30),
+    getActivityByWeekday(),
+    getTopTracks(), // <-- ДОБАВЛЕНО
+    getTopUsers() // <-- ДОБАВЛЕНО
+]);
             const stats = {
                 total_users: users.length,
                 active_users: users.filter(u => u.active).length,
@@ -176,7 +178,7 @@ function setupExpress() {
                 labels: (weekdayActivity || []).map(d => d.weekday.trim()),
                 datasets: [{ label: 'Загрузки', data: (weekdayActivity || []).map(d => d.count), backgroundColor: 'rgba(13, 110, 253, 0.5)' }]
             };
-            res.render('dashboard', { title: 'Дашборд', page: 'dashboard', stats, storageStatus, period: req.query.period || 30, chartDataCombined, chartDataTariffs, chartDataWeekday });
+            res.render('dashboard', { title: 'Дашборд', page: 'dashboard', stats, storageStatus, period: req.query.period || 30, chartDataCombined, chartDataTariffs, chartDataWeekday, topTracks, topUsers });
         } catch (error) {
             console.error("Ошибка дашборда:", error);
             res.status(500).send("Ошибка сервера");
