@@ -280,14 +280,23 @@ export async function getTopReferralSources(limit = 5) {
 
 // db.js -> ЗАМЕНИТЬ СТАРУЮ ФУНКЦИЮ getDailyStats
 
-export async function getDailyStats(days = 30) {
+export async function getDailyStats(options = {}) {
+  // Устанавливаем даты по умолчанию: последние 30 дней
+  const endDate = options.endDate ? new Date(options.endDate) : new Date();
+  const startDate = options.startDate ? new Date(options.startDate) : new Date(new Date().setDate(endDate.getDate() - 29));
+  
+  // Форматируем даты для SQL-запроса
+  const startDateSql = startDate.toISOString().slice(0, 10);
+  const endDateSql = endDate.toISOString().slice(0, 10);
+  
   const { rows } = await query(`
     WITH date_series AS (
-      SELECT generate_series(CURRENT_DATE - INTERVAL '${days - 1} days', CURRENT_DATE, '1 day')::date AS day
+      SELECT generate_series($1::date, $2::date, '1 day')::date AS day
     ),
     daily_registrations AS (
       SELECT created_at::date AS day, COUNT(id) AS registrations
       FROM users
+      WHERE created_at::date BETWEEN $1 AND $2
       GROUP BY created_at::date
     ),
     daily_activity AS (
@@ -295,19 +304,20 @@ export async function getDailyStats(days = 30) {
              COUNT(id) AS downloads,
              COUNT(DISTINCT user_id) AS active_users
       FROM downloads_log
+      WHERE downloaded_at::date BETWEEN $1 AND $2
       GROUP BY downloaded_at::date
     )
     SELECT
-        ds.day::text,
+        to_char(ds.day, 'YYYY-MM-DD') as day,
         COALESCE(dr.registrations, 0)::int AS registrations,
         COALESCE(da.active_users, 0)::int AS active_users,
         COALESCE(da.downloads, 0)::int AS downloads
     FROM date_series ds
     LEFT JOIN daily_registrations dr ON ds.day = dr.day
     LEFT JOIN daily_activity da ON ds.day = da.day
-    WHERE ds.day >= CURRENT_DATE - INTERVAL '${days - 1} days'
     ORDER BY ds.day;
-  `);
+  `, [startDateSql, endDateSql]);
+  
   return rows;
 }
 
