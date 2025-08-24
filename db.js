@@ -308,6 +308,27 @@ export async function getActivityByWeekday() {
   });
   return result;
 }
+// db.js -> ДОБАВИТЬ ЭТУ ФУНКЦИЮ
+
+export async function getHourlyActivity(days = 7) {
+  const { rows } = await query(
+    `SELECT EXTRACT(HOUR FROM downloaded_at AT TIME ZONE 'UTC') as hour, COUNT(*) as count
+     FROM downloads_log
+     WHERE downloaded_at >= NOW() - INTERVAL '${days} days'
+     GROUP BY hour
+     ORDER BY hour;`
+  );
+
+  // Создаем массив из 24 часов, заполненный нулями
+  const hourlyCounts = Array(24).fill(0);
+  
+  // Заполняем массив реальными данными из базы
+  rows.forEach(row => {
+    hourlyCounts[parseInt(row.hour, 10)] = parseInt(row.count, 10);
+  });
+
+  return hourlyCounts;
+}
 // db.js -> ДОБАВИТЬ ЭТИ ДВЕ ФУНКЦИИ
 
 export async function getTopTracks(limit = 10) {
