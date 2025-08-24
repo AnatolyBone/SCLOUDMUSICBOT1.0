@@ -1,8 +1,8 @@
-// bot.js (ФИНАЛЬНАЯ ВЕРСИЯ)
+// bot.js (ФИНАЛЬНАЯ ВЕРСИЯ С ИСПРАВЛЕННЫМ ЛОГИРОВАНИЕМ)
 
 import { Telegraf, Markup, TelegramError } from 'telegraf';
 import { ADMIN_ID, BOT_TOKEN, WEBHOOK_URL, CHANNEL_USERNAME, STORAGE_CHANNEL_ID } from './config.js';
-import { updateUserField, getUser, createUser, setPremium, getAllUsers, resetDailyLimitIfNeeded, getCachedTracksCount,logUserAction} from './db.js';
+import { updateUserField, getUser, createUser, setPremium, getAllUsers, resetDailyLimitIfNeeded, getCachedTracksCount, logUserAction } from './db.js';
 import { T, allTextsSync } from './config/texts.js';
 import { performInlineSearch } from './services/searchManager.js';
 import { enqueue, downloadQueue } from './services/downloadManager.js';
@@ -70,40 +70,38 @@ bot.catch(async (err, ctx) => {
     }
 });
 
-// bot.js -> ЗАМЕНИТЬ СТАРЫЙ bot.use НА ЭТОТ
-
 bot.use(async (ctx, next) => {
-    // Пропускаем инлайн-запросы, так как у них нет ctx.from в том же виде
     if (!ctx.from) {
         return next();
     }
-    
-    // Получаем пользователя из базы
     const user = await getUser(ctx.from.id, ctx.from.first_name, ctx.from.username);
-    ctx.state.user = user; // Сохраняем пользователя в контекст для других обработчиков
-    
-    // ================== ГЛАВНОЕ ИЗМЕНЕНИЕ ЗДЕСЬ ==================
-    // Проверяем, активен ли пользователь
+    ctx.state.user = user;
     if (user && user.active === false) {
         console.log(`[Access Denied] Заблокированный пользователь ${ctx.from.id} попытался использовать бота.`);
-        // Отправляем сообщение о блокировке (без await, чтобы не задерживать)
         ctx.reply(T('blockedMessage')).catch(() => {});
-        // НЕ вызываем next(), чтобы остановить обработку
         return;
     }
-    // =============================================================
-    
-    // Если пользователь активен, продолжаем как обычно
     await resetDailyLimitIfNeeded(ctx.from.id);
     return next();
 });
 
 bot.start(async (ctx) => {
+    // Сначала создаем пользователя (или ничего не делаем, если он есть)
     await createUser(ctx.from.id, ctx.from.first_name, ctx.from.username, ctx.startPayload || null);
+    
+    // Получаем пользователя, которого нам создал/нашел getUser в bot.use
+    const user = ctx.state.user;
+    // Проверяем, действительно ли это новый пользователь, сравнивая время создания
+    const isNewRegistration = (Date.now() - new Date(user.created_at).getTime()) < 5000; // создан в последние 5 секунд
+    
+    if (isNewRegistration) {
+        // Логируем событие только для действительно новых пользователей
+        await logUserAction(ctx.from.id, 'registration');
+    }
+    
     await ctx.reply(T('start'), Markup.keyboard([[T('menu'), T('upgrade')], [T('mytracks'), T('help')]]).resize());
 });
-// В самом начале bot.start, после createUser
-await logUserAction(ctx.from.id, 'registration');
+
 bot.command('admin', async (ctx) => {
     if (ctx.from.id !== ADMIN_ID) return;
     try {
@@ -134,7 +132,7 @@ bot.action('check_subscription', async (ctx) => {
     if (subscribed) {
         await setPremium(ctx.from.id, 30, 7); 
         await updateUserField(ctx.from.id, 'subscribed_bonus_used', true);
-await logUserAction(ctx.from.id, 'bonus_received');
+        await logUserAction(ctx.from.id, 'bonus_received');
         await ctx.editMessageText('🎉 Поздравляем! Вам начислено 7 дней тарифа Plus. Спасибо за подписку!');
     } else {
         await ctx.answerCbQuery(`Вы еще не подписаны. Пожалуйста, подпишитесь и нажмите кнопку снова.`, { show_alert: true });
@@ -172,7 +170,6 @@ bot.hears(T('mytracks'), async (ctx) => {
 bot.hears(T('help'), async (ctx) => await ctx.reply(T('helpInfo')));
 bot.hears(T('upgrade'), async (ctx) => await ctx.reply(T('upgradeInfo'), { parse_mode: 'Markdown' }));
 
-// === ОБРАБОТЧИК ИНЛАЙН-РЕЖИМА ===
 bot.on('inline_query', async (ctx) => {
     const query = ctx.inlineQuery.query;
     if (!query || query.trim().length < 2) {
@@ -190,7 +187,6 @@ bot.on('inline_query', async (ctx) => {
     }
 });
 
-// === ОСНОВНОЙ ОБРАБОТЧИК ТЕКСТА (ССЫЛОК) ===
 bot.on('text', async (ctx) => {
     const userText = ctx.message.text;
     if (Object.values(allTextsSync()).includes(userText)) return;
