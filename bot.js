@@ -87,7 +87,7 @@ bot.use(async (ctx, next) => {
     if (user && user.active === false) {
         console.log(`[Access Denied] Заблокированный пользователь ${ctx.from.id} попытался использовать бота.`);
         // Отправляем сообщение о блокировке (без await, чтобы не задерживать)
-        ctx.reply('❌ Ваш аккаунт заблокирован администратором.').catch(() => {});
+        ctx.reply(T('blockedMessage')).catch(() => {});
         // НЕ вызываем next(), чтобы остановить обработку
         return;
     }
