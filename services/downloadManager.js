@@ -70,7 +70,7 @@ async function trackDownloadProcessor(task) {
             "socket-timeout": YTDL_TIMEOUT,
             'user-agent': FAKE_USER_AGENT,
             proxy: PROXY_URL || undefined,
-            '--embed-thumbnail': true // Вшиваем обложку в MP3
+            embedThumbnail: true
         });
         
         if (!fs.existsSync(tempFilePath)) throw new Error(`Файл не был создан`);
