@@ -26,7 +26,7 @@ import {
 import { bot } from './bot.js';
 import redisService from './services/redisClient.js';
 import { WEBHOOK_URL, PORT, SESSION_SECRET, ADMIN_ID, ADMIN_LOGIN, ADMIN_PASSWORD, WEBHOOK_PATH, STORAGE_CHANNEL_ID } from './config.js';
-import { loadTexts } from './config/texts.js';
+import { loadTexts, allTextsSync, setText } from './config/texts.js';
 import { downloadQueue } from './services/downloadManager.js';
 
 const app = express();
@@ -124,6 +124,40 @@ function setupExpress() {
             res.render('login', { title: 'Вход', error: 'Неверные данные', page: 'login', layout: false });
         }
     });
+    // index.js -> ДОБАВИТЬ ЭТИ ДВА РОУТА
+
+// Страница для редактирования текстов
+app.get('/texts', requireAuth, async (req, res) => {
+    try {
+        // Загружаем все тексты, включая те, что по умолчанию
+        const texts = allTextsSync();
+        res.render('texts', { 
+            title: 'Редактор текстов', 
+            page: 'texts', 
+            texts,
+            success: req.query.success // Для показа уведомления об успехе
+        });
+    } catch (error) {
+        console.error("Ошибка на странице текстов:", error);
+        res.status(500).send("Ошибка сервера");
+    }
+});
+
+// Обработчик для обновления текста
+app.post('/texts/update', requireAuth, async (req, res) => {
+    try {
+        const { key, value } = req.body;
+        if (!key || typeof value !== 'string') {
+            return res.status(400).send('Неверные данные');
+        }
+        await setText(key, value);
+        // Перенаправляем обратно с параметром успеха
+        res.redirect('/texts?success=true');
+    } catch (error) {
+        console.error("Ошибка при обновлении текста:", error);
+        res.status(500).send("Ошибка сервера");
+    }
+});
     app.get('/logout', (req, res) => req.session.destroy(() => res.redirect('/admin')));
     
     // ... (весь остальной код роутов остается без изменений) ...
