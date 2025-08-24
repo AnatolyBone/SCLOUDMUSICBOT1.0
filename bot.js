@@ -102,7 +102,8 @@ bot.start(async (ctx) => {
     await createUser(ctx.from.id, ctx.from.first_name, ctx.from.username, ctx.startPayload || null);
     await ctx.reply(T('start'), Markup.keyboard([[T('menu'), T('upgrade')], [T('mytracks'), T('help')]]).resize());
 });
-
+// В самом начале bot.start, после createUser
+await logUserAction(ctx.from.id, 'registration');
 bot.command('admin', async (ctx) => {
     if (ctx.from.id !== ADMIN_ID) return;
     try {
@@ -133,6 +134,7 @@ bot.action('check_subscription', async (ctx) => {
     if (subscribed) {
         await setPremium(ctx.from.id, 30, 7); 
         await updateUserField(ctx.from.id, 'subscribed_bonus_used', true);
+await logUserAction(ctx.from.id, 'bonus_received');
         await ctx.editMessageText('🎉 Поздравляем! Вам начислено 7 дней тарифа Plus. Спасибо за подписку!');
     } else {
         await ctx.answerCbQuery(`Вы еще не подписаны. Пожалуйста, подпишитесь и нажмите кнопку снова.`, { show_alert: true });
