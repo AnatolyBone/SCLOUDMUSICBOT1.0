@@ -278,19 +278,35 @@ export async function getTopReferralSources(limit = 5) {
   return rows;
 }
 
+// db.js -> ЗАМЕНИТЬ СТАРУЮ ФУНКЦИЮ getDailyStats
+
 export async function getDailyStats(days = 30) {
   const { rows } = await query(`
-    WITH date_series AS (SELECT generate_series(CURRENT_DATE - INTERVAL '${days - 1} days', CURRENT_DATE, '1 day')::date AS day)
-    SELECT 
-      ds.day::text,
-      COUNT(DISTINCT u.id) FILTER (WHERE u.created_at::date = ds.day) AS registrations,
-      COUNT(DISTINCT d.user_id) FILTER (WHERE d.downloaded_at::date = ds.day) AS active_users,
-      COUNT(d.id) FILTER (WHERE d.downloaded_at::date = ds.day) AS downloads
+    WITH date_series AS (
+      SELECT generate_series(CURRENT_DATE - INTERVAL '${days - 1} days', CURRENT_DATE, '1 day')::date AS day
+    ),
+    daily_registrations AS (
+      SELECT created_at::date AS day, COUNT(id) AS registrations
+      FROM users
+      GROUP BY created_at::date
+    ),
+    daily_activity AS (
+      SELECT downloaded_at::date AS day,
+             COUNT(id) AS downloads,
+             COUNT(DISTINCT user_id) AS active_users
+      FROM downloads_log
+      GROUP BY downloaded_at::date
+    )
+    SELECT
+        ds.day::text,
+        COALESCE(dr.registrations, 0)::int AS registrations,
+        COALESCE(da.active_users, 0)::int AS active_users,
+        COALESCE(da.downloads, 0)::int AS downloads
     FROM date_series ds
-    LEFT JOIN users u ON u.created_at::date <= ds.day
-    LEFT JOIN downloads_log d ON d.downloaded_at::date = ds.day
+    LEFT JOIN daily_registrations dr ON ds.day = dr.day
+    LEFT JOIN daily_activity da ON ds.day = da.day
     WHERE ds.day >= CURRENT_DATE - INTERVAL '${days - 1} days'
-    GROUP BY ds.day ORDER BY ds.day;
+    ORDER BY ds.day;
   `);
   return rows;
 }
