@@ -47,6 +47,8 @@ async function safeSendMessage(userId, text, extra = {}) {
     }
 }
 
+// services/downloadManager.js -> ЗАМЕНИТЬ ФУНКЦИЮ trackDownloadProcessor
+
 async function trackDownloadProcessor(task) {
     const { userId, url, metadata } = task;
     const { title, uploader, id: trackId, duration, thumbnail } = metadata;
@@ -57,30 +59,32 @@ async function trackDownloadProcessor(task) {
     
     try {
         statusMessage = await safeSendMessage(userId, `⏳ Начинаю обработку трека: "${title}"`);
-        console.log(`[Worker] Начинаю скачивание: ${title}`);
+        console.log(`[Worker] Начинаю скачивание и встраивание обложки для: ${title}`);
         tempFilePath = path.join(cacheDir, `${trackId}-${crypto.randomUUID()}.mp3`);
         
         await ytdl(url, {
-    output: tempFilePath,
-    extractAudio: true,
-    audioFormat: 'mp3',
-    retries: 3,
-    "socket-timeout": YTDL_TIMEOUT,
-    'user-agent': FAKE_USER_AGENT,
-    proxy: PROXY_URL || undefined,
-    '--embed-thumbnail': true // <-- ВОТ ОНО, ГЛАВНОЕ ИЗМЕНЕНИЕ
-});
+            output: tempFilePath,
+            extractAudio: true,
+            audioFormat: 'mp3',
+            retries: 3,
+            "socket-timeout": YTDL_TIMEOUT,
+            'user-agent': FAKE_USER_AGENT,
+            proxy: PROXY_URL || undefined,
+            '--embed-thumbnail': true // Вшиваем обложку в MP3
+        });
         
         if (!fs.existsSync(tempFilePath)) throw new Error(`Файл не был создан`);
         
         if (statusMessage) await bot.telegram.editMessageText(userId, statusMessage.message_id, undefined, `✅ Скачал. Отправляю...`).catch(()=>{});
         
+        // ======================= ГЛАВНОЕ ИЗМЕНЕНИЕ ЗДЕСЬ =======================
+        // Мы больше не передаем 'thumb' вручную. Telegram сам возьмет его из файла.
         const sentToUserMessage = await bot.telegram.sendAudio(userId, { source: fs.createReadStream(tempFilePath) }, { 
             title: title, 
             performer: uploader || 'SoundCloud',
-            duration: roundedDuration,
-            thumb: thumbnail ? { url: thumbnail } : undefined
+            duration: roundedDuration
         });
+        // =========================================================================
         
         if (statusMessage) await bot.telegram.deleteMessage(userId, statusMessage.message_id).catch(()=>{});
 
@@ -124,6 +128,8 @@ async function trackDownloadProcessor(task) {
         const errorDetails = err.stderr || err.message || '';
         if (err.name === 'TimeoutError' || errorDetails.includes('timed out')) {
             userErrorMessage += '. Причина: таймаут.';
+        } else if (errorDetails.includes('Postprocessing')) {
+             console.warn(`[Worker] Ошибка встраивания обложки для "${title}". Отправляю без нее.`);
         }
         console.error(`❌ Ошибка воркера при обработке "${title}":`, errorDetails);
         if (statusMessage) {
@@ -137,7 +143,6 @@ async function trackDownloadProcessor(task) {
         }
     } 
 }
-
 export const downloadQueue = new TaskQueue({
     maxConcurrent: 1,
     taskProcessor: trackDownloadProcessor
