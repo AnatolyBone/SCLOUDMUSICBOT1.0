@@ -120,35 +120,18 @@ export async function getExpiringUsers(days = 3) {
     const { rows } = await query( `SELECT * FROM users WHERE premium_until IS NOT NULL AND premium_until BETWEEN NOW() AND NOW() + INTERVAL '${days} days' ORDER BY premium_until ASC`);
     return rows;
 }
-// db.js -> ЗАМЕНИТЬ СТАРУЮ ФУНКЦИЮ searchTracksInCache
+// db.js -> ЗАМЕНИТЬ СТАРУЮ ФУНКЦИЮ searchTracksInCache НА ЭТУ
 
 export async function searchTracksInCache(query, limit = 7) {
   try {
-    // 1. Разбиваем запрос на отдельные слова и очищаем их
-    const searchTerms = query.split(' ')
-      .map(term => term.trim())
-      .filter(term => term.length > 0);
-    
-    if (searchTerms.length === 0) {
-      return [];
-    }
-    
-    // 2. Для каждого слова создаем условие "title ILIKE '%слово%' OR artist ILIKE '%слово%'"
-    const orFilters = searchTerms.map(term =>
-      `or(title.ilike.%${term}%,artist.ilike.%${term}%)`
-    );
-    
-    // 3. Объединяем все условия через "И" (AND)
-    const filterString = `and(${orFilters.join(',')})`;
-    
-    const { data, error } = await supabase
-      .from('track_cache')
-      .select('title, artist, duration, thumbnail, file_id')
-      .filter(filterString) // Используем новый, умный фильтр
-      .limit(limit);
+    // Вызываем нашу новую "умную" SQL-функцию через RPC
+    const { data, error } = await supabase.rpc('search_tracks', {
+      search_query: query,
+      result_limit: limit
+    });
     
     if (error) {
-      console.error('[DB Search] Ошибка при поиске в кэше Supabase:', error);
+      console.error('[DB Search] Ошибка при вызове RPC search_tracks:', error);
       return [];
     }
     return data;
