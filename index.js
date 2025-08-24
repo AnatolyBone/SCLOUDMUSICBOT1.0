@@ -374,6 +374,23 @@ app.post('/texts/update', requireAuth, async (req, res) => {
         }
         res.redirect(req.get('Referrer') || '/users');
     });
+    // index.js -> ДОБАВИТЬ ЭТОТ РОУТ ВНУТРИ setupExpress
+
+app.get('/users/export.csv', requireAuth, async (req, res) => {
+    try {
+        const { q = '', status = '' } = req.query;
+        const csvData = await getUsersAsCsv({ searchQuery: q, statusFilter: status });
+
+        // Устанавливаем правильные заголовки, чтобы браузер предложил скачать файл
+        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+        res.setHeader('Content-Disposition', `attachment; filename="users_${new Date().toISOString().slice(0, 10)}.csv"`);
+        res.send(csvData);
+
+    } catch (error) {
+        console.error("Ошибка при экспорте пользователей:", error);
+        res.status(500).send("Не удалось сгенерировать CSV-файл");
+    }
+});
     app.post('/user/set-status', requireAuth, async (req, res) => {
     const { userId, newStatus } = req.body;
     if (userId && (newStatus === 'true' || newStatus === 'false')) {
