@@ -61,12 +61,15 @@ async function trackDownloadProcessor(task) {
         tempFilePath = path.join(cacheDir, `${trackId}-${crypto.randomUUID()}.mp3`);
         
         await ytdl(url, {
-            output: tempFilePath,
-            extractAudio: true, audioFormat: 'mp3',
-            retries: 3, "socket-timeout": YTDL_TIMEOUT,
-            'user-agent': FAKE_USER_AGENT,
-            proxy: PROXY_URL || undefined
-        });
+    output: tempFilePath,
+    extractAudio: true,
+    audioFormat: 'mp3',
+    retries: 3,
+    "socket-timeout": YTDL_TIMEOUT,
+    'user-agent': FAKE_USER_AGENT,
+    proxy: PROXY_URL || undefined,
+    '--embed-thumbnail': true // <-- ВОТ ОНО, ГЛАВНОЕ ИЗМЕНЕНИЕ
+});
         
         if (!fs.existsSync(tempFilePath)) throw new Error(`Файл не был создан`);
         
