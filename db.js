@@ -416,7 +416,33 @@ export async function createBroadcastTask(task) {
     [message, audioPath, targetAudience, disableNotification, scheduledAt]
   );
 }
+// db.js (ФИНАЛЬНАЯ ВЕРСИЯ С НОВЫМИ ПОЛЯМИ ДЛЯ РАССЫЛКИ)
 
+// ... (все до функций рассылки без изменений) ...
+
+// --- Рассылки ---
+export async function createBroadcastTask(task) {
+  const { message, file_path, targetAudience, disableNotification, scheduledAt, keyboard, disable_web_page_preview } = task;
+  await query(
+    `INSERT INTO broadcast_tasks (message, file_path, target_audience, disable_notification, scheduled_at, status, keyboard, disable_web_page_preview)
+     VALUES ($1, $2, $3, $4, $5, 'pending', $6, $7)`,
+    [message, file_path, targetAudience, disableNotification, scheduledAt, keyboard, disable_web_page_preview]
+  );
+}
+
+// ... (getPendingBroadcastTask, completeBroadcastTask, failBroadcastTask, getAllBroadcastTasks, deleteBroadcastTask без изменений) ...
+
+export async function updateBroadcastTask(taskId, task) {
+  const { message, file_path, targetAudience, disableNotification, scheduledAt, keyboard, disable_web_page_preview } = task;
+  await query(
+    `UPDATE broadcast_tasks 
+     SET message = $1, file_path = $2, target_audience = $3, disable_notification = $4, scheduled_at = $5, status = 'pending', keyboard = $6, disable_web_page_preview = $7
+     WHERE id = $8`,
+    [message, file_path, targetAudience, disableNotification, scheduledAt, keyboard, disable_web_page_preview, taskId]
+  );
+}
+
+// ... (остальные функции без изменений)
 export async function getPendingBroadcastTask() {
   const { rows } = await query(`
     UPDATE broadcast_tasks SET status = 'processing'
