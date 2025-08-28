@@ -383,11 +383,11 @@ export async function getTopUsers(limit = 15) {
 // --- Рассылки ---
 // db.js -> ЗАМЕНИТЬ createBroadcastTask
 export async function createBroadcastTask(task) {
-  const { message, file_path, targetAudience, disableNotification, scheduledAt, keyboard, disable_web_page_preview } = task;
+  const { message, file_id, file_mime_type, targetAudience, disableNotification, scheduledAt, keyboard, disable_web_page_preview } = task;
   await query(
-    `INSERT INTO broadcast_tasks (message, file_path, target_audience, disable_notification, scheduled_at, status, keyboard, disable_web_page_preview)
-     VALUES ($1, $2, $3, $4, $5, 'pending', $6, $7)`,
-    [message, file_path, targetAudience, disableNotification, scheduledAt, JSON.stringify(keyboard), disable_web_page_preview] // <-- ИЗМЕНЕНИЕ ЗДЕСЬ
+    `INSERT INTO broadcast_tasks (message, file_id, file_mime_type, target_audience, disable_notification, scheduled_at, status, keyboard, disable_web_page_preview)
+     VALUES ($1, $2, $3, $4, $5, 'pending', $6, $7, $8)`,
+    [message, file_id, file_mime_type, targetAudience, disableNotification, scheduledAt, JSON.stringify(keyboard), disable_web_page_preview]
   );
 }
 
@@ -428,17 +428,15 @@ export async function getBroadcastTaskById(taskId) {
   return rows[0] || null;
 }
 
-// db.js -> ЗАМЕНИТЬ updateBroadcastTask
-export async function updateBroadcastTask(taskId, task) {
-  const { message, file_path, targetAudience, disableNotification, scheduledAt, keyboard, disable_web_page_preview } = task;
+// db.js -> ЗАМЕНИТЬ export async function updateBroadcastTask(taskId, task) {
+  const { message, file_id, file_mime_type, targetAudience, disableNotification, scheduledAt, keyboard, disable_web_page_preview } = task;
   await query(
     `UPDATE broadcast_tasks 
-     SET message = $1, file_path = $2, target_audience = $3, disable_notification = $4, scheduled_at = $5, status = 'pending', keyboard = $6, disable_web_page_preview = $7
-     WHERE id = $8`,
-    [message, file_path, targetAudience, disableNotification, scheduledAt, JSON.stringify(keyboard), disable_web_page_preview, taskId] // <-- ИЗМЕНЕНИЕ ЗДЕСЬ
+     SET message = $1, file_id = $2, file_mime_type = $3, target_audience = $4, disable_notification = $5, scheduled_at = $6, status = 'pending', keyboard = $7, disable_web_page_preview = $8
+     WHERE id = $9`,
+    [message, file_id, file_mime_type, targetAudience, disableNotification, scheduledAt, JSON.stringify(keyboard), disable_web_page_preview, taskId]
   );
-}
-// --- Другие функции ---
+
 export async function resetOtherTariffsToFree() {
   console.log('[DB-Admin] Начинаю сброс нестандартных тарифов...');
   const { rowCount } = await query(`
