@@ -381,7 +381,6 @@ export async function getTopUsers(limit = 15) {
 }
 
 // --- Рассылки ---
-// db.js -> ЗАМЕНИТЬ createBroadcastTask
 export async function createBroadcastTask(task) {
   const { message, file_id, file_mime_type, targetAudience, disableNotification, scheduledAt, keyboard, disable_web_page_preview } = task;
   await query(
@@ -428,7 +427,7 @@ export async function getBroadcastTaskById(taskId) {
   return rows[0] || null;
 }
 
-// db.js -> ЗАМЕНИТЬ export async function updateBroadcastTask(taskId, task) {
+export async function updateBroadcastTask(taskId, task) {
   const { message, file_id, file_mime_type, targetAudience, disableNotification, scheduledAt, keyboard, disable_web_page_preview } = task;
   await query(
     `UPDATE broadcast_tasks 
@@ -436,7 +435,7 @@ export async function getBroadcastTaskById(taskId) {
      WHERE id = $9`,
     [message, file_id, file_mime_type, targetAudience, disableNotification, scheduledAt, JSON.stringify(keyboard), disable_web_page_preview, taskId]
   );
-
+}
 export async function resetOtherTariffsToFree() {
   console.log('[DB-Admin] Начинаю сброс нестандартных тарифов...');
   const { rowCount } = await query(`
