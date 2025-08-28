@@ -1,4 +1,4 @@
-// db.js (ФИНАЛЬНАЯ ВЕРСИЯ - БЕЗ ДУБЛИКАТОВ)
+// db.js (ФИНАЛЬНАЯ ВЕРСИЯ БЕЗ ДУБЛИКАТОВ И С НОВЫМИ ФУНКЦИЯМИ)
 
 import { Pool } from 'pg';
 import { createClient } from '@supabase/supabase-js';
@@ -94,6 +94,43 @@ export async function getPaginatedUsers(options) {
     return { users: usersResult.rows, totalPages, currentPage: page, totalUsers };
 }
 
+function escapeCsv(str) {
+    if (str === null || str === undefined) return '';
+    const s = String(str);
+    if (s.includes(',') || s.includes('"') || s.includes('\n')) {
+        return `"${s.replace(/"/g, '""')}"`;
+    }
+    return s;
+}
+
+export async function getUsersAsCsv(options) {
+    const { searchQuery = '', statusFilter = '' } = options;
+    let whereClauses = [];
+    let queryParams = [];
+    let paramIndex = 1;
+    if (statusFilter === 'active') { whereClauses.push('active = TRUE'); } 
+    else if (statusFilter === 'inactive') { whereClauses.push('active = FALSE'); }
+    if (searchQuery) {
+        queryParams.push(`%${searchQuery}%`);
+        whereClauses.push(`(CAST(id AS TEXT) ILIKE $${paramIndex} OR first_name ILIKE $${paramIndex} OR username ILIKE $${paramIndex})`);
+    }
+    const whereString = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+
+    const { rows } = await query(`SELECT * FROM users ${whereString} ORDER BY created_at DESC`, queryParams);
+
+    const headers = 'ID,FirstName,Username,Status,TotalDownloads,PremiumLimit,PremiumUntil,CreatedAt,LastActive\n';
+    const csvRows = rows.map(u => [
+        u.id, escapeCsv(u.first_name), escapeCsv(u.username),
+        u.active ? 'active' : 'inactive',
+        u.total_downloads || 0, u.premium_limit || 0,
+        u.premium_until ? new Date(u.premium_until).toISOString() : '',
+        new Date(u.created_at).toISOString(),
+        u.last_active ? new Date(u.last_active).toISOString() : ''
+    ].join(','));
+
+    return headers + csvRows.join('\n');
+}
+
 // --- Тарифы и лимиты ---
 export async function setPremium(id, limit, days = 30) {
   const until = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
@@ -120,16 +157,14 @@ export async function getExpiringUsers(days = 3) {
     const { rows } = await query( `SELECT * FROM users WHERE premium_until IS NOT NULL AND premium_until BETWEEN NOW() AND NOW() + INTERVAL '${days} days' ORDER BY premium_until ASC`);
     return rows;
 }
-// db.js -> ЗАМЕНИТЬ СТАРУЮ ФУНКЦИЮ searchTracksInCache НА ЭТУ
 
+// --- Кэш треков ---
 export async function searchTracksInCache(query, limit = 7) {
   try {
-    // Вызываем нашу новую "умную" SQL-функцию через RPC
     const { data, error } = await supabase.rpc('search_tracks', {
       search_query: query,
       result_limit: limit
     });
-    
     if (error) {
       console.error('[DB Search] Ошибка при вызове RPC search_tracks:', error);
       return [];
@@ -143,7 +178,6 @@ export async function searchTracksInCache(query, limit = 7) {
 
 export async function cacheTrack(trackData) {
   const { url, fileId, title, artist, duration, thumbnail } = trackData;
-  
   await pool.query(
     `INSERT INTO track_cache (url, file_id, title, artist, duration, thumbnail)
      VALUES ($1, $2, $3, $4, $5, $6)
@@ -156,22 +190,17 @@ export async function cacheTrack(trackData) {
     [url, fileId, title, artist, duration, thumbnail]
   );
 }
-// --- Кэш треков ---
-// db.js -> ЗАМЕНИТЬ СТАРУЮ findCachedTrack
 
 export async function findCachedTrack(trackUrl) {
   try {
-    // ИЗМЕНЕНИЕ: Ищем 'title' вместо 'track_name'
     const { data, error } = await supabase.from('track_cache').select('file_id, title').eq('url', trackUrl).single();
     if (error && error.code !== 'PGRST116') console.error('Ошибка поиска в кэше Supabase:', error);
-    // ИЗМЕНЕНИЕ: Возвращаем 'trackName' для совместимости со старым кодом
     return data ? { fileId: data.file_id, trackName: data.title } : null;
   } catch (e) {
     console.error('Критическая ошибка в findCachedTrack:', e);
     return null;
   }
 }
-
 
 export async function getCachedTracksCount() {
   try {
@@ -215,13 +244,6 @@ export async function logEvent(userId, event) {
   }
 }
 
-// --- Статистика для дашборда ---
-export async function getReferralSourcesStats() {
-  const { rows } = await query(`SELECT referral_source, COUNT(*) as count FROM users WHERE referral_source IS NOT NULL GROUP BY referral_source ORDER BY count DESC`);
-  return rows.map(row => ({ source: row.referral_source, count: parseInt(row.count, 10) }));
-}
-// db.js -> ДОБАВИТЬ ЭТИ ДВЕ ФУНКЦИИ
-
 export async function logUserAction(userId, actionType, details = null) {
   try {
     await supabase.from('user_actions_log').insert([
@@ -235,12 +257,8 @@ export async function logUserAction(userId, actionType, details = null) {
 export async function getUserActions(userId, limit = 20) {
   try {
     const { data, error } = await supabase
-      .from('user_actions_log')
-      .select('*')
-      .eq('user_id', userId)
-      .order('created_at', { ascending: false })
-      .limit(limit);
-
+      .from('user_actions_log').select('*')
+      .eq('user_id', userId).order('created_at', { ascending: false }).limit(limit);
     if (error) throw error;
     return data;
   } catch (e) {
@@ -248,21 +266,8 @@ export async function getUserActions(userId, limit = 20) {
     return [];
   }
 }
-export async function getRegistrationsByDate() {
-  const { rows } = await query(`SELECT TO_CHAR(created_at, 'YYYY-MM-DD') as date, COUNT(*) as count FROM users GROUP BY date ORDER BY date`);
-  return rows.reduce((acc, row) => ({ ...acc, [row.date]: parseInt(row.count, 10) }), {});
-}
 
-export async function getDownloadsByDate() {
-  const { rows } = await query(`SELECT TO_CHAR(downloaded_at, 'YYYY-MM-DD') as date, COUNT(*) as count FROM downloads_log GROUP BY date ORDER BY date`);
-  return rows.reduce((acc, row) => ({ ...acc, [row.date]: parseInt(row.count, 10) }), {});
-}
-
-export async function getActiveUsersByDate() {
-  const { rows } = await query(`SELECT TO_CHAR(last_active, 'YYYY-MM-DD') as date, COUNT(DISTINCT id) as count FROM users WHERE last_active IS NOT NULL GROUP BY date ORDER BY date`);
-  return rows.reduce((acc, row) => ({ ...acc, [row.date]: parseInt(row.count, 10) }), {});
-}
-
+// --- Статистика для дашборда ---
 export async function getDownloadsByUserId(userId, limit = 50) {
   const { rows } = await query(
     `SELECT track_title, downloaded_at FROM downloads_log WHERE user_id = $1 ORDER BY downloaded_at DESC LIMIT $2`,
@@ -289,9 +294,7 @@ export async function getUsersCountByTariff() {
     FROM users WHERE active = TRUE GROUP BY tariff;
   `);
   const result = { Free: 0, Plus: 0, Pro: 0, Unlimited: 0, Other: 0 };
-  rows.forEach(row => {
-    result[row.tariff] = parseInt(row.count);
-  });
+  rows.forEach(row => { result[row.tariff] = parseInt(row.count); });
   return result;
 }
 
@@ -305,46 +308,21 @@ export async function getTopReferralSources(limit = 5) {
   return rows;
 }
 
-// db.js -> ЗАМЕНИТЬ СТАРУЮ ФУНКЦИЮ getDailyStats
-
 export async function getDailyStats(options = {}) {
-  // Устанавливаем даты по умолчанию: последние 30 дней
   const endDate = options.endDate ? new Date(options.endDate) : new Date();
   const startDate = options.startDate ? new Date(options.startDate) : new Date(new Date().setDate(endDate.getDate() - 29));
-  
-  // Форматируем даты для SQL-запроса
   const startDateSql = startDate.toISOString().slice(0, 10);
   const endDateSql = endDate.toISOString().slice(0, 10);
-  
   const { rows } = await query(`
-    WITH date_series AS (
-      SELECT generate_series($1::date, $2::date, '1 day')::date AS day
-    ),
-    daily_registrations AS (
-      SELECT created_at::date AS day, COUNT(id) AS registrations
-      FROM users
-      WHERE created_at::date BETWEEN $1 AND $2
-      GROUP BY created_at::date
-    ),
-    daily_activity AS (
-      SELECT downloaded_at::date AS day,
-             COUNT(id) AS downloads,
-             COUNT(DISTINCT user_id) AS active_users
-      FROM downloads_log
-      WHERE downloaded_at::date BETWEEN $1 AND $2
-      GROUP BY downloaded_at::date
-    )
-    SELECT
-        to_char(ds.day, 'YYYY-MM-DD') as day,
-        COALESCE(dr.registrations, 0)::int AS registrations,
-        COALESCE(da.active_users, 0)::int AS active_users,
-        COALESCE(da.downloads, 0)::int AS downloads
-    FROM date_series ds
-    LEFT JOIN daily_registrations dr ON ds.day = dr.day
+    WITH date_series AS ( SELECT generate_series($1::date, $2::date, '1 day')::date AS day ),
+    daily_registrations AS ( SELECT created_at::date AS day, COUNT(id) AS registrations FROM users WHERE created_at::date BETWEEN $1 AND $2 GROUP BY created_at::date ),
+    daily_activity AS ( SELECT downloaded_at::date AS day, COUNT(id) AS downloads, COUNT(DISTINCT user_id) AS active_users FROM downloads_log WHERE downloaded_at::date BETWEEN $1 AND $2 GROUP BY downloaded_at::date )
+    SELECT to_char(ds.day, 'YYYY-MM-DD') as day, COALESCE(dr.registrations, 0)::int AS registrations,
+        COALESCE(da.active_users, 0)::int AS active_users, COALESCE(da.downloads, 0)::int AS downloads
+    FROM date_series ds LEFT JOIN daily_registrations dr ON ds.day = dr.day
     LEFT JOIN daily_activity da ON ds.day = da.day
     ORDER BY ds.day;
   `, [startDateSql, endDateSql]);
-  
   return rows;
 }
 
@@ -356,41 +334,24 @@ export async function getActivityByWeekday() {
   `);
   const weekdays = ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота', 'Воскресенье'];
   const result = Array(7).fill(0).map((_, i) => ({ weekday: weekdays[i], count: 0 }));
-  rows.forEach(row => {
-    result[parseInt(row.weekday_num) - 1].count = parseInt(row.count);
-  });
+  rows.forEach(row => { result[parseInt(row.weekday_num) - 1].count = parseInt(row.count); });
   return result;
 }
-// db.js -> ДОБАВИТЬ ЭТУ ФУНКЦИЮ
 
 export async function getHourlyActivity(days = 7) {
   const { rows } = await query(
     `SELECT EXTRACT(HOUR FROM downloaded_at AT TIME ZONE 'UTC') as hour, COUNT(*) as count
-     FROM downloads_log
-     WHERE downloaded_at >= NOW() - INTERVAL '${days} days'
-     GROUP BY hour
-     ORDER BY hour;`
+     FROM downloads_log WHERE downloaded_at >= NOW() - INTERVAL '${days} days'
+     GROUP BY hour ORDER BY hour;`
   );
-
-  // Создаем массив из 24 часов, заполненный нулями
   const hourlyCounts = Array(24).fill(0);
-  
-  // Заполняем массив реальными данными из базы
-  rows.forEach(row => {
-    hourlyCounts[parseInt(row.hour, 10)] = parseInt(row.count, 10);
-  });
-
+  rows.forEach(row => { hourlyCounts[parseInt(row.hour, 10)] = parseInt(row.count, 10); });
   return hourlyCounts;
 }
-// db.js -> ДОБАВИТЬ ЭТИ ДВЕ ФУНКЦИИ
 
 export async function getTopTracks(limit = 10) {
   const { rows } = await query(
-    `SELECT track_title, COUNT(*) as count 
-     FROM downloads_log
-     GROUP BY track_title 
-     ORDER BY count DESC 
-     LIMIT $1`,
+    `SELECT track_title, COUNT(*) as count FROM downloads_log GROUP BY track_title ORDER BY count DESC LIMIT $1`,
     [limit]
   );
   return rows;
@@ -398,15 +359,12 @@ export async function getTopTracks(limit = 10) {
 
 export async function getTopUsers(limit = 10) {
   const { rows } = await query(
-    `SELECT id, first_name, username, total_downloads 
-     FROM users 
-     WHERE total_downloads > 0
-     ORDER BY total_downloads DESC 
-     LIMIT $1`,
+    `SELECT id, first_name, username, total_downloads FROM users WHERE total_downloads > 0 ORDER BY total_downloads DESC LIMIT $1`,
     [limit]
   );
   return rows;
 }
+
 // --- Рассылки ---
 export async function createBroadcastTask(task) {
   const { message, file_path, targetAudience, disableNotification, scheduledAt, keyboard, disable_web_page_preview } = task;
@@ -417,11 +375,6 @@ export async function createBroadcastTask(task) {
   );
 }
 
-// ... (getPendingBroadcastTask, completeBroadcastTask, failBroadcastTask, getAllBroadcastTasks, deleteBroadcastTask без изменений) ...
-
-
-
-// ... (остальные функции без изменений)
 export async function getPendingBroadcastTask() {
   const { rows } = await query(`
     UPDATE broadcast_tasks SET status = 'processing'
@@ -433,51 +386,7 @@ export async function getPendingBroadcastTask() {
   `);
   return rows[0] || null;
 }
-// db.js -> ДОБАВИТЬ ЭТУ ФУНКЦИЮ
 
-// Хелпер для экранирования данных в CSV
-function escapeCsv(str) {
-    if (str === null || str === undefined) return '';
-    const s = String(str);
-    if (s.includes(',')) {
-        return `"${s.replace(/"/g, '""')}"`;
-    }
-    return s;
-}
-
-export async function getUsersAsCsv(options) {
-    const { searchQuery = '', statusFilter = '' } = options;
-    
-    // Почти тот же код, что и в getPaginatedUsers, но без пагинации
-    let whereClauses = [];
-    let queryParams = [];
-    let paramIndex = 1;
-    if (statusFilter === 'active') { whereClauses.push('active = TRUE'); } 
-    else if (statusFilter === 'inactive') { whereClauses.push('active = FALSE'); }
-    if (searchQuery) {
-        queryParams.push(`%${searchQuery}%`);
-        whereClauses.push(`(CAST(id AS TEXT) ILIKE $${paramIndex} OR first_name ILIKE $${paramIndex} OR username ILIKE $${paramIndex})`);
-    }
-    const whereString = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
-
-    const { rows } = await query(`SELECT * FROM users ${whereString} ORDER BY created_at DESC`, queryParams);
-
-    // Формируем CSV
-    const headers = 'ID,FirstName,Username,Status,TotalDownloads,PremiumLimit,PremiumUntil,CreatedAt,LastActive\n';
-    const csvRows = rows.map(u => [
-        u.id,
-        escapeCsv(u.first_name),
-        escapeCsv(u.username),
-        u.active ? 'active' : 'inactive',
-        u.total_downloads || 0,
-        u.premium_limit || 0,
-        u.premium_until ? new Date(u.premium_until).toISOString() : '',
-        new Date(u.created_at).toISOString(),
-        u.last_active ? new Date(u.last_active).toISOString() : ''
-    ].join(','));
-
-    return headers + csvRows.join('\n');
-}
 export async function completeBroadcastTask(taskId, report) {
   await query(
     `UPDATE broadcast_tasks SET status = 'completed', report = $1, completed_at = NOW() WHERE id = $2`,
@@ -497,17 +406,7 @@ export async function getAllBroadcastTasks() {
 export async function deleteBroadcastTask(taskId) {
   await query(`DELETE FROM broadcast_tasks WHERE id = $1 AND status = 'pending'`, [taskId]);
 }
-// В ФАЙЛЕ db.js
-export async function resetOtherTariffsToFree() {
-  console.log('[DB-Admin] Начинаю сброс нестандартных тарифов...');
-  const { rowCount } = await query(`
-    UPDATE users
-    SET premium_limit = 5, premium_until = NULL
-    WHERE premium_limit NOT IN (5, 30, 100, 10000);
-  `);
-  console.log(`[DB-Admin] Сброшено ${rowCount} пользователей на тариф Free.`);
-  return rowCount;
-}
+
 export async function getBroadcastTaskById(taskId) {
   const { rows } = await query(`SELECT * FROM broadcast_tasks WHERE id = $1`, [taskId]);
   return rows[0] || null;
@@ -521,6 +420,16 @@ export async function updateBroadcastTask(taskId, task) {
      WHERE id = $8`,
     [message, file_path, targetAudience, disableNotification, scheduledAt, keyboard, disable_web_page_preview, taskId]
   );
+}
+
+// --- Другие функции ---
+export async function resetOtherTariffsToFree() {
+  console.log('[DB-Admin] Начинаю сброс нестандартных тарифов...');
+  const { rowCount } = await query(`
+    UPDATE users SET premium_limit = 5, premium_until = NULL WHERE premium_limit NOT IN (5, 30, 100, 10000);
+  `);
+  console.log(`[DB-Admin] Сброшено ${rowCount} пользователей на тариф Free.`);
+  return rowCount;
 }
 
 export async function getActiveFreeUsers() {
