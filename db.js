@@ -419,15 +419,7 @@ export async function createBroadcastTask(task) {
 
 // ... (getPendingBroadcastTask, completeBroadcastTask, failBroadcastTask, getAllBroadcastTasks, deleteBroadcastTask без изменений) ...
 
-export async function updateBroadcastTask(taskId, task) {
-  const { message, file_path, targetAudience, disableNotification, scheduledAt, keyboard, disable_web_page_preview } = task;
-  await query(
-    `UPDATE broadcast_tasks 
-     SET message = $1, file_path = $2, target_audience = $3, disable_notification = $4, scheduled_at = $5, status = 'pending', keyboard = $6, disable_web_page_preview = $7
-     WHERE id = $8`,
-    [message, file_path, targetAudience, disableNotification, scheduledAt, keyboard, disable_web_page_preview, taskId]
-  );
-}
+
 
 // ... (остальные функции без изменений)
 export async function getPendingBroadcastTask() {
@@ -522,12 +514,12 @@ export async function getBroadcastTaskById(taskId) {
 }
 
 export async function updateBroadcastTask(taskId, task) {
-  const { message, audioPath, targetAudience, disableNotification, scheduledAt } = task;
+  const { message, file_path, targetAudience, disableNotification, scheduledAt, keyboard, disable_web_page_preview } = task;
   await query(
     `UPDATE broadcast_tasks 
-     SET message = $1, audio_path = $2, target_audience = $3, disable_notification = $4, scheduled_at = $5, status = 'pending'
-     WHERE id = $6`,
-    [message, audioPath, targetAudience, disableNotification, scheduledAt, taskId]
+     SET message = $1, file_path = $2, target_audience = $3, disable_notification = $4, scheduled_at = $5, status = 'pending', keyboard = $6, disable_web_page_preview = $7
+     WHERE id = $8`,
+    [message, file_path, targetAudience, disableNotification, scheduledAt, keyboard, disable_web_page_preview, taskId]
   );
 }
 
