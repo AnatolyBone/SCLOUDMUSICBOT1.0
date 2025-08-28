@@ -1,4 +1,4 @@
-<% // views/broadcast-form.ejs %>
+<% // views/broadcast-form.ejs (ФИНАЛЬНАЯ ВЕРСИЯ) %>
 <%- contentFor('body') %>
 <% const isEditing = typeof task !== 'undefined' && task; %>
 <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
@@ -10,15 +10,28 @@
 <div class="card shadow-sm">
   <div class="card-body">
     <form id="broadcastForm" method="POST" action="<%= isEditing ? '/broadcast/edit/' + task.id : '/broadcast/new' %>" enctype="multipart/form-data">
+      
       <div class="mb-3">
         <label for="message" class="form-label">Текст сообщения</label>
         <textarea name="message" id="message" class="form-control" rows="5" required><%= isEditing ? task.message : '' %></textarea>
+        <div class="form-text">Поддерживается Markdown и тег <code>{first_name}</code> для обращения по имени.</div>
       </div>
+
+      <div class="mb-3">
+        <label for="buttons" class="form-label">Инлайн-кнопки (необязательно)</label>
+        <textarea name="buttons" id="buttons" class="form-control" rows="3" placeholder="Текст кнопки | тип | данные (каждая кнопка с новой строки)"><%= isEditing && task.buttons_text ? task.buttons_text : '' %></textarea>
+        <div class="form-text">
+          Типы: <code>url</code>, <code>callback</code>, <code>inline_search</code>. Пример: <code>Наш канал | url | https://t.me/your_channel</code>
+        </div>
+      </div>
+
       <div class="row">
         <div class="col-md-6 mb-3">
-          <label for="audio" class="form-label">Аудио-файл</label>
-          <input type="file" name="audio" id="audio" accept="audio/*" class="form-control" />
-          <% if (isEditing && task.audio_path) { %><div class="form-text">Прикреплен файл. Загрузка нового заменит его.</div><% } %>
+          <label for="file" class="form-label">Файл (фото, видео, аудио, документ)</label>
+          <input type="file" name="file" id="file" class="form-control" />
+          <% if (isEditing && (task.audio_path || task.file_path)) { %>
+            <div class="form-text">Прикреплен файл. Загрузка нового заменит его.</div>
+          <% } %>
         </div>
         <div class="col-md-6 mb-3">
           <label for="targetAudience" class="form-label">Аудитория</label>
@@ -29,20 +42,25 @@
           </select>
         </div>
       </div>
+
       <div class="row align-items-end">
         <div class="col-md-6 mb-3">
           <label for="localScheduledAt" class="form-label">Запланировать на (ваше локальное время)</label>
           <input type="datetime-local" class="form-control" id="localScheduledAt" value="<%= isEditing && task.scheduled_at ? new Date(new Date(task.scheduled_at).getTime() - (new Date().getTimezoneOffset() * 60000)).toISOString().slice(0, 16) : '' %>">
           <input type="hidden" name="scheduledAt" id="scheduledAt">
-          <div class="form-text">Если оставить пустым, отправка будет немедленной.</div>
         </div>
-        <div class="col-md-6 mb-3 d-flex align-items-center">
-          <div class="form-check">
+        <div class="col-md-6 mb-3 d-flex flex-wrap gap-3">
+          <div class="form-check form-switch">
             <input class="form-check-input" type="checkbox" name="disable_notification" id="disable_notification" <%= (isEditing && task.disable_notification) ? 'checked' : '' %>>
             <label class="form-check-label" for="disable_notification">Тихая рассылка</label>
           </div>
+          <div class="form-check form-switch">
+            <input class="form-check-input" type="checkbox" name="enable_web_page_preview" id="enable_web_page_preview" <%= (isEditing && !task.disable_web_page_preview) ? 'checked' : '' %>>
+            <label class="form-check-label" for="enable_web_page_preview">Предпросмотр ссылки</label>
+          </div>
         </div>
       </div>
+
       <div class="d-flex flex-wrap gap-2">
         <% if (!isEditing) { %><button type="submit" name="action" value="preview" class="btn btn-outline-secondary">Предпросмотр</button><% } %>
         <button type="submit" name="action" value="send" class="btn btn-primary flex-grow-1" onclick="return confirm('Вы уверены?')">🚀 <%= isEditing ? 'Сохранить' : 'Отправить/Запланировать' %></button>
