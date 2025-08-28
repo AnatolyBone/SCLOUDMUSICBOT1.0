@@ -15,6 +15,7 @@ export const REDIS_URL = process.env.REDIS_URL;
 export const SUPABASE_URL = process.env.SUPABASE_URL;
 export const PROXY_URL = process.env.PROXY_URL;
 export const SUPABASE_KEY = process.env.SUPABASE_KEY;
+export const BROADCAST_STORAGE_ID = process.env.BROADCAST_STORAGE_ID;
 let rawChannelIdentifier = process.env.CHANNEL_URL || '';
 // Если в переменной полная ссылка, извлекаем username
 if (rawChannelIdentifier.includes('t.me/')) {
