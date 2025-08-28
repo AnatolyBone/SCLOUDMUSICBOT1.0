@@ -1,4 +1,4 @@
-// index.js (ФИНАЛЬНАЯ ЧИСТАЯ ВЕРСИЯ)
+// index.js (ФИНАЛЬНАЯ ПОЛНАЯ ВЕРСИЯ С ПРОКАЧАННОЙ РАССЫЛКОЙ)
 
 import express from 'express';
 import session from 'express-session';
@@ -10,6 +10,7 @@ import { fileURLToPath } from 'url';
 import pgSessionFactory from 'connect-pg-simple';
 import pLimit from 'p-limit';
 import fs from 'fs';
+import mime from 'mime-types';
 import cron from 'node-cron';
 
 import { 
@@ -19,9 +20,10 @@ import {
     getLatestReviews, getUserActivityByDayHour, getDownloadsByUserId, getReferralsByUserId, 
     getCachedTracksCount, getActiveFreeUsers, getActivePremiumUsers,
     getUsersCountByTariff, getTopReferralSources, getDailyStats,
-    getActivityByWeekday, getTopTracks, getTopUsers, getHourlyActivity,
+    getActivityByWeekday, getTopTracks, getTopUsers, getHourlyActivity, getUsersAsCsv, 
+    getUserActions, logUserAction,
     createBroadcastTask, getPendingBroadcastTask, completeBroadcastTask, failBroadcastTask,
-    getAllBroadcastTasks, deleteBroadcastTask, getBroadcastTaskById, updateBroadcastTask, getUsersAsCsv, getUserActions, logUserAction
+    getAllBroadcastTasks, deleteBroadcastTask, getBroadcastTaskById, updateBroadcastTask
 } from './db.js';
 import { bot } from './bot.js';
 import redisService from './services/redisClient.js';
@@ -44,7 +46,6 @@ async function startApp() {
         setupExpress();
         startBroadcastWorker();
 
-        // =================== ИСПРАВЛЕННЫЙ БЛОК ЗАПУСКА БОТА ===================
         if (process.env.NODE_ENV === 'production') {
             const fullWebhookUrl = (WEBHOOK_URL.endsWith('/') ? WEBHOOK_URL.slice(0, -1) : WEBHOOK_URL) + WEBHOOK_PATH;
             const allowedUpdates = ['message', 'callback_query', 'inline_query'];
@@ -70,7 +71,6 @@ async function startApp() {
                 allowedUpdates: ['message', 'callback_query', 'inline_query']
             });
         }
-        // ======================================================================
 
         app.listen(PORT, () => console.log(`✅ [App] Сервер запущен на порту ${PORT}.`));
         
@@ -82,6 +82,31 @@ async function startApp() {
         console.error('🔴 Критическая ошибка при запуске:', err);
         process.exit(1);
     }
+}
+
+function parseButtons(buttonsText) {
+    if (!buttonsText || typeof buttonsText !== 'string' || buttonsText.trim() === '') {
+        return null;
+    }
+    const rows = buttonsText.split('\n').map(line => line.trim()).filter(line => line);
+    const keyboard = rows.map(row => {
+        const parts = row.split('|').map(p => p.trim());
+        const [text, type, data] = parts;
+        if (!text || !type) return null;
+
+        switch (type.toLowerCase()) {
+            case 'url':
+                return { text, url: data };
+            case 'callback':
+                return { text, callback_data: data };
+            case 'inline_search':
+                return { text, switch_inline_query: data || '' };
+            default:
+                return null;
+        }
+    }).filter(Boolean);
+    
+    return keyboard.length > 0 ? keyboard.map(button => [button]) : null;
 }
 
 function setupExpress() {
@@ -124,43 +149,8 @@ function setupExpress() {
             res.render('login', { title: 'Вход', error: 'Неверные данные', page: 'login', layout: false });
         }
     });
-    // index.js -> ДОБАВИТЬ ЭТИ ДВА РОУТА
-
-// Страница для редактирования текстов
-app.get('/texts', requireAuth, async (req, res) => {
-    try {
-        // Загружаем все тексты, включая те, что по умолчанию
-        const texts = allTextsSync();
-        res.render('texts', { 
-            title: 'Редактор текстов', 
-            page: 'texts', 
-            texts,
-            success: req.query.success // Для показа уведомления об успехе
-        });
-    } catch (error) {
-        console.error("Ошибка на странице текстов:", error);
-        res.status(500).send("Ошибка сервера");
-    }
-});
-
-// Обработчик для обновления текста
-app.post('/texts/update', requireAuth, async (req, res) => {
-    try {
-        const { key, value } = req.body;
-        if (!key || typeof value !== 'string') {
-            return res.status(400).send('Неверные данные');
-        }
-        await setText(key, value);
-        // Перенаправляем обратно с параметром успеха
-        res.redirect('/texts?success=true');
-    } catch (error) {
-        console.error("Ошибка при обновлении текста:", error);
-        res.status(500).send("Ошибка сервера");
-    }
-});
     app.get('/logout', (req, res) => req.session.destroy(() => res.redirect('/admin')));
     
-    // ... (весь остальной код роутов остается без изменений) ...
     app.get('/dashboard', requireAuth, async (req, res) => {
         try {
             let storageStatus = { available: false, error: '' };
@@ -173,21 +163,21 @@ app.post('/texts/update', requireAuth, async (req, res) => {
                 }
             }
             const [
-    users, registrationsRaw, cachedTracksCount, usersByTariff,
-    topSources, dailyStats, weekdayActivity, topTracks,
-    topUsers, hourlyActivity
-] = await Promise.all([
-    getAllUsers(true),
-    getRegistrationsByDate(),
-    getCachedTracksCount(),
-    getUsersCountByTariff(),
-    getTopReferralSources(),
-    getDailyStats({ startDate: req.query.startDate, endDate: req.query.endDate }),
-    getActivityByWeekday(),
-    getTopTracks(),
-    getTopUsers(),
-    getHourlyActivity()
-]);
+                users, registrationsRaw, cachedTracksCount, usersByTariff,
+                topSources, dailyStats, weekdayActivity, topTracks,
+                topUsers, hourlyActivity
+            ] = await Promise.all([
+                getAllUsers(true),
+                getRegistrationsByDate(),
+                getCachedTracksCount(),
+                getUsersCountByTariff(),
+                getTopReferralSources(),
+                getDailyStats({ startDate: req.query.startDate, endDate: req.query.endDate }),
+                getActivityByWeekday(),
+                getTopTracks(),
+                getTopUsers(),
+                getHourlyActivity()
+            ]);
             const stats = {
                 total_users: users.length,
                 active_users: users.filter(u => u.active).length,
@@ -216,17 +206,20 @@ app.post('/texts/update', requireAuth, async (req, res) => {
                 datasets: [{ label: 'Загрузки', data: (weekdayActivity || []).map(d => d.count), backgroundColor: 'rgba(13, 110, 253, 0.5)' }]
             };
             const chartDataHourly = {
-    labels: Array.from({ length: 24 }, (_, i) => `${i.toString().padStart(2, '0')}:00`),
-    datasets: [{
-        label: 'Загрузки',
-        data: hourlyActivity,
-        backgroundColor: 'rgba(255, 99, 132, 0.5)',
-        borderColor: 'rgba(255, 99, 132, 1)',
-        borderWidth: 1
-    }]
-};
-            res.render('dashboard', { title: 'Дашборд', page: 'dashboard', stats, storageStatus, period: req.query.period || 30, chartDataCombined, chartDataTariffs, chartDataWeekday, topTracks, topUsers, chartDataHourly, startDate: req.query.startDate,
-    endDate: req.query.endDate});
+                labels: Array.from({ length: 24 }, (_, i) => `${i.toString().padStart(2, '0')}:00`),
+                datasets: [{
+                    label: 'Загрузки',
+                    data: hourlyActivity,
+                    backgroundColor: 'rgba(255, 99, 132, 0.5)',
+                    borderColor: 'rgba(255, 99, 132, 1)',
+                    borderWidth: 1
+                }]
+            };
+            res.render('dashboard', { 
+                title: 'Дашборд', page: 'dashboard', stats, storageStatus, 
+                startDate: req.query.startDate, endDate: req.query.endDate,
+                chartDataCombined, chartDataTariffs, chartDataWeekday, topTracks, topUsers, chartDataHourly 
+            });
         } catch (error) {
             console.error("Ошибка дашборда:", error);
             res.status(500).send("Ошибка сервера");
@@ -244,6 +237,19 @@ app.post('/texts/update', requireAuth, async (req, res) => {
         } catch (error) {
             console.error("Ошибка на странице пользователей:", error);
             res.status(500).send("Ошибка сервера");
+        }
+    });
+    
+    app.get('/users/export.csv', requireAuth, async (req, res) => {
+        try {
+            const { q = '', status = '' } = req.query;
+            const csvData = await getUsersAsCsv({ searchQuery: q, statusFilter: status });
+            res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+            res.setHeader('Content-Disposition', `attachment; filename="users_${new Date().toISOString().slice(0, 10)}.csv"`);
+            res.send(csvData);
+        } catch (error) {
+            console.error("Ошибка при экспорте пользователей:", error);
+            res.status(500).send("Не удалось сгенерировать CSV-файл");
         }
     });
 
@@ -264,31 +270,26 @@ app.post('/texts/update', requireAuth, async (req, res) => {
     app.get('/user/:id', requireAuth, async (req, res) => {
         try {
             const userId = req.params.id;
-            const [userProfile, downloads, referrals, actions] = await Promise.all([ getUserById(userId), getDownloadsByUserId(userId), getReferralsByUserId(userId), getUserActions(userId) ]);
+            const [userProfile, downloads, referrals, actions] = await Promise.all([ 
+                getUserById(userId), 
+                getDownloadsByUserId(userId), 
+                getReferralsByUserId(userId),
+                getUserActions(userId)
+            ]);
             if (!userProfile) {
-                return res.status(404).render('user-profile', { title: 'Пользователь не найден', page: 'users', userProfile: null, downloads: [], referrals: [] });
+                return res.status(404).render('user-profile', { title: 'Пользователь не найден', page: 'users', userProfile: null, downloads: [], referrals: [], actions: [] });
             }
-            res.render('user-profile', { title: `Профиль: ${userProfile.first_name || userId}`, page: 'users', userProfile, downloads, referrals, actions });
+            res.render('user-profile', { 
+                title: `Профиль: ${userProfile.first_name || userId}`, 
+                page: 'users', 
+                userProfile, downloads, referrals, actions
+            });
         } catch (error) {
             console.error(`Ошибка при получении профиля пользователя ${req.params.id}:`, error);
             res.status(500).send("Ошибка сервера");
         }
     });
-    app.get('/users/export.csv', requireAuth, async (req, res) => {
-    try {
-        const { q = '', status = '' } = req.query;
-        const csvData = await getUsersAsCsv({ searchQuery: q, statusFilter: status });
-
-        // Устанавливаем правильные заголовки, чтобы браузер предложил скачать файл
-        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-        res.setHeader('Content-Disposition', `attachment; filename="users_${new Date().toISOString().slice(0, 10)}.csv"`);
-        res.send(csvData);
-
-    } catch (error) {
-        console.error("Ошибка при экспорте пользователей:", error);
-        res.status(500).send("Не удалось сгенерировать CSV-файл");
-    }
-});
+    
     app.get('/broadcasts', requireAuth, async (req, res) => {
         const tasks = await getAllBroadcastTasks();
         res.render('broadcasts', { title: 'Управление рассылками', page: 'broadcasts', tasks });
@@ -303,7 +304,15 @@ app.post('/texts/update', requireAuth, async (req, res) => {
         if (!task || task.status !== 'pending') {
             return res.redirect('/broadcasts');
         }
-        res.render('broadcast-form', { title: 'Редактировать рассылку', page: 'broadcasts', task, error: null, success: null });
+        // Восстанавливаем текстовое представление кнопок для редактирования
+        const buttons_text = task.keyboard ? task.keyboard.map(row => {
+            const btn = row[0];
+            if (btn.url) return `${btn.text} | url | ${btn.url}`;
+            if (btn.callback_data) return `${btn.text} | callback | ${btn.callback_data}`;
+            if (btn.switch_inline_query !== undefined) return `${btn.text} | inline_search | ${btn.switch_inline_query}`;
+            return '';
+        }).join('\n') : '';
+        res.render('broadcast-form', { title: 'Редактировать рассылку', page: 'broadcasts', task: {...task, buttons_text}, error: null, success: null });
     });
 
     app.post('/broadcast/delete', requireAuth, async (req, res) => {
@@ -312,29 +321,36 @@ app.post('/texts/update', requireAuth, async (req, res) => {
         res.redirect('/broadcasts');
     });
 
-    app.post(['/broadcast/new', '/broadcast/edit/:id'], requireAuth, upload.single('audio'), async (req, res) => {
+    app.post(['/broadcast/new', '/broadcast/edit/:id'], requireAuth, upload.single('file'), async (req, res) => {
         const isEditing = !!req.params.id;
         const taskId = req.params.id;
         try {
-            const { message, targetAudience, scheduledAt, disable_notification, action } = req.body;
-            const audioFile = req.file;
-            const renderOptions = { title: isEditing ? 'Редактировать рассылку' : 'Новая рассылка', page: 'broadcasts', success: null, error: null, task: isEditing ? await getBroadcastTaskById(taskId) : undefined };
-            if (!message) {
-                renderOptions.error = 'Текст сообщения не может быть пустым.';
+            const { message, buttons, targetAudience, scheduledAt, disable_notification, enable_web_page_preview, action } = req.body;
+            const file = req.file;
+            const existingTask = isEditing ? await getBroadcastTaskById(taskId) : {};
+            const renderOptions = { title: isEditing ? 'Редактировать рассылку' : 'Новая рассылка', page: 'broadcasts', success: null, error: null, task: { ...existingTask, ...req.body, buttons_text: buttons } };
+
+            if (!message && !file && !existingTask.file_path) {
+                renderOptions.error = 'Сообщение не может быть пустым, если не прикреплен файл.';
                 return res.render('broadcast-form', renderOptions);
             }
+            
             const taskData = {
                 message,
-                audioPath: audioFile ? audioFile.path : (isEditing ? (await getBroadcastTaskById(taskId)).audio_path : null),
+                keyboard: parseButtons(buttons),
+                file_path: file ? file.path : (existingTask ? existingTask.file_path : null),
                 targetAudience,
                 disableNotification: !!disable_notification,
+                disable_web_page_preview: !enable_web_page_preview,
             };
+
             if (action === 'preview') {
-                await runSingleBroadcast(taskData, [{ id: ADMIN_ID }]);
-                if (audioFile) fs.unlinkSync(audioFile.path);
+                await runSingleBroadcast({ ...taskData, targetAudience: 'preview' }, [{ id: ADMIN_ID, first_name: 'Admin' }]);
+                if (file) fs.unlinkSync(file.path);
                 renderOptions.success = 'Предпросмотр отправлен вам в Telegram.';
                 return res.render('broadcast-form', renderOptions);
             }
+
             const scheduleTime = scheduledAt ? new Date(scheduledAt) : new Date();
             if (isEditing) {
                 await updateBroadcastTask(taskId, { ...taskData, scheduledAt: scheduleTime });
@@ -344,7 +360,28 @@ app.post('/texts/update', requireAuth, async (req, res) => {
             res.redirect('/broadcasts');
         } catch (e) {
             console.error('Ошибка создания/редактирования задачи:', e);
-            res.render('broadcast-form', { title: 'Ошибка', page: 'broadcasts', error: 'Не удалось сохранить задачу.', success: null, task: isEditing ? { ...req.body, id: taskId } : req.body });
+            res.render('broadcast-form', { title: 'Ошибка', page: 'broadcasts', error: 'Не удалось сохранить задачу.', success: null, task: req.body });
+        }
+    });
+
+    app.get('/texts', requireAuth, async (req, res) => {
+        try {
+            const texts = allTextsSync();
+            res.render('texts', { title: 'Редактор текстов', page: 'texts', texts, success: req.query.success });
+        } catch (error) {
+            console.error("Ошибка на странице текстов:", error);
+            res.status(500).send("Ошибка сервера");
+        }
+    });
+
+    app.post('/texts/update', requireAuth, async (req, res) => {
+        try {
+            const { key, value } = req.body;
+            await setText(key, value);
+            res.redirect('/texts?success=true');
+        } catch (error) {
+            console.error("Ошибка при обновлении текста:", error);
+            res.status(500).send("Ошибка сервера");
         }
     });
 
@@ -361,10 +398,10 @@ app.post('/texts/update', requireAuth, async (req, res) => {
         const { userId, limit, days } = req.body;
         try {
             await setPremium(userId, parseInt(limit), parseInt(days) || 30);
-            await logUserAction(userId, 'tariff_changed_by_admin', {
-    new_limit: parseInt(limit),
-    days: parseInt(days) || 30
-});
+            await logUserAction(userId, 'tariff_changed_by_admin', { 
+                new_limit: parseInt(limit), 
+                days: parseInt(days) || 30 
+            });
             let tariffName = '';
             const newLimit = parseInt(limit);
             if (newLimit <= 5) tariffName = 'Free';
@@ -393,43 +430,63 @@ app.post('/texts/update', requireAuth, async (req, res) => {
         }
         res.redirect(req.get('Referrer') || '/users');
     });
-    // index.js -> ДОБАВИТЬ ЭТОТ РОУТ ВНУТРИ setupExpress
-
-
+    
     app.post('/user/set-status', requireAuth, async (req, res) => {
-    const { userId, newStatus } = req.body;
-    if (userId && (newStatus === 'true' || newStatus === 'false')) {
-        try {
-            const isActive = newStatus === 'true';
-            await updateUserField(userId, 'active', isActive);
-
-            // Опционально: уведомить пользователя, если мы его разбанили
-            if (isActive) {
-                await bot.telegram.sendMessage(userId, '✅ Ваш аккаунт снова активен.').catch(() => {});
+        const { userId, newStatus } = req.body;
+        if (userId && (newStatus === 'true' || newStatus === 'false')) {
+            try {
+                const isActive = newStatus === 'true';
+                await updateUserField(userId, 'active', isActive);
+                const actionType = isActive ? 'unbanned_by_admin' : 'banned_by_admin';
+                await logUserAction(userId, actionType);
+                if (isActive) {
+                    await bot.telegram.sendMessage(userId, '✅ Ваш аккаунт снова активен.').catch(() => {});
+                }
+            } catch (error) {
+                console.error(`[Admin] Ошибка при смене статуса для ${userId}:`, error.message);
             }
-        } catch (error) {
-            console.error(`[Admin] Ошибка при смене статуса для ${userId}:`, error.message);
         }
-    }
-    res.redirect(req.get('Referrer') || '/users');
-});
+        res.redirect(req.get('Referrer') || '/users');
+    });
 }
-// index.js -> ДОБАВИТЬ ЭТОТ РОУТ
-
 
 async function runSingleBroadcast(task, users, taskId = null) {
     console.log(`[Broadcast Worker] Запуск рассылки для ${users.length} пользователей.`);
     let successCount = 0, errorCount = 0;
-    let safeMessage = task.message.replace(/\*(.*?)\*/g, '<b>$1</b>').replace(/_(.*?)_/g, '<i>$1</i>').replace(/(https?:\/\/[^\s]+)/g, '<a href="$1">$1</a>');
+    
     for (const user of users) {
         try {
-            const options = { parse_mode: 'HTML', disable_web_page_preview: true, disable_notification: task.disableNotification };
-            if (task.audioPath || task.audio_path) {
-                options.caption = safeMessage;
-                await bot.telegram.sendAudio(user.id, { source: task.audioPath || task.audio_path }, options);
-            } else {
-                await bot.telegram.sendMessage(user.id, safeMessage, options);
+            const personalMessage = (task.message || '').replace(/{first_name}/g, user.first_name || 'дорогой друг');
+            
+            const options = { 
+                parse_mode: 'Markdown',
+                disable_web_page_preview: task.disable_web_page_preview, 
+                disable_notification: task.disable_notification 
+            };
+            if (task.keyboard && task.keyboard.length > 0) {
+                options.reply_markup = { inline_keyboard: task.keyboard };
             }
+
+            const filePath = task.file_path || task.audio_path;
+
+            if (filePath) {
+                if (personalMessage) options.caption = personalMessage;
+                const fileSource = { source: filePath };
+                const mimeType = mime.lookup(filePath) || '';
+
+                if (mimeType.startsWith('image/')) {
+                    await bot.telegram.sendPhoto(user.id, fileSource, options);
+                } else if (mimeType.startsWith('video/')) {
+                    await bot.telegram.sendVideo(user.id, fileSource, options);
+                } else if (mimeType.startsWith('audio/')) {
+                    await bot.telegram.sendAudio(user.id, fileSource, options);
+                } else {
+                    await bot.telegram.sendDocument(user.id, fileSource, options);
+                }
+            } else if (personalMessage) {
+                await bot.telegram.sendMessage(user.id, personalMessage, options);
+            }
+            
             successCount++;
         } catch (e) {
             errorCount++;
@@ -437,12 +494,13 @@ async function runSingleBroadcast(task, users, taskId = null) {
         }
         await new Promise(resolve => setTimeout(resolve, 50));
     }
+    
     const report = { successCount, errorCount, totalUsers: users.length };
     console.log(`[Broadcast Worker] Рассылка завершена.`, report);
     if (users.length > 1 || (users.length === 1 && users[0].id !== ADMIN_ID)) {
         try {
-            const audienceName = task.targetAudience.replace('_', ' ');
-            const reportMessage = `📢 Отчет по рассылке ${taskId ? `(задача #${taskId})` : ''}\n\n✅ Успешно: *${successCount}*\n❌ Ошибки: *${errorCount}*\n👥 Аудитория: *${audienceName}* (${users.length} чел.)`;
+            const audienceName = (task.target_audience || 'unknown').replace('_', ' ');
+            const reportMessage = `📢 Отчет по рассылке ${taskId ? `(#${taskId})` : ''}\n\n✅ Успешно: *${successCount}*\n❌ Ошибки: *${errorCount}*\n👥 Аудитория: *${audienceName}* (${users.length} чел.)`;
             await bot.telegram.sendMessage(ADMIN_ID, reportMessage, { parse_mode: 'Markdown' });
         } catch (e) { console.error('Не удалось отправить отчет админу:', e.message); }
     }
@@ -462,8 +520,9 @@ function startBroadcastWorker() {
                 else if (task.target_audience === 'premium_users') users = await getActivePremiumUsers();
                 const report = await runSingleBroadcast(task, users, task.id);
                 await completeBroadcastTask(task.id, report);
-                if (task.audio_path) {
-                    fs.unlink(task.audio_path, (err) => {
+                if (task.file_path || task.audio_path) {
+                    const filePath = task.file_path || task.audio_path;
+                    fs.unlink(filePath, (err) => {
                         if (err) console.error("Не удалось удалить временный файл рассылки:", err);
                     });
                 }
