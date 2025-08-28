@@ -27,24 +27,25 @@ import {
 } from './db.js';
 import { bot } from './bot.js';
 import redisService from './services/redisClient.js';
-import { WEBHOOK_URL, PORT, SESSION_SECRET, ADMIN_ID, ADMIN_LOGIN, ADMIN_PASSWORD, WEBHOOK_PATH, STORAGE_CHANNEL_ID } from './config.js';
+import { WEBHOOK_URL, PORT, SESSION_SECRET, ADMIN_ID, ADMIN_LOGIN, ADMIN_PASSWORD, WEBHOOK_PATH, STORAGE_CHANNEL_ID, BROADCAST_STORAGE_ID } from './config.js';
 import { loadTexts, allTextsSync, setText } from './config/texts.js';
 import { downloadQueue } from './services/downloadManager.js';
 
 const app = express();
 
 const storage = multer.diskStorage({
-    destination: function(req, file, cb) {
-        cb(null, 'uploads/')
+    destination: function (req, file, cb) {
+        const dest = 'uploads/'; // Локальная папка для временного хранения
+        fs.mkdirSync(dest, { recursive: true });
+        cb(null, dest);
     },
-    filename: function(req, file, cb) {
-        // Сохраняем файл с уникальным именем и его оригинальным расширением
-        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9)
-        cb(null, file.fieldname + '-' + uniqueSuffix + path.extname(file.originalname))
+    filename: function (req, file, cb) {
+        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+        cb(null, file.fieldname + '-' + uniqueSuffix + path.extname(file.originalname));
     }
 });
-
 const upload = multer({ storage: storage });
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const limit = pLimit(1); 
@@ -107,14 +108,10 @@ function parseButtons(buttonsText) {
         if (!text || !type) return null;
 
         switch (type.toLowerCase()) {
-            case 'url':
-                return { text, url: data };
-            case 'callback':
-                return { text, callback_data: data };
-            case 'inline_search':
-                return { text, switch_inline_query: data || '' };
-            default:
-                return null;
+            case 'url': return { text, url: data };
+            case 'callback': return { text, callback_data: data };
+            case 'inline_search': return { text, switch_inline_query: data || '' };
+            default: return null;
         }
     }).filter(Boolean);
     
@@ -316,7 +313,6 @@ function setupExpress() {
         if (!task || task.status !== 'pending') {
             return res.redirect('/broadcasts');
         }
-        // Восстанавливаем текстовое представление кнопок для редактирования
         const buttons_text = task.keyboard ? task.keyboard.map(row => {
             const btn = row[0];
             if (btn.url) return `${btn.text} | url | ${btn.url}`;
@@ -342,15 +338,41 @@ function setupExpress() {
             const existingTask = isEditing ? await getBroadcastTaskById(taskId) : {};
             const renderOptions = { title: isEditing ? 'Редактировать рассылку' : 'Новая рассылка', page: 'broadcasts', success: null, error: null, task: { ...existingTask, ...req.body, buttons_text: buttons } };
 
-            if (!message && !file && !existingTask.file_path) {
+            if (!message && !file && !existingTask.file_id) {
                 renderOptions.error = 'Сообщение не может быть пустым, если не прикреплен файл.';
                 return res.render('broadcast-form', renderOptions);
             }
-            
+
+            let fileId = existingTask.file_id || null;
+            let fileMimeType = existingTask.file_mime_type || null;
+
+            if (file) {
+                if (!BROADCAST_STORAGE_ID) {
+                    fs.unlinkSync(file.path);
+                    renderOptions.error = 'Технический канал-хранилище (BROADCAST_STORAGE_ID) не настроен!';
+                    return res.render('broadcast-form', renderOptions);
+                }
+                console.log(`[Broadcast] Загружен новый файл, отправляю в хранилище...`);
+                const mimeType = mime.lookup(file.path) || '';
+                let sentMessage;
+                const source = { source: file.path };
+                
+                if (mimeType.startsWith('image/')) sentMessage = await bot.telegram.sendPhoto(BROADCAST_STORAGE_ID, source);
+                else if (mimeType.startsWith('video/')) sentMessage = await bot.telegram.sendVideo(BROADCAST_STORAGE_ID, source);
+                else if (mimeType.startsWith('audio/')) sentMessage = await bot.telegram.sendAudio(BROADCAST_STORAGE_ID, source);
+                else sentMessage = await bot.telegram.sendDocument(BROADCAST_STORAGE_ID, source);
+                
+                fileId = sentMessage.photo?.pop()?.file_id || sentMessage.video?.file_id || sentMessage.audio?.file_id || sentMessage.document?.file_id;
+                fileMimeType = mimeType;
+                
+                fs.unlinkSync(file.path);
+            }
+
             const taskData = {
                 message,
                 keyboard: parseButtons(buttons),
-                file_path: file ? file.path : (existingTask ? existingTask.file_path : null),
+                file_id: fileId,
+                file_mime_type: fileMimeType,
                 targetAudience,
                 disableNotification: !!disable_notification,
                 disable_web_page_preview: !enable_web_page_preview,
@@ -358,7 +380,7 @@ function setupExpress() {
 
             if (action === 'preview') {
                 await runSingleBroadcast({ ...taskData, targetAudience: 'preview' }, [{ id: ADMIN_ID, first_name: 'Admin' }]);
-                if (file) fs.unlinkSync(file.path);
+                // Не удаляем файл, т.к. он уже удален после загрузки в хранилище
                 renderOptions.success = 'Предпросмотр отправлен вам в Telegram.';
                 return res.render('broadcast-form', renderOptions);
             }
@@ -479,21 +501,20 @@ async function runSingleBroadcast(task, users, taskId = null) {
                 options.reply_markup = { inline_keyboard: task.keyboard };
             }
 
-            const filePath = task.file_path || task.audio_path;
+            const fileId = task.file_id;
 
-            if (filePath) {
+            if (fileId) {
                 if (personalMessage) options.caption = personalMessage;
-                const fileSource = { source: filePath };
-                const mimeType = mime.lookup(filePath) || '';
+                const mimeType = task.file_mime_type || '';
 
                 if (mimeType.startsWith('image/')) {
-                    await bot.telegram.sendPhoto(user.id, fileSource, options);
+                    await bot.telegram.sendPhoto(user.id, fileId, options);
                 } else if (mimeType.startsWith('video/')) {
-                    await bot.telegram.sendVideo(user.id, fileSource, options);
+                    await bot.telegram.sendVideo(user.id, fileId, options);
                 } else if (mimeType.startsWith('audio/')) {
-                    await bot.telegram.sendAudio(user.id, fileSource, options);
+                    await bot.telegram.sendAudio(user.id, fileId, options);
                 } else {
-                    await bot.telegram.sendDocument(user.id, fileSource, options);
+                    await bot.telegram.sendDocument(user.id, fileId, options);
                 }
             } else if (personalMessage) {
                 await bot.telegram.sendMessage(user.id, personalMessage, options);
@@ -509,10 +530,10 @@ async function runSingleBroadcast(task, users, taskId = null) {
     
     const report = { successCount, errorCount, totalUsers: users.length };
     console.log(`[Broadcast Worker] Рассылка завершена.`, report);
-    if (users.length > 1 || (users.length === 1 && users[0].id !== ADMIN_ID)) {
+    if ((users.length > 1 || (users.length === 1 && users[0].id !== ADMIN_ID)) && taskId) {
         try {
             const audienceName = (task.target_audience || 'unknown').replace('_', ' ');
-            const reportMessage = `📢 Отчет по рассылке ${taskId ? `(#${taskId})` : ''}\n\n✅ Успешно: *${successCount}*\n❌ Ошибки: *${errorCount}*\n👥 Аудитория: *${audienceName}* (${users.length} чел.)`;
+            const reportMessage = `📢 Отчет по рассылке #${taskId}\n\n✅ Успешно: *${successCount}*\n❌ Ошибки: *${errorCount}*\n👥 Аудитория: *${audienceName}* (${users.length} чел.)`;
             await bot.telegram.sendMessage(ADMIN_ID, reportMessage, { parse_mode: 'Markdown' });
         } catch (e) { console.error('Не удалось отправить отчет админу:', e.message); }
     }
@@ -532,12 +553,6 @@ function startBroadcastWorker() {
                 else if (task.target_audience === 'premium_users') users = await getActivePremiumUsers();
                 const report = await runSingleBroadcast(task, users, task.id);
                 await completeBroadcastTask(task.id, report);
-                if (task.file_path || task.audio_path) {
-                    const filePath = task.file_path || task.audio_path;
-                    fs.unlink(filePath, (err) => {
-                        if (err) console.error("Не удалось удалить временный файл рассылки:", err);
-                    });
-                }
             } catch (error) {
                 console.error(`[Broadcast Worker] Критическая ошибка при выполнении задачи #${task.id}:`, error);
                 await failBroadcastTask(task.id, error.message);
