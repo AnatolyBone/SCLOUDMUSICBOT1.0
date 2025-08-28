@@ -1,4 +1,4 @@
-// db.js (ФИНАЛЬНАЯ ВЕРСИЯ БЕЗ ДУБЛИКАТОВ И С НОВЫМИ ФУНКЦИЯМИ)
+// db.js (ФИНАЛЬНАЯ ПОЛНАЯ ВЕРСИЯ БЕЗ ПРОПУСКОВ И ДУБЛИКАТОВ)
 
 import { Pool } from 'pg';
 import { createClient } from '@supabase/supabase-js';
@@ -161,10 +161,7 @@ export async function getExpiringUsers(days = 3) {
 // --- Кэш треков ---
 export async function searchTracksInCache(query, limit = 7) {
   try {
-    const { data, error } = await supabase.rpc('search_tracks', {
-      search_query: query,
-      result_limit: limit
-    });
+    const { data, error } = await supabase.rpc('search_tracks', { search_query: query, result_limit: limit });
     if (error) {
       console.error('[DB Search] Ошибка при вызове RPC search_tracks:', error);
       return [];
@@ -182,11 +179,8 @@ export async function cacheTrack(trackData) {
     `INSERT INTO track_cache (url, file_id, title, artist, duration, thumbnail)
      VALUES ($1, $2, $3, $4, $5, $6)
      ON CONFLICT (url) DO UPDATE SET
-       file_id = EXCLUDED.file_id,
-       title = EXCLUDED.title,
-       artist = EXCLUDED.artist,
-       duration = EXCLUDED.duration,
-       thumbnail = EXCLUDED.thumbnail;`,
+       file_id = EXCLUDED.file_id, title = EXCLUDED.title, artist = EXCLUDED.artist,
+       duration = EXCLUDED.duration, thumbnail = EXCLUDED.thumbnail;`,
     [url, fileId, title, artist, duration, thumbnail]
   );
 }
@@ -268,6 +262,27 @@ export async function getUserActions(userId, limit = 20) {
 }
 
 // --- Статистика для дашборда ---
+export async function getReferralSourcesStats() {
+  const { rows } = await query(`SELECT referral_source, COUNT(*) as count FROM users WHERE referral_source IS NOT NULL GROUP BY referral_source ORDER BY count DESC`);
+  return rows.map(row => ({ source: row.referral_source, count: parseInt(row.count, 10) }));
+}
+
+export async function getRegistrationsByDate() {
+  const { rows } = await query(`SELECT TO_CHAR(created_at, 'YYYY-MM-DD') as date, COUNT(*) as count FROM users GROUP BY date ORDER BY date`);
+  return rows.reduce((acc, row) => ({ ...acc, [row.date]: parseInt(row.count, 10) }), {});
+}
+
+export async function getDownloadsByDate() {
+  const { rows } = await query(`SELECT TO_CHAR(downloaded_at, 'YYYY-MM-DD') as date, COUNT(*) as count FROM downloads_log GROUP BY date ORDER BY date`);
+  return rows.reduce((acc, row) => ({ ...acc, [row.date]: parseInt(row.count, 10) }), {});
+}
+
+// ВОССТАНОВЛЕННАЯ ФУНКЦИЯ
+export async function getActiveUsersByDate() {
+  const { rows } = await query(`SELECT TO_CHAR(last_active, 'YYYY-MM-DD') as date, COUNT(DISTINCT id) as count FROM users WHERE last_active IS NOT NULL GROUP BY date ORDER BY date`);
+  return rows.reduce((acc, row) => ({ ...acc, [row.date]: parseInt(row.count, 10) }), {});
+}
+
 export async function getDownloadsByUserId(userId, limit = 50) {
   const { rows } = await query(
     `SELECT track_title, downloaded_at FROM downloads_log WHERE user_id = $1 ORDER BY downloaded_at DESC LIMIT $2`,
