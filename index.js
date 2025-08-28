@@ -32,7 +32,19 @@ import { loadTexts, allTextsSync, setText } from './config/texts.js';
 import { downloadQueue } from './services/downloadManager.js';
 
 const app = express();
-const upload = multer({ dest: 'uploads/' });
+
+const storage = multer.diskStorage({
+    destination: function(req, file, cb) {
+        cb(null, 'uploads/')
+    },
+    filename: function(req, file, cb) {
+        // Сохраняем файл с уникальным именем и его оригинальным расширением
+        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9)
+        cb(null, file.fieldname + '-' + uniqueSuffix + path.extname(file.originalname))
+    }
+});
+
+const upload = multer({ storage: storage });
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const limit = pLimit(1); 
