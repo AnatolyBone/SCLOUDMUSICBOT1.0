@@ -409,19 +409,6 @@ export async function getTopUsers(limit = 10) {
 }
 // --- Рассылки ---
 export async function createBroadcastTask(task) {
-  const { message, audioPath, targetAudience, disableNotification, scheduledAt } = task;
-  await query(
-    `INSERT INTO broadcast_tasks (message, audio_path, target_audience, disable_notification, scheduled_at, status)
-     VALUES ($1, $2, $3, $4, $5, 'pending')`,
-    [message, audioPath, targetAudience, disableNotification, scheduledAt]
-  );
-}
-// db.js (ФИНАЛЬНАЯ ВЕРСИЯ С НОВЫМИ ПОЛЯМИ ДЛЯ РАССЫЛКИ)
-
-// ... (все до функций рассылки без изменений) ...
-
-// --- Рассылки ---
-export async function createBroadcastTask(task) {
   const { message, file_path, targetAudience, disableNotification, scheduledAt, keyboard, disable_web_page_preview } = task;
   await query(
     `INSERT INTO broadcast_tasks (message, file_path, target_audience, disable_notification, scheduled_at, status, keyboard, disable_web_page_preview)
