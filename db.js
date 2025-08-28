@@ -405,12 +405,12 @@ export async function getPendingBroadcastTask() {
 export async function completeBroadcastTask(taskId, report) {
   await query(
     `UPDATE broadcast_tasks SET status = 'completed', report = $1, completed_at = NOW() WHERE id = $2`,
-    [report, taskId]
+    [JSON.stringify(report), taskId]
   );
 }
 
 export async function failBroadcastTask(taskId, error) {
-    await query(`UPDATE broadcast_tasks SET status = 'failed', report = $1 WHERE id = $2`, [{ error }, taskId]);
+  await query(`UPDATE broadcast_tasks SET status = 'failed', report = $1 WHERE id = $2`, [JSON.stringify({ error }), taskId]);
 }
 
 export async function getAllBroadcastTasks() {
