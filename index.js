@@ -305,7 +305,8 @@ function setupExpress() {
     });
     
     app.get('/broadcast/new', requireAuth, (req, res) => { 
-        res.render('broadcast-form', { title: 'Новая рассылка', page: 'broadcasts', error: null, success: null }); 
+        res.render('broadcast-form', { title: 'Новая рассылка', page: 'broadcasts', error: null, success: null });
+        console.log(`[Broadcast Debug] Использую BROADCAST_STORAGE_ID: '${BROADCAST_STORAGE_ID}' (тип: ${typeof BROADCAST_STORAGE_ID})`);
     });
 
     app.get('/broadcast/edit/:id', requireAuth, async (req, res) => {
