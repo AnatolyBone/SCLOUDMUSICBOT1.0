@@ -372,7 +372,7 @@ export async function getTopTracks(limit = 10) {
   return rows;
 }
 
-export async function getTopUsers(limit = 10) {
+export async function getTopUsers(limit = 15) {
   const { rows } = await query(
     `SELECT id, first_name, username, total_downloads FROM users WHERE total_downloads > 0 ORDER BY total_downloads DESC LIMIT $1`,
     [limit]
