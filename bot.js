@@ -1,4 +1,4 @@
-// bot.js (ПОЛНАЯ ВЕРСИЯ С ПЕРЕХОДОМ НА HTML)
+// bot.js (ФИНАЛЬНАЯ ВЕРСИЯ С УМНЫМ ПРИВЕТСТВИЕМ)
 
 import { Telegraf, Markup, TelegramError } from 'telegraf';
 import { ADMIN_ID, BOT_TOKEN, WEBHOOK_URL, CHANNEL_USERNAME, STORAGE_CHANNEL_ID } from './config.js';
@@ -35,8 +35,7 @@ function formatMenuMessage(user, ctx) {
     const tariffLabel = getTariffName(user.premium_limit);
     const downloadsToday = user.downloads_today || 0;
     const daysLeft = getDaysLeft(user.premium_until);
-    
-    // Используем HTML-теги для форматирования
+
     let message = `
 👋 Привет, ${user.first_name || 'пользователь'}!
 <b>Твой профиль:</b>
@@ -44,13 +43,13 @@ function formatMenuMessage(user, ctx) {
 ⏳ <b>Осталось дней подписки:</b> <i>${daysLeft}</i>
 🎧 <b>Сегодня скачано:</b> <i>${downloadsToday}</i> из <i>${user.premium_limit}</i>
     `.trim();
-    
+
     if (!user.subscribed_bonus_used && CHANNEL_USERNAME) {
         const cleanUsername = CHANNEL_USERNAME.replace('@', '');
-        const channelLink = `<a href="https://t.me/${cleanUsername}">наш канал</a>`; // HTML-ссылка
+        const channelLink = `<a href="https://t.me/${cleanUsername}">наш канал</a>`;
         message += `\n\n🎁 <b>Бонус!</b> Подпишись на ${channelLink} и получи <b>7 дней тарифа Plus</b> бесплатно!`;
     }
-    
+
     message += '\n\nПросто отправь мне ссылку, и я скачаю трек!';
     return message;
 }
@@ -75,9 +74,7 @@ bot.catch(async (err, ctx) => {
 });
 
 bot.use(async (ctx, next) => {
-    if (!ctx.from) {
-        return next();
-    }
+    if (!ctx.from) return next();
     const user = await getUser(ctx.from.id, ctx.from.first_name, ctx.from.username);
     ctx.state.user = user;
     if (user && user.active === false) {
@@ -98,7 +95,16 @@ bot.start(async (ctx) => {
         await logUserAction(ctx.from.id, 'registration');
     }
 
-    await ctx.reply(T('start'), Markup.keyboard([[T('menu'), T('upgrade')], [T('mytracks'), T('help')]]).resize());
+    const startMessage = isNewRegistration ? T('start_new_user') : T('start');
+    
+    await ctx.reply(startMessage, {
+        parse_mode: 'HTML',
+        disable_web_page_preview: true,
+        ...Markup.keyboard([
+            [T('menu'), T('upgrade')],
+            [T('mytracks'), T('help')]
+        ]).resize()
+    });
 });
 
 bot.command('admin', async (ctx) => {
@@ -110,7 +116,7 @@ bot.command('admin', async (ctx) => {
         const activeUsers = users.filter(u => u.active).length;
         const totalDownloads = users.reduce((sum, u) => sum + (u.total_downloads || 0), 0);
         const activeToday = users.filter(u => u.last_active && new Date(u.last_active).toDateString() === new Date().toDateString()).length;
-        
+
         const statsMessage = `<b>📊 Статистика Бота</b>\n\n` +
             `<b>👤 Пользователи:</b>\n   - Всего: <i>${totalUsers}</i>\n   - Активных: <i>${activeUsers}</i>\n   - Активных сегодня: <i>${activeToday}</i>\n\n` +
             `<b>📥 Загрузки:</b>\n   - Всего за все время: <i>${totalDownloads}</i>\n\n` +
