@@ -71,7 +71,8 @@ async function trackDownloadProcessor(task) {
         if (source === 'spotify') {
             // Если трек из Spotify, используем spotdl
             // --output использует фигурные скобки, поэтому заключаем путь в одинарные кавычки
-            const command = `spotdl "${task.spotifyUrl}" --output "${tempFilePath}"`;
+           // Команда для spotdl v4: spotdl [URL трека] [путь к файлу]
+const command = `spotdl "${task.spotifyUrl}" "${tempFilePath}"`;
             console.log(`[Worker] Выполняю команду spotdl: ${command}`);
             await execAsync(command, {
                 env: {
