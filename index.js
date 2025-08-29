@@ -485,6 +485,9 @@ function setupExpress() {
     });
 }
 
+// index.js
+
+// >>>>> ЗАМЕНИТЕ СУЩЕСТВУЮЩУЮ ФУНКЦИЮ НА ЭТУ <<<<<
 async function runSingleBroadcast(task, users, taskId = null) {
     console.log(`[Broadcast Worker] Запуск рассылки для ${users.length} пользователей.`);
     let successCount = 0, errorCount = 0;
@@ -494,7 +497,7 @@ async function runSingleBroadcast(task, users, taskId = null) {
             const personalMessage = (task.message || '').replace(/{first_name}/g, user.first_name || 'дорогой друг');
             
             const options = { 
-                parse_mode: 'Markdown',
+                parse_mode: 'HTML', // <--- ГЛАВНОЕ ИЗМЕНЕНИЕ
                 disable_web_page_preview: task.disable_web_page_preview, 
                 disable_notification: task.disable_notification 
             };
@@ -531,16 +534,23 @@ async function runSingleBroadcast(task, users, taskId = null) {
     
     const report = { successCount, errorCount, totalUsers: users.length };
     console.log(`[Broadcast Worker] Рассылка завершена.`, report);
+
+    // Этот блок отправляет отчет админу. Мы его тоже переведем на HTML.
     if ((users.length > 1 || (users.length === 1 && users[0].id !== ADMIN_ID)) && taskId) {
         try {
             const audienceName = (task.target_audience || 'unknown').replace('_', ' ');
-            const reportMessage = `📢 Отчет по рассылке #${taskId}\n\n✅ Успешно: *${successCount}*\n❌ Ошибки: *${errorCount}*\n👥 Аудитория: *${audienceName}* (${users.length} чел.)`;
-            await bot.telegram.sendMessage(ADMIN_ID, reportMessage, { parse_mode: 'Markdown' });
+            // <--- ИЗМЕНЕНИЕ: Текст отчета теперь тоже в HTML ---
+            const reportMessage = `📢 <b>Отчет по рассылке #${taskId}</b>\n\n` +
+                                `✅ Успешно: <b>${successCount}</b>\n` +
+                                `❌ Ошибки: <b>${errorCount}</b>\n` +
+                                `👥 Аудитория: <b>${audienceName}</b> (${users.length} чел.)`;
+
+            // <--- ИЗМЕНЕНИЕ: parse_mode для отчета ---
+            await bot.telegram.sendMessage(ADMIN_ID, reportMessage, { parse_mode: 'HTML' });
         } catch (e) { console.error('Не удалось отправить отчет админу:', e.message); }
     }
     return report;
 }
-
 function startBroadcastWorker() {
     console.log('[Broadcast Worker] Планировщик запущен.');
     cron.schedule('* * * * *', async () => {
