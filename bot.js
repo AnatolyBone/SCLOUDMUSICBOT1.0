@@ -5,6 +5,7 @@ import { ADMIN_ID, BOT_TOKEN, WEBHOOK_URL, CHANNEL_USERNAME, STORAGE_CHANNEL_ID 
 import { updateUserField, getUser, createUser, setPremium, getAllUsers, resetDailyLimitIfNeeded, getCachedTracksCount, logUserAction } from './db.js';
 import { T, allTextsSync } from './config/texts.js';
 import { performInlineSearch } from './services/searchManager.js';
+import { spotifyEnqueue } from './services/spotifyManager.js';
 import { enqueue, downloadQueue } from './services/downloadManager.js';
 
 async function isSubscribed(userId) {
@@ -199,14 +200,36 @@ bot.on('inline_query', async (ctx) => {
 
 bot.on('text', async (ctx) => {
     const userText = ctx.message.text;
-    if (Object.values(allTextsSync()).includes(userText)) return;
-
-    const url = userText.match(/(https?:\/\/[^\s]+)/g)?.find(u => u.includes('soundcloud.com'));
-    if (url) {
+    
+    // 1. Проверяем, не является ли текст командой из меню
+    if (Object.values(allTextsSync()).includes(userText)) {
+        return;
+    }
+    
+    // 2. Ищем любую ссылку в сообщении
+    const urlMatch = userText.match(/(https?:\/\/[^\s]+)/g);
+    
+    // Если ссылка не найдена вообще
+    if (!urlMatch || urlMatch.length === 0) {
+        await ctx.reply('Я не понял. Пожалуйста, отправьте мне ссылку на трек, альбом или плейлист.');
+        return;
+    }
+    
+    const url = urlMatch[0];
+    
+    // 3. Определяем, с какого сервиса ссылка, и вызываем нужный обработчик
+    if (url.includes('soundcloud.com')) {
+        // Логика для SoundCloud (остается без изменений)
         enqueue(ctx, ctx.from.id, url).catch(err => {
-            console.error(`[Background Enqueue Error] Ошибка для user ${ctx.from.id}:`, err.message);
+            console.error(`[SC Enqueue Error] Ошибка для user ${ctx.from.id}:`, err.message);
+        });
+    } else if (url.includes('open.spotify.com')) {
+        // НОВАЯ ЛОГИКА для Spotify
+        spotifyEnqueue(ctx, ctx.from.id, url).catch(err => {
+            console.error(`[Spotify Enqueue Error] Ошибка для user ${ctx.from.id}:`, err.message);
         });
     } else {
-        await ctx.reply('Я не понял. Пришлите ссылку или используйте меню.');
+        // Если ссылка с другого сайта
+        await ctx.reply('Я пока умею скачивать только с SoundCloud и Spotify. Поддержка других платформ в разработке!');
     }
 });
