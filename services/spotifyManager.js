@@ -1,4 +1,4 @@
-// services/spotifyManager.js (ФИНАЛЬНАЯ ВЕРСИЯ С ОТКЛЮЧЕННЫМИ ТЕКСТАМИ)
+// services/spotifyManager.js (ФИНАЛЬНАЯ ВЕРСИЯ БЕЗ ЛИШНИХ ФЛАГОВ)
 
 import { exec } from 'child_process';
 import { promisify } from 'util';
@@ -18,8 +18,8 @@ export async function spotifyEnqueue(ctx, userId, url) {
         const tempFilePath = path.join('uploads', tempFileName);
         
         // ======================= ГЛАВНОЕ ИСПРАВЛЕНИЕ ЗДЕСЬ =======================
-        // Добавляем флаг --no-lyrics, чтобы отключить поиск текстов
-        const command = `spotdl save "${url}" --save-file "${tempFilePath}" --no-lyrics`;
+        // Убираем флаг --no-lyrics, так как в v4 он не нужен
+        const command = `spotdl save "${url}" --save-file "${tempFilePath}"`;
         // =========================================================================
 
         await execAsync(command, {
@@ -27,7 +27,7 @@ export async function spotifyEnqueue(ctx, userId, url) {
         });
 
         const fileContent = await fs.readFile(tempFilePath, 'utf-8');
-        await fs.unlink(tempFilePath); // Сразу удаляем временный файл
+        await fs.unlink(tempFilePath);
 
         const tracks = JSON.parse(fileContent);
 
