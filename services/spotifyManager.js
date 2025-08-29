@@ -19,7 +19,7 @@ export async function spotifyEnqueue(ctx, userId, url) {
         
         // ======================= ГЛАВНОЕ ИСПРАВЛЕНИЕ ЗДЕСЬ =======================
         // Убираем флаг --no-lyrics, так как в v4 он не нужен
-        const command = `spotdl save "${url}" --save-file "${tempFilePath}"`;
+        const command = `spotdl save "${url}" --save-file "${tempFilePath}" --no-lyrics`;
         // =========================================================================
 
         await execAsync(command, {
