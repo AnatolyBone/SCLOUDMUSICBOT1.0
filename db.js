@@ -383,23 +383,77 @@ export async function getTopUsers(limit = 15) {
 // --- Рассылки ---
 // db.js
 
-// >>>>> ЗАМЕНИТЕ СУЩЕСТВУЮЩУЮ ФУНКЦИЮ НА ЭТУ <<<<<
+// db.js
+
+// >>>>> ЗАМЕНИТЕ СУЩЕСТВУЮЩУЮ ФУНКЦИЮ createBroadcastTask <<<<<
 export async function createBroadcastTask(taskData) {
   const {
     message,
     file_id,
     file_mime_type,
-    targetAudience,
-    disableNotification,
-    scheduledAt,
     keyboard,
-    disable_web_page_preview
+    disable_web_page_preview,
+    targetAudience,
+    scheduledAt,
+    disableNotification
   } = taskData;
   
   const queryText = `
-        INSERT INTO broadcast_tasks 
-        (message, file_id, file_mime_type, target_audience, disable_notification, scheduled_at, status, keyboard, disable_web_page_preview)
-        VALUES ($1, $2, $3, $4, $5, $6, 'pending', $7, $8)
+        INSERT INTO broadcast_tasks (
+            message,                  -- $1
+            file_id,                  -- $2
+            file_mime_type,           -- $3
+            keyboard,                 -- $4
+            disable_web_page_preview, -- $5
+            target_audience,          -- $6
+            status,                   -- hardcoded
+            scheduled_at,             -- $7
+            disable_notification      -- $8
+        ) VALUES ($1, $2, $3, $4, $5, $6, 'pending', $7, $8)
+        RETURNING *;
+    `;
+  
+  const values = [
+    message, // $1
+    file_id, // $2
+    file_mime_type, // $3
+    keyboard ? JSON.stringify(keyboard) : null, // $4 (Явное преобразование в JSON-строку)
+    disable_web_page_preview, // $5
+    targetAudience, // $6
+    scheduledAt || new Date(), // $7
+    !!disableNotification // $8
+  ];
+  
+  const result = await query(queryText, values);
+  return result.rows[0];
+}
+
+
+// >>>>> ЗАМЕНИТЕ СУЩЕСТВУЮЩУЮ ФУНКЦИЮ updateBroadcastTask <<<<<
+export async function updateBroadcastTask(id, taskData) {
+  const {
+    message,
+    file_id,
+    file_mime_type,
+    keyboard,
+    disable_web_page_preview,
+    targetAudience,
+    scheduledAt,
+    disableNotification
+  } = taskData;
+  
+  const queryText = `
+        UPDATE broadcast_tasks SET
+            message = $1,
+            file_id = $2,
+            file_mime_type = $3,
+            keyboard = $4,
+            disable_web_page_preview = $5,
+            target_audience = $6,
+            scheduled_at = $7,
+            disable_notification = $8,
+            status = 'pending'
+        WHERE id = $9
         RETURNING *;
     `;
   
@@ -407,11 +461,12 @@ export async function createBroadcastTask(taskData) {
     message,
     file_id,
     file_mime_type,
+    keyboard ? JSON.stringify(keyboard) : null,
+    disable_web_page_preview,
     targetAudience,
+    scheduledAt || new Date(),
     !!disableNotification,
-    scheduledAt || new Date(), // <-- Правильное значение для даты
-    keyboard || null,
-    disable_web_page_preview
+    id
   ];
   
   const result = await query(queryText, values);
