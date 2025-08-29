@@ -332,39 +332,46 @@ function setupExpress() {
 
     // index.js
 
-// >>>>> ЗАМЕНИТЕ ВЕСЬ СУЩЕСТВУЮЩИЙ ОБРАБОТЧИК НА ЭТОТ БЛОК <<<<<
+// index.js
+
 app.post(['/broadcast/new', '/broadcast/edit/:id'], requireAuth, upload.single('file'), async (req, res) => {
     const isEditing = !!req.params.id;
     const taskId = req.params.id;
-    const file = req.file; // Сохраняем информацию о файле в начале для доступа в catch
-    
+    const file = req.file;
+
     try {
         const { message, buttons, targetAudience, scheduledAt, disable_notification, enable_web_page_preview, action } = req.body;
-        
-        const existingTask = isEditing ? await getBroadcastTaskById(taskId) : {};
-        
-        // Готовим опции для рендеринга заранее, чтобы сохранить данные при любой ошибке
+
+        // Определяем, какие данные использовать для рендера формы.
+        // Это предотвратит потерю ID при ошибках.
+        const taskForRender = { ...req.body, buttons_text: buttons };
+        if (isEditing) {
+            taskForRender.id = taskId;
+        }
+
         const renderOptions = {
             title: isEditing ? 'Редактировать рассылку' : 'Новая рассылка',
             page: 'broadcasts',
             success: null,
             error: null,
-            // Сразу формируем task с id, чтобы не потерять его
-            task: { ...existingTask, ...req.body, id: taskId, buttons_text: buttons }
+            task: taskForRender // Используем подготовленные данные
         };
-        
+
+        const existingTask = isEditing ? await getBroadcastTaskById(taskId) : {};
+
+        // Валидация
         if (!message && !file && !(existingTask && existingTask.file_id)) {
-            if (file) fs.unlinkSync(file.path); // Если файл был загружен зря, удаляем его
+            if (file) fs.unlinkSync(file.path);
             renderOptions.error = 'Сообщение не может быть пустым, если не прикреплен файл.';
             return res.render('broadcast-form', renderOptions);
         }
-        
+
         let fileId = existingTask.file_id || null;
         let fileMimeType = existingTask.file_mime_type || null;
-        
+
         if (file) {
             if (!BROADCAST_STORAGE_ID) {
-                fs.unlinkSync(file.path);
+                if (file) fs.unlinkSync(file.path);
                 renderOptions.error = 'Технический канал-хранилище (BROADCAST_STORAGE_ID) не настроен!';
                 return res.render('broadcast-form', renderOptions);
             }
@@ -381,9 +388,9 @@ app.post(['/broadcast/new', '/broadcast/edit/:id'], requireAuth, upload.single('
             fileId = sentMessage.photo?.pop()?.file_id || sentMessage.video?.file_id || sentMessage.audio?.file_id || sentMessage.document?.file_id;
             fileMimeType = mimeType;
             
-            fs.unlinkSync(file.path); // Удаляем временный файл после успешной отправки в хранилище
+            fs.unlinkSync(file.path);
         }
-        
+
         const taskData = {
             message,
             keyboard: parseButtons(buttons),
@@ -393,13 +400,13 @@ app.post(['/broadcast/new', '/broadcast/edit/:id'], requireAuth, upload.single('
             disableNotification: !!disable_notification,
             disable_web_page_preview: !enable_web_page_preview,
         };
-        
+
         if (action === 'preview') {
             await runSingleBroadcast({ ...taskData, targetAudience: 'preview' }, [{ id: ADMIN_ID, first_name: 'Admin' }]);
             renderOptions.success = 'Предпросмотр отправлен вам в Telegram.';
             return res.render('broadcast-form', renderOptions);
         }
-        
+
         const scheduleTime = scheduledAt ? new Date(scheduledAt) : new Date();
         if (isEditing) {
             await updateBroadcastTask(taskId, { ...taskData, scheduledAt: scheduleTime });
@@ -407,27 +414,25 @@ app.post(['/broadcast/new', '/broadcast/edit/:id'], requireAuth, upload.single('
             await createBroadcastTask({ ...taskData, scheduledAt: scheduleTime });
         }
         res.redirect('/broadcasts');
-        
+
     } catch (e) {
         console.error(`Ошибка создания/редактирования задачи (ID: ${taskId}):`, e);
-        
-        // >>>>> ВАЖНОЕ УЛУЧШЕНИЕ: Очистка файла при ошибке <<<<<
         if (file) {
-            try {
-                fs.unlinkSync(file.path);
-                console.log('[Error Cleanup] Временный файл успешно удален.');
-            } catch (cleanupError) {
-                console.error('[Error Cleanup] Не удалось удалить временный файл:', cleanupError);
-            }
+            try { fs.unlinkSync(file.path); console.log('[Error Cleanup] Временный файл успешно удален.'); } 
+            catch (cleanupError) { console.error('[Error Cleanup] Не удалось удалить временный файл:', cleanupError); }
         }
         
-        // >>>>> ГЛАВНЫЙ ФИКС: Гарантируем наличие ID в объекте task <<<<<
-        res.render('broadcast-form', {
-            title: isEditing ? 'Редактировать рассылку' : 'Новая рассылка',
-            page: 'broadcasts',
-            error: 'Не удалось сохранить задачу. ' + e.message,
-            success: null,
-            task: { ...req.body, id: taskId } // Гарантируем наличие id для корректной перерисовки формы
+        const taskForRenderOnError = { ...req.body, buttons_text: req.body.buttons };
+        if (isEditing) {
+            taskForRenderOnError.id = taskId;
+        }
+
+        res.render('broadcast-form', { 
+            title: isEditing ? 'Редактировать рассылку' : 'Новая рассылка', 
+            page: 'broadcasts', 
+            error: 'Не удалось сохранить задачу. ' + e.message, 
+            success: null, 
+            task: taskForRenderOnError
         });
     }
 });
