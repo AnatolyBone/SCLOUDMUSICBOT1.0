@@ -1,4 +1,4 @@
-// bot.js (ФИНАЛЬНАЯ ВЕРСИЯ С ИСПРАВЛЕННЫМ ЛОГИРОВАНИЕМ)
+// bot.js (ПОЛНАЯ ВЕРСИЯ С ПЕРЕХОДОМ НА HTML)
 
 import { Telegraf, Markup, TelegramError } from 'telegraf';
 import { ADMIN_ID, BOT_TOKEN, WEBHOOK_URL, CHANNEL_USERNAME, STORAGE_CHANNEL_ID } from './config.js';
@@ -35,18 +35,22 @@ function formatMenuMessage(user, ctx) {
     const tariffLabel = getTariffName(user.premium_limit);
     const downloadsToday = user.downloads_today || 0;
     const daysLeft = getDaysLeft(user.premium_until);
+    
+    // Используем HTML-теги для форматирования
     let message = `
 👋 Привет, ${user.first_name || 'пользователь'}!
-Твой профиль:
-💼 Тариф: *${tariffLabel}*
-⏳ Осталось дней подписки: *${daysLeft}*
-🎧 Сегодня скачано: *${downloadsToday}* из *${user.premium_limit}*
+<b>Твой профиль:</b>
+💼 <b>Тариф:</b> <i>${tariffLabel}</i>
+⏳ <b>Осталось дней подписки:</b> <i>${daysLeft}</i>
+🎧 <b>Сегодня скачано:</b> <i>${downloadsToday}</i> из <i>${user.premium_limit}</i>
     `.trim();
-    if (!user.subscribed_bonus_used) {
+    
+    if (!user.subscribed_bonus_used && CHANNEL_USERNAME) {
         const cleanUsername = CHANNEL_USERNAME.replace('@', '');
-        const channelLink = `[наш канал](https://t.me/${cleanUsername})`;
-        message += `\n\n🎁 *Бонус!* Подпишись на ${channelLink} и получи *7 дней тарифа Plus* бесплатно!`;
+        const channelLink = `<a href="https://t.me/${cleanUsername}">наш канал</a>`; // HTML-ссылка
+        message += `\n\n🎁 <b>Бонус!</b> Подпишись на ${channelLink} и получи <b>7 дней тарифа Plus</b> бесплатно!`;
     }
+    
     message += '\n\nПросто отправь мне ссылку, и я скачаю трек!';
     return message;
 }
@@ -86,19 +90,14 @@ bot.use(async (ctx, next) => {
 });
 
 bot.start(async (ctx) => {
-    // Сначала создаем пользователя (или ничего не делаем, если он есть)
     await createUser(ctx.from.id, ctx.from.first_name, ctx.from.username, ctx.startPayload || null);
-    
-    // Получаем пользователя, которого нам создал/нашел getUser в bot.use
     const user = ctx.state.user;
-    // Проверяем, действительно ли это новый пользователь, сравнивая время создания
-    const isNewRegistration = (Date.now() - new Date(user.created_at).getTime()) < 5000; // создан в последние 5 секунд
-    
+    const isNewRegistration = (Date.now() - new Date(user.created_at).getTime()) < 5000;
+
     if (isNewRegistration) {
-        // Логируем событие только для действительно новых пользователей
         await logUserAction(ctx.from.id, 'registration');
     }
-    
+
     await ctx.reply(T('start'), Markup.keyboard([[T('menu'), T('upgrade')], [T('mytracks'), T('help')]]).resize());
 });
 
@@ -111,13 +110,15 @@ bot.command('admin', async (ctx) => {
         const activeUsers = users.filter(u => u.active).length;
         const totalDownloads = users.reduce((sum, u) => sum + (u.total_downloads || 0), 0);
         const activeToday = users.filter(u => u.last_active && new Date(u.last_active).toDateString() === new Date().toDateString()).length;
-        const statsMessage = `📊 **Статистика Бота**\n\n` +
-            `👤 **Пользователи:**\n   - Всего: *${totalUsers}*\n   - Активных: *${activeUsers}*\n   - Активных сегодня: *${activeToday}*\n\n` +
-            `📥 **Загрузки:**\n   - Всего за все время: *${totalDownloads}*\n\n` +
-            `⚙️ **Система:**\n   - Очередь: *${downloadQueue.size}* в ож. / *${downloadQueue.active}* в раб.\n` +
-            `   - Канал-хранилище: *${storageStatusText}*\n   - Треков в кэше: *${cachedTracksCount}*\n\n` +
-            `🔗 **Админ-панель:**\n[Открыть дашборд](${WEBHOOK_URL.replace(/\/$/, '')}/dashboard)`;
-        await ctx.reply(statsMessage, { parse_mode: 'Markdown' });
+        
+        const statsMessage = `<b>📊 Статистика Бота</b>\n\n` +
+            `<b>👤 Пользователи:</b>\n   - Всего: <i>${totalUsers}</i>\n   - Активных: <i>${activeUsers}</i>\n   - Активных сегодня: <i>${activeToday}</i>\n\n` +
+            `<b>📥 Загрузки:</b>\n   - Всего за все время: <i>${totalDownloads}</i>\n\n` +
+            `<b>⚙️ Система:</b>\n   - Очередь: <i>${downloadQueue.size}</i> в ож. / <i>${downloadQueue.active}</i> в раб.\n` +
+            `   - Канал-хранилище: <i>${storageStatusText}</i>\n   - Треков в кэше: <i>${cachedTracksCount}</i>\n\n` +
+            `<b>🔗 Админ-панель:</b>\n<a href="${WEBHOOK_URL.replace(/\/$/, '')}/dashboard">Открыть дашборд</a>`;
+
+        await ctx.reply(statsMessage, { parse_mode: 'HTML', disable_web_page_preview: true });
     } catch (e) {
         console.error('❌ Ошибка в команде /admin:', e);
     }
@@ -142,8 +143,11 @@ bot.action('check_subscription', async (ctx) => {
 bot.hears(T('menu'), async (ctx) => {
     const user = await getUser(ctx.from.id);
     const message = formatMenuMessage(user, ctx);
-    const extraOptions = { parse_mode: 'Markdown' };
-    if (!user.subscribed_bonus_used) {
+    const extraOptions = { 
+        parse_mode: 'HTML',
+        disable_web_page_preview: true
+    };
+    if (!user.subscribed_bonus_used && CHANNEL_USERNAME) {
         extraOptions.reply_markup = { inline_keyboard: [[ Markup.button.callback('✅ Я подписался и хочу бонус!', 'check_subscription') ]] };
     }
     await ctx.reply(message, extraOptions);
@@ -167,8 +171,8 @@ bot.hears(T('mytracks'), async (ctx) => {
     }
 });
 
-bot.hears(T('help'), async (ctx) => await ctx.reply(T('helpInfo')));
-bot.hears(T('upgrade'), async (ctx) => await ctx.reply(T('upgradeInfo'), { parse_mode: 'Markdown' }));
+bot.hears(T('help'), async (ctx) => await ctx.reply(T('helpInfo'), { parse_mode: 'HTML', disable_web_page_preview: true }));
+bot.hears(T('upgrade'), async (ctx) => await ctx.reply(T('upgradeInfo'), { parse_mode: 'HTML', disable_web_page_preview: true }));
 
 bot.on('inline_query', async (ctx) => {
     const query = ctx.inlineQuery.query;
