@@ -381,13 +381,41 @@ export async function getTopUsers(limit = 15) {
 }
 
 // --- Рассылки ---
-export async function createBroadcastTask(task) {
-  const { message, file_id, file_mime_type, targetAudience, disableNotification, scheduledAt, keyboard, disable_web_page_preview } = task;
-  await query(
-    `INSERT INTO broadcast_tasks (message, file_id, file_mime_type, target_audience, disable_notification, scheduled_at, status, keyboard, disable_web_page_preview)
-     VALUES ($1, $2, $3, $4, $5, 'pending', $6, $7, $8)`,
-    [message, file_id, file_mime_type, targetAudience, disableNotification, scheduledAt, JSON.stringify(keyboard), disable_web_page_preview]
-  );
+// db.js
+
+// >>>>> ЗАМЕНИТЕ СУЩЕСТВУЮЩУЮ ФУНКЦИЮ НА ЭТУ <<<<<
+export async function createBroadcastTask(taskData) {
+  const {
+    message,
+    file_id,
+    file_mime_type,
+    targetAudience,
+    disableNotification,
+    scheduledAt,
+    keyboard,
+    disable_web_page_preview
+  } = taskData;
+  
+  const queryText = `
+        INSERT INTO broadcast_tasks 
+        (message, file_id, file_mime_type, target_audience, disable_notification, scheduled_at, status, keyboard, disable_web_page_preview)
+        VALUES ($1, $2, $3, $4, $5, $6, 'pending', $7, $8)
+        RETURNING *;
+    `;
+  
+  const values = [
+    message,
+    file_id,
+    file_mime_type,
+    targetAudience,
+    !!disableNotification,
+    scheduledAt || new Date(), // <-- Правильное значение для даты
+    keyboard || null,
+    disable_web_page_preview
+  ];
+  
+  const result = await query(queryText, values);
+  return result.rows[0];
 }
 
 export async function getPendingBroadcastTask() {
