@@ -1,20 +1,22 @@
-<% // views/broadcast-form.ejs (ФИНАЛЬНАЯ ВЕРСИЯ) %>
+<% // views/broadcast-form.ejs (ПОЛНАЯ И ИСПРАВЛЕННАЯ ВЕРСИЯ) %>
 <%- contentFor('body') %>
 <% const isEditing = typeof task !== 'undefined' && task; %>
 <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
   <h1 class="h2"><%= isEditing ? 'Редактировать рассылку' : 'Создать рассылку' %></h1>
   <a href="/broadcasts" class="btn btn-sm btn-outline-secondary"><i class="bi bi-arrow-left"></i> Назад к списку</a>
 </div>
+
 <% if (success) { %><div class="alert alert-success"><%= success %></div><% } %>
 <% if (error) { %><div class="alert alert-danger"><%= error %></div><% } %>
+
 <div class="card shadow-sm">
   <div class="card-body">
     <form id="broadcastForm" method="POST" action="<%= isEditing ? '/broadcast/edit/' + task.id : '/broadcast/new' %>" enctype="multipart/form-data">
-      
+
       <div class="mb-3">
         <label for="message" class="form-label">Текст сообщения</label>
         <textarea name="message" id="message" class="form-control" rows="5" required><%= isEditing ? task.message : '' %></textarea>
-        <div class="form-text">Поддерживается Markdown и тег <code>{first_name}</code> для обращения по имени.</div>
+        <div class="form-text">Поддерживается <b>HTML-разметка</b> и тег <code>{first_name}</code> для обращения по имени.</div>
       </div>
 
       <div class="mb-3">
@@ -29,7 +31,7 @@
         <div class="col-md-6 mb-3">
           <label for="file" class="form-label">Файл (фото, видео, аудио, документ)</label>
           <input type="file" name="file" id="file" class="form-control" />
-          <% if (isEditing && (task.audio_path || task.file_path)) { %>
+          <% if (isEditing && (task.audio_path || task.file_path || task.file_id)) { %>
             <div class="form-text">Прикреплен файл. Загрузка нового заменит его.</div>
           <% } %>
         </div>
@@ -68,6 +70,7 @@
     </form>
   </div>
 </div>
+
 <script>
   document.getElementById('broadcastForm').addEventListener('submit', function(event) {
     const localTimeInput = document.getElementById('localScheduledAt');
