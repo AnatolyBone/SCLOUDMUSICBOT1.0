@@ -49,62 +49,82 @@ async function safeSendMessage(userId, text, extra = {}) {
 
 // services/downloadManager.js -> ЗАМЕНИТЬ ФУНКЦИЮ trackDownloadProcessor
 
+
+
 async function trackDownloadProcessor(task) {
-    const { userId, url, metadata } = task;
+    // В задаче теперь есть поле 'source', которое говорит нам, откуда она пришла
+    const { userId, source, metadata } = task;
     const { title, uploader, id: trackId, duration, thumbnail } = metadata;
     const roundedDuration = duration ? Math.round(duration) : undefined;
-
+    
     let tempFilePath = null;
     let statusMessage = null;
     
     try {
-        statusMessage = await safeSendMessage(userId, `⏳ Начинаю обработку трека: "${title}"`);
-        console.log(`[Worker] Начинаю скачивание и встраивание обложки для: ${title}`);
-        tempFilePath = path.join(cacheDir, `${trackId}-${crypto.randomUUID()}.mp3`);
+        statusMessage = await safeSendMessage(userId, `⏳ Начинаю скачивание трека: "${title}"`);
+        console.log(`[Worker] Начинаю скачивание "${title}" (источник: ${source || 'soundcloud'})`);
+        const tempFileName = `${trackId}-${crypto.randomUUID()}.mp3`;
+        tempFilePath = path.join(cacheDir, tempFileName);
         
-        await ytdl(url, {
-            output: tempFilePath,
-            extractAudio: true,
-            audioFormat: 'mp3',
-            retries: 3,
-            "socket-timeout": YTDL_TIMEOUT,
-            'user-agent': FAKE_USER_AGENT,
-            proxy: PROXY_URL || undefined,
-            embedThumbnail: true
-        });
+        // ======================= ГЛАВНОЕ ИЗМЕНЕНИЕ ЗДЕСЬ =======================
+        if (source === 'spotify') {
+            // Если трек из Spotify, используем spotdl
+            // --output использует фигурные скобки, поэтому заключаем путь в одинарные кавычки
+            const command = `spotdl "${task.spotifyUrl}" --output "${tempFilePath}"`;
+            console.log(`[Worker] Выполняю команду spotdl: ${command}`);
+            await execAsync(command, {
+                env: {
+                    ...process.env,
+                    SPOTIPY_CLIENT_ID,
+                    SPOTIPY_CLIENT_SECRET
+                }
+            });
+        } else {
+            // Если трек из SoundCloud (или источник не указан), используем старую логику с yt-dlp
+            await ytdl(task.url, {
+                output: tempFilePath,
+                extractAudio: true,
+                audioFormat: 'mp3',
+                embedThumbnail: true,
+                retries: 3,
+                "socket-timeout": YTDL_TIMEOUT,
+                'user-agent': FAKE_USER_AGENT,
+                proxy: PROXY_URL || undefined,
+            });
+        }
+        // =========================================================================
         
         if (!fs.existsSync(tempFilePath)) throw new Error(`Файл не был создан`);
         
-        if (statusMessage) await bot.telegram.editMessageText(userId, statusMessage.message_id, undefined, `✅ Скачал. Отправляю...`).catch(()=>{});
+        if (statusMessage) await bot.telegram.editMessageText(userId, statusMessage.message_id, undefined, `✅ Скачал. Отправляю...`).catch(() => {});
         
-        // ======================= ГЛАВНОЕ ИЗМЕНЕНИЕ ЗДЕСЬ =======================
-        // Мы больше не передаем 'thumb' вручную. Telegram сам возьмет его из файла.
-        const sentToUserMessage = await bot.telegram.sendAudio(userId, { source: fs.createReadStream(tempFilePath) }, { 
-            title: title, 
-            performer: uploader || 'SoundCloud',
+        const sentToUserMessage = await bot.telegram.sendAudio(userId, { source: fs.createReadStream(tempFilePath) }, {
+            title: title,
+            performer: uploader || 'Unknown Artist', // Обобщаем, т.к. может быть не только SoundCloud
             duration: roundedDuration
         });
-        // =========================================================================
         
-        if (statusMessage) await bot.telegram.deleteMessage(userId, statusMessage.message_id).catch(()=>{});
-
+        if (statusMessage) await bot.telegram.deleteMessage(userId, statusMessage.message_id).catch(() => {});
+        
+        // Универсальная ссылка для кэша - ссылка на Spotify, если есть, иначе SoundCloud
+        const cacheUrl = task.spotifyUrl || task.url;
+        
         if (sentToUserMessage?.audio?.file_id) {
-            await incrementDownloadsAndSaveTrack(userId, title, sentToUserMessage.audio.file_id, url);
+            await incrementDownloadsAndSaveTrack(userId, title, sentToUserMessage.audio.file_id, cacheUrl);
         }
-
+        
         (async () => {
             if (STORAGE_CHANNEL_ID && sentToUserMessage?.audio?.file_id) {
                 try {
                     console.log(`[Cache] Отправляю "${title}" в канал-хранилище...`);
                     const sentToStorageMessage = await bot.telegram.sendAudio(
                         STORAGE_CHANNEL_ID,
-                        sentToUserMessage.audio.file_id,
-                        { title: title, performer: uploader || 'SoundCloud' }
+                        sentToUserMessage.audio.file_id
                     );
                     
                     if (sentToStorageMessage?.audio?.file_id) {
                         await cacheTrack({
-                            url: url,
+                            url: cacheUrl, // Кэшируем по ссылке Spotify или SoundCloud
                             fileId: sentToStorageMessage.audio.file_id,
                             title: title,
                             artist: uploader,
@@ -118,30 +138,28 @@ async function trackDownloadProcessor(task) {
                 }
             }
         })().finally(() => {
-             if (fs.existsSync(tempFilePath)) {
+            if (fs.existsSync(tempFilePath)) {
                 fs.promises.unlink(tempFilePath).catch(err => console.error("Ошибка удаления временного файла:", err));
             }
         });
-
+        
     } catch (err) {
         let userErrorMessage = `❌ Не удалось обработать трек: "${title}"`;
         const errorDetails = err.stderr || err.message || '';
         if (err.name === 'TimeoutError' || errorDetails.includes('timed out')) {
             userErrorMessage += '. Причина: таймаут.';
-        } else if (errorDetails.includes('Postprocessing')) {
-             console.warn(`[Worker] Ошибка встраивания обложки для "${title}". Отправляю без нее.`);
         }
         console.error(`❌ Ошибка воркера при обработке "${title}":`, errorDetails);
         if (statusMessage) {
-            await bot.telegram.editMessageText(userId, statusMessage.message_id, undefined, userErrorMessage).catch(()=>{});
+            await bot.telegram.editMessageText(userId, statusMessage.message_id, undefined, userErrorMessage).catch(() => {});
         } else {
             await safeSendMessage(userId, userErrorMessage);
         }
-
+        
         if (tempFilePath && fs.existsSync(tempFilePath)) {
             await fs.promises.unlink(tempFilePath).catch(() => {});
         }
-    } 
+    }
 }
 export const downloadQueue = new TaskQueue({
     maxConcurrent: 1,
