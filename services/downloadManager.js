@@ -265,10 +265,10 @@ export async function enqueue(ctx, userId, url) {
             }
         }
         
-        let finalMessage = '';
-        if (sentFromCacheCount > 0) {
-            finalMessage += `✅ ${sentFromCacheCount} трек(ов) отправлено мгновенно из кэша.\n`;
-        }
+       // let finalMessage = '';
+        //if (sentFromCacheCount > 0) {
+            //finalMessage += `✅ ${sentFromCacheCount} трек(ов) отправлено мгновенно из кэша.\n`;
+       // }
         
         if (tasksToDownload.length > 0) {
             user = await getUser(userId);
