@@ -510,15 +510,7 @@ export async function getBroadcastTaskById(taskId) {
   return rows[0] || null;
 }
 
-export async function updateBroadcastTask(taskId, task) {
-  const { message, file_id, file_mime_type, targetAudience, disableNotification, scheduledAt, keyboard, disable_web_page_preview } = task;
-  await query(
-    `UPDATE broadcast_tasks 
-     SET message = $1, file_id = $2, file_mime_type = $3, target_audience = $4, disable_notification = $5, scheduled_at = $6, status = 'pending', keyboard = $7, disable_web_page_preview = $8
-     WHERE id = $9`,
-    [message, file_id, file_mime_type, targetAudience, disableNotification, scheduledAt, JSON.stringify(keyboard), disable_web_page_preview, taskId]
-  );
-}
+
 export async function resetOtherTariffsToFree() {
   console.log('[DB-Admin] Начинаю сброс нестандартных тарифов...');
   const { rowCount } = await query(`
