@@ -1,39 +1,34 @@
-# Используем многоступенчатую сборку для минимизации образа
-# Стадия сборки
-FROM node:20-alpine AS builder
+# Шаг 1: Используем официальный образ Node.js 18 как основу.
+# Он построен на Debian, что позволяет легко установить правильный Python и ffmpeg.
+FROM node:18-slim
 
-# Устанавливаем системные зависимости (Alpine использует apk)
-RUN apk add --no-cache \
+# Шаг 2: Устанавливаем системные зависимости
+# - python3.11 - именно та версия, которая нам нужна
+# - python3-pip - для установки пакетов
+# - ffmpeg - для обработки аудио
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3.11 \
+    python3-pip \
     ffmpeg \
-    curl \
-    python3 \
-    py3-pip \
-    && pip3 install --no-cache-dir yt-dlp==2023.11.16
+    && rm -rf /var/lib/apt/lists/*
 
-# Проверяем версии
-RUN yt-dlp --version && ffmpeg -version
-
-# Устанавливаем зависимости Node.js
+# Шаг 3: Устанавливаем рабочую директорию внутри сервера
 WORKDIR /app
+
+# Шаг 4: Копируем файлы с зависимостями
+# Это делается для оптимизации. Если эти файлы не меняются,
+# Docker не будет переустанавливать всё заново при каждой сборке.
 COPY package*.json ./
-RUN npm ci --only=production
+COPY requirements.txt ./
 
-# Финальная стадия
-FROM node:20-alpine
+# Шаг 5: Устанавливаем Python зависимости из нашего файла
+RUN pip3 install -r requirements.txt
 
-# Копируем системные зависимости из стадии builder
-COPY --from=builder /usr/bin/ffmpeg /usr/bin/ffmpeg
-COPY --from=builder /usr/bin/yt-dlp /usr/bin/yt-dlp
-COPY --from=builder /usr/lib/ /usr/lib/ # Для совместимости библиотек
+# Шаг 6: Устанавливаем Node.js зависимости
+RUN npm install
 
-# Создаем непривилегированного пользователя
-RUN addgroup -S app && adduser -S app -G app
-USER app
-
-# Копируем установленные зависимости и исходный код
-WORKDIR /app
-COPY --from=builder /app/node_modules ./node_modules
+# Шаг 7: Копируем весь остальной код вашего проекта
 COPY . .
 
-# Запускаем приложение
+# Шаг 8: Команда для запуска вашего бота
 CMD ["node", "index.js"]
