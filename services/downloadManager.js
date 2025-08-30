@@ -48,12 +48,8 @@ async function safeSendMessage(userId, text, extra = {}) {
     }
 }
 
-// services/downloadManager.js -> ЗАМЕНИТЬ ФУНКЦИЮ trackDownloadProcessor
-
-
-
+// ЗАМЕНИТЕ ЭТУ ФУНКЦИЮ В ВАШЕМ ФАЙЛЕ services/downloadManager.js
 async function trackDownloadProcessor(task) {
-    // В задаче теперь есть поле 'source', которое говорит нам, откуда она пришла
     const { userId, source, metadata } = task;
     const { title, uploader, id: trackId, duration, thumbnail } = metadata;
     const roundedDuration = duration ? Math.round(duration) : undefined;
@@ -67,34 +63,32 @@ async function trackDownloadProcessor(task) {
         const tempFileName = `${trackId}-${crypto.randomUUID()}.mp3`;
         tempFilePath = path.join(cacheDir, tempFileName);
         
-        // ======================= ГЛАВНОЕ ИЗМЕНЕНИЕ ЗДЕСЬ =======================
+        // ======================= ГЛАВНОЕ ИЗМЕНЕНИЕ =======================
+        let downloadUrlOrQuery;
+        const ytdlOptions = {
+            output: tempFilePath,
+            extractAudio: true,
+            audioFormat: 'mp3',
+            embedThumbnail: true,
+            retries: 3,
+            "socket-timeout": YTDL_TIMEOUT,
+            'user-agent': FAKE_USER_AGENT,
+            proxy: PROXY_URL || undefined,
+        };
+        
         if (source === 'spotify') {
-            // Если трек из Spotify, используем spotdl
-            // --output использует фигурные скобки, поэтому заключаем путь в одинарные кавычки
-           // Команда для spotdl v4: spotdl [URL трека] [путь к файлу]
-const command = `spotdl "${task.spotifyUrl}" "${tempFilePath}"`;
-            console.log(`[Worker] Выполняю команду spotdl: ${command}`);
-            await execAsync(command, {
-                env: {
-                    ...process.env,
-                    SPOTIPY_CLIENT_ID,
-                    SPOTIPY_CLIENT_SECRET
-                }
-            });
+            // Если трек из Spotify, формируем поисковый запрос для yt-dlp
+            downloadUrlOrQuery = `${title} ${uploader}`;
+            ytdlOptions.defaultSearch = 'ytsearch'; // Указываем yt-dlp искать на YouTube
+            console.log(`[Worker] Ищу на YouTube по запросу: "${downloadUrlOrQuery}"`);
         } else {
-            // Если трек из SoundCloud (или источник не указан), используем старую логику с yt-dlp
-            await ytdl(task.url, {
-                output: tempFilePath,
-                extractAudio: true,
-                audioFormat: 'mp3',
-                embedThumbnail: true,
-                retries: 3,
-                "socket-timeout": YTDL_TIMEOUT,
-                'user-agent': FAKE_USER_AGENT,
-                proxy: PROXY_URL || undefined,
-            });
+            // Если трек из SoundCloud, используем прямую ссылку
+            downloadUrlOrQuery = task.url;
         }
-        // =========================================================================
+        
+        // Выполняем скачивание с помощью yt-dlp для обоих случаев
+        await ytdl(downloadUrlOrQuery, ytdlOptions);
+        // =================================================================
         
         if (!fs.existsSync(tempFilePath)) throw new Error(`Файл не был создан`);
         
@@ -102,13 +96,12 @@ const command = `spotdl "${task.spotifyUrl}" "${tempFilePath}"`;
         
         const sentToUserMessage = await bot.telegram.sendAudio(userId, { source: fs.createReadStream(tempFilePath) }, {
             title: title,
-            performer: uploader || 'Unknown Artist', // Обобщаем, т.к. может быть не только SoundCloud
+            performer: uploader || 'Unknown Artist',
             duration: roundedDuration
         });
         
         if (statusMessage) await bot.telegram.deleteMessage(userId, statusMessage.message_id).catch(() => {});
         
-        // Универсальная ссылка для кэша - ссылка на Spotify, если есть, иначе SoundCloud
         const cacheUrl = task.spotifyUrl || task.url;
         
         if (sentToUserMessage?.audio?.file_id) {
@@ -126,7 +119,7 @@ const command = `spotdl "${task.spotifyUrl}" "${tempFilePath}"`;
                     
                     if (sentToStorageMessage?.audio?.file_id) {
                         await cacheTrack({
-                            url: cacheUrl, // Кэшируем по ссылке Spotify или SoundCloud
+                            url: cacheUrl,
                             fileId: sentToStorageMessage.audio.file_id,
                             title: title,
                             artist: uploader,
