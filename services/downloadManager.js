@@ -1,6 +1,6 @@
 // services/downloadManager.js (ФИНАЛЬНАЯ, ПОЛНАЯ, ИСПРАВЛЕННАЯ ВЕРСИЯ)
 
-import { STORAGE_CHANNEL_ID, CHANNEL_USERNAME, SPOTIPY_CLIENT_ID, SPOTIPY_CLIENT_SECRET, PROXY_URL, ADMIN_ID } from '../config.js';
+import { STORAGE_CHANNEL_ID, CHANNEL_USERNAME, PROXY_URL, ADMIN_ID } from '../config.js';
 import { Markup } from 'telegraf';
 import path from 'path';
 import fs from 'fs';
@@ -8,7 +8,7 @@ import ytdl from 'youtube-dl-exec';
 import { fileURLToPath } from 'url';
 import crypto from 'crypto';
 import pLimit from 'p-limit';
-// ==> ИЗМЕНЕНИЕ 1: Импортируем 'spawn' и оставляем 'exec' для совместимости
+// ==> ИЗМЕНЕНИЕ 1: Импортируем 'spawn' и 'exec'
 import { exec, spawn } from 'child_process';
 import { promisify } from 'util';
 import { bot } from '../bot.js';
@@ -24,7 +24,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(path.dirname(__filename));
 const cacheDir = path.join(__dirname, 'cache');
 
-const YTDL_TIMEOUT = 120; // Увеличиваем на всякий случай
+const YTDL_TIMEOUT = 120;
 const TRACK_TITLE_LIMIT = 100;
 const UNLIMITED_PLAYLIST_LIMIT = 100;
 const FAKE_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36';
@@ -50,10 +50,10 @@ async function safeSendMessage(userId, text, extra = {}) {
     }
 }
 
-// ==> ИЗМЕНЕНИЕ 2: Новая, правильная вспомогательная функция spawnAsync
+// ==> ИЗМЕНЕНИЕ 2: НАСТОЯЩАЯ, ПРАВИЛЬНАЯ функция spawnAsync БЕЗ { shell: true }
 function spawnAsync(command, args) {
     return new Promise((resolve, reject) => {
-        // Вызываем spawn БЕЗ shell: true. Аргументы передаются как безопасный массив.
+        // Вызываем spawn в безопасном режиме. Аргументы передаются как чистый массив.
         const process = spawn(command, args);
         let stdout = '';
         let stderr = '';
@@ -71,12 +71,11 @@ function spawnAsync(command, args) {
                 reject(error);
             }
         });
-
         process.on('error', (err) => reject(err));
     });
 }
 
-// ==> ИЗМЕНЕНИЕ 3: Исправляем только эту функцию, используя новый spawnAsync
+// ==> ИЗМЕНЕНИЕ 3: Исправляем функцию, чтобы она использовала новый, правильный spawn
 async function trackDownloadProcessor(task) {
     const { userId, source, metadata } = task;
     const { title, uploader, id: trackId, duration, thumbnail } = metadata;
@@ -102,7 +101,8 @@ async function trackDownloadProcessor(task) {
             args.push(task.url);
         }
 
-        // Аргументы передаются без лишних кавычек, spawn их обработает правильно
+        // Аргументы передаются как чистые строки, без лишних кавычек.
+        // spawn сам их обработает правильно.
         args.push(
             '--max-downloads', '1',
             '-o', tempFilePath,
@@ -216,6 +216,7 @@ export async function enqueue(ctx, userId, url) {
         }
 
         statusMessage = await safeSendMessage(userId, '🔍 Получаю информацию о треке...');
+        // Здесь мы можем оставить ytdl, так как он используется только для получения метаданных, что менее критично.
         const info = await ytdlLimit(() => ytdl(url, {
             dumpSingleJson: true,
             retries: 2, "socket-timeout": YTDL_TIMEOUT,
