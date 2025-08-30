@@ -62,35 +62,32 @@ async function trackDownloadProcessor(task) {
         const tempFileName = `${trackId}-${crypto.randomUUID()}.mp3`;
         tempFilePath = path.join(cacheDir, tempFileName);
         
-        // ======================= ФИНАЛЬНОЕ ИЗМЕНЕНИЕ ЗДЕСЬ =======================
+        // ======================= САМЫЙ ПРОСТОЙ И НАДЕЖНЫЙ СПОСОБ =======================
         let downloadUrlOrQuery;
+        const ytdlOptions = {
+            output: tempFilePath,
+            extractAudio: true,
+            audioFormat: 'mp3',
+            embedThumbnail: true,
+            retries: 3,
+            "socket-timeout": YTDL_TIMEOUT,
+            'user-agent': FAKE_USER_AGENT,
+            proxy: PROXY_URL || undefined,
+        };
+        
         if (source === 'spotify') {
-            // ИЗМЕНЯЕМ ПОИСК С YOUTUBE НА YOUTUBE MUSIC
-            downloadUrlOrQuery = `ytmsearch1:"${title} ${uploader}"`;
+            // Если трек из Spotify, мы не передаем URL, а просто текст для поиска
+            downloadUrlOrQuery = `${title} ${uploader}`;
+            // И добавляем специальную опцию, которая говорит "ищи на YouTube Music и бери первый результат"
+            ytdlOptions.defaultSearch = 'ytmsearch1';
             console.log(`[Worker] Ищу на YouTube Music по запросу: "${downloadUrlOrQuery}"`);
         } else {
+            // Для SoundCloud все по-старому - передаем прямую ссылку
             downloadUrlOrQuery = task.url;
         }
         
-        // Формируем прямую команду для yt-dlp
-        const ytdlCommand = [
-            'yt-dlp',
-            `"${downloadUrlOrQuery}"`, // Запрос или URL в кавычках
-            '--max-downloads', '1', // Скачать только 1 файл
-            '-o', `"${tempFilePath}"`, // Путь вывода в кавычках
-            '-x', // Извлечь аудио
-            '--audio-format', 'mp3',
-            '--embed-thumbnail',
-            '--retries', '3',
-            '--socket-timeout', YTDL_TIMEOUT,
-            '--user-agent', `"${FAKE_USER_AGENT}"`
-        ];
-        
-        if (PROXY_URL) {
-            ytdlCommand.push('--proxy', `"${PROXY_URL}"`);
-        }
-        
-        await execAsync(ytdlCommand.join(' '));
+        // Выполняем скачивание с помощью библиотеки ytdl, которая сама правильно сформирует команду
+        await ytdl(downloadUrlOrQuery, ytdlOptions);
         // ===================================================================================
         
         if (!fs.existsSync(tempFilePath)) throw new Error(`Файл не был создан`);
