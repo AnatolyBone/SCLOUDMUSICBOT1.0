@@ -1,4 +1,4 @@
-// services/downloadManager.js (ФИНАЛЬНАЯ, ПОЛНАЯ, УНИФИЦИРОВАННАЯ ВЕРСИЯ)
+// services/downloadManager.js (ФИНАЛЬНАЯ ВЕРСИЯ С РАСШИРЕННЫМ ЛОГГИРОВАНИЕМ)
 
 import { STORAGE_CHANNEL_ID, CHANNEL_USERNAME, PROXY_URL, ADMIN_ID } from '../config.js';
 import { Markup } from 'telegraf';
@@ -19,8 +19,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(path.dirname(__filename));
 const cacheDir = path.join(__dirname, 'cache');
 
-// Увеличим общий таймаут на случай медленной сети или долгого поиска
-const YTDL_TIMEOUT = 180; 
+const YTDL_TIMEOUT = 180;
 const TRACK_TITLE_LIMIT = 100;
 const UNLIMITED_PLAYLIST_LIMIT = 100;
 const FAKE_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36';
@@ -46,7 +45,6 @@ async function safeSendMessage(userId, text, extra = {}) {
 
 function spawnAsync(command, args) {
     return new Promise((resolve, reject) => {
-        // Устанавливаем общий таймаут на весь процесс
         const process = spawn(command, args, { timeout: YTDL_TIMEOUT * 1000 });
         let stdout = '';
         let stderr = '';
@@ -99,18 +97,19 @@ async function trackDownloadProcessor(task) {
             const searchQuery = `${title} ${uploader}`;
             console.log(`[Worker] Spotify трек. Ищу на YouTube Music по запросу: "${searchQuery}"`);
             args.push('--default-search', 'ytmsearch1', searchQuery);
-        } else { // Для SoundCloud и других
+        } else {
             args.push(task.url);
         }
 
         args.push(
+            '--verbose', // <== ВОТ ЭТО ИЗМЕНЕНИЕ ДЛЯ ДЕТАЛЬНОЙ ДИАГНОСТИКИ
             '--max-downloads', '1',
             '-o', tempFilePath,
-            '-x', // Извлечь аудио
+            '-x',
             '--audio-format', 'mp3',
             '--embed-thumbnail',
             '--retries', '3',
-            '--socket-timeout', '30', // Таймаут на установку соединения
+            '--socket-timeout', '30',
             '--user-agent', FAKE_USER_AGENT
         );
 
@@ -175,13 +174,14 @@ async function trackDownloadProcessor(task) {
         
     } catch (err) {
         let userErrorMessage = `❌ Не удалось обработать трек: "${title}"`;
-        const errorDetails = err.stderr || err.message || '';
+        const errorDetails = err.stderr || err.message || ''; // stderr будет содержать детальный лог
         if (err.name === 'TimeoutError' || errorDetails.includes('timed out')) {
             userErrorMessage += '. Причина: таймаут.';
         } else if (errorDetails.includes('exit code 101')) {
-            userErrorMessage += '. Причина: сетевая ошибка при скачивании (возможно, проблема с прокси).';
+            userErrorMessage += '. Причина: сетевая ошибка при скачивании.';
         }
-        console.error(`❌ Ошибка воркера при обработке "${title}":`, errorDetails);
+        // Выводим в консоль полный детальный лог ошибки
+        console.error(`❌ Ошибка воркера при обработке "${title}":\n---STDERR---\n${errorDetails}\n------------`);
         if (statusMessage) {
             await bot.telegram.editMessageText(userId, statusMessage.message_id, undefined, userErrorMessage).catch(() => {});
         } else {
@@ -195,7 +195,7 @@ async function trackDownloadProcessor(task) {
 }
 
 export const downloadQueue = new TaskQueue({
-    maxConcurrent: 1, // Оставляем 1, чтобы не перегружать сеть/диск
+    maxConcurrent: 1,
     taskProcessor: trackDownloadProcessor
 });
 
