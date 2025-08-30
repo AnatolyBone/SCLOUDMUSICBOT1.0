@@ -1,20 +1,9 @@
 services:
   - type: web
     name: soundcloud-bot # Или ваше имя
-    env: native          # <--- ГЛАВНОЕ ИЗМЕНЕНИЕ: Используем "родное" окружение
+    env: docker
     plan: free
-    buildCommand: "bash build.sh"
-    startCommand: "node index.js"
-    # Добавляем фильтр, чтобы сборка запускалась только при изменении нужных файлов
-    buildFilter:
-      paths:
-        - "build.sh"
-        - "package.json"
-        - "package-lock.json"
-        - "requirements.txt"
-        - "src/**/*.js"
-    # Переменные окружения для секретов
-    envVars:
+    envVars: # Место для ваших секретов. Введите их на сайте.
       - key: SPOTIPY_CLIENT_ID
         sync: false
       - key: SPOTIPY_CLIENT_SECRET
@@ -28,5 +17,5 @@ services:
       - key: WEBHOOK_URL
         fromService:
           type: web
-          name: soundcloud-bot # Укажите здесь то же имя, что и в 'name' выше
+          name: soundcloud-bot
           property: url
