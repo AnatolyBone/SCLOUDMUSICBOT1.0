@@ -1,4 +1,4 @@
-// services/downloadManager.js (ФИНАЛЬНАЯ ВЕРСИЯ 2.0 С ОКРУГЛЕНИЕМ)
+// services/downloadManager.js (ФИНАЛЬНАЯ, ИСПРАВЛЕННАЯ ВЕРСИЯ - ВАШ КОД + МОИ ПРАВКИ)
 
 import { STORAGE_CHANNEL_ID, CHANNEL_USERNAME, SPOTIPY_CLIENT_ID, SPOTIPY_CLIENT_SECRET, PROXY_URL, ADMIN_ID } from '../config.js';
 import { Markup } from 'telegraf';
@@ -8,7 +8,8 @@ import ytdl from 'youtube-dl-exec';
 import { fileURLToPath } from 'url';
 import crypto from 'crypto';
 import pLimit from 'p-limit';
-import { exec } from 'child_process';
+// ==> ИЗМЕНЕНИЕ 1: Импортируем 'spawn' для надежного вызова
+import { exec, spawn } from 'child_process';
 import { promisify } from 'util';
 import { bot } from '../bot.js';
 import { T } from '../config/texts.js';
@@ -17,12 +18,13 @@ import {
     getUser, resetDailyLimitIfNeeded, logEvent, updateUserField,
     findCachedTrack, cacheTrack, incrementDownloadsAndSaveTrack
 } from '../db.js';
+
 const execAsync = promisify(exec);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(path.dirname(__filename));
 const cacheDir = path.join(__dirname, 'cache');
 
-const YTDL_TIMEOUT = 60;
+const YTDL_TIMEOUT = 120; // Увеличим на всякий случай
 const TRACK_TITLE_LIMIT = 100;
 const UNLIMITED_PLAYLIST_LIMIT = 100;
 const FAKE_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36';
@@ -47,24 +49,17 @@ async function safeSendMessage(userId, text, extra = {}) {
         return null;
     }
 }
-// ЗАМЕНИТЕ ЭТУ ФУНКЦИЮ И ДОБАВЬТЕ НОВУЮ ВСПОМОГАТЕЛЬНУЮ ФУНКЦИЮ
-// В ВАШЕМ ФАЙЛЕ services/downloadManager.js
 
-// Новая вспомогательная функция для надежного вызова внешних команд
+// ==> ИЗМЕНЕНИЕ 2: Новая вспомогательная функция spawnAsync
 function spawnAsync(command, args) {
     return new Promise((resolve, reject) => {
-        const process = exec(command + ' ' + args.join(' ')); // Используем exec, так как spawn может быть сложнее в настройке PATH
+        const process = spawn(command, args, { shell: true });
         let stdout = '';
         let stderr = '';
-        
-        process.stdout.on('data', (data) => {
-            stdout += data;
-        });
-        
-        process.stderr.on('data', (data) => {
-            stderr += data;
-        });
-        
+
+        process.stdout.on('data', (data) => stdout += data.toString());
+        process.stderr.on('data', (data) => stderr += data.toString());
+
         process.on('close', (code) => {
             if (code === 0) {
                 resolve({ stdout, stderr });
@@ -75,13 +70,12 @@ function spawnAsync(command, args) {
                 reject(error);
             }
         });
-        
-        process.on('error', (err) => {
-            reject(err);
-        });
+
+        process.on('error', (err) => reject(err));
     });
 }
 
+// ==> ИЗМЕНЕНИЕ 3: Исправляем только эту функцию
 async function trackDownloadProcessor(task) {
     const { userId, source, metadata } = task;
     const { title, uploader, id: trackId, duration, thumbnail } = metadata;
@@ -96,41 +90,34 @@ async function trackDownloadProcessor(task) {
         const tempFileName = `${trackId}-${crypto.randomUUID()}.mp3`;
         tempFilePath = path.join(cacheDir, tempFileName);
         
-        // ======================= САМЫЙ НАДЕЖНЫЙ СПОСОБ ВЫЗОВА YT-DLP =======================
         const command = 'yt-dlp';
         const args = [];
         
         if (source === 'spotify') {
             const searchQuery = `${title} ${uploader}`;
             console.log(`[Worker] Ищу на YouTube Music по запросу: "${searchQuery}"`);
-            // Говорим yt-dlp: "По умолчанию ищи на YouTube Music и бери первый результат"
-            args.push('--default-search', 'ytmsearch1');
-            args.push(`"${searchQuery}"`);
+            args.push('--default-search', 'ytmsearch1', searchQuery);
         } else {
-            // Для SoundCloud просто передаем URL
-            args.push(`"${task.url}"`);
+            args.push(task.url);
         }
-        
-        // Добавляем остальные опции
+
         args.push(
             '--max-downloads', '1',
-            '-o', `"${tempFilePath}"`,
-            '-x', // Извлечь аудио
+            '-o', tempFilePath,
+            '-x',
             '--audio-format', 'mp3',
             '--embed-thumbnail',
             '--retries', '3',
             '--socket-timeout', String(YTDL_TIMEOUT),
-            '--user-agent', `"${FAKE_USER_AGENT}"`
+            '--user-agent', FAKE_USER_AGENT
         );
-        
+
         if (PROXY_URL) {
-            args.push('--proxy', `"${PROXY_URL}"`);
+            args.push('--proxy', PROXY_URL);
         }
         
-        // Выполняем команду с помощью нашей новой надежной функции
-        console.log(`[Worker] Выполняю команду: ${command} ${args.join(' ')}`);
+        console.log(`[Worker] Выполняю команду: ${command} ${args.map(a => a.includes(' ') ? `"${a}"` : a).join(' ')}`);
         await spawnAsync(command, args);
-        // ==============================================================================================
         
         if (!fs.existsSync(tempFilePath)) throw new Error(`Файл не был создан`);
         
@@ -198,11 +185,13 @@ async function trackDownloadProcessor(task) {
         }
     }
 }
+
 export const downloadQueue = new TaskQueue({
     maxConcurrent: 1,
     taskProcessor: trackDownloadProcessor
 });
 
+// ==> ЭТА ФУНКЦИЯ ОСТАЕТСЯ БЕЗ ИЗМЕНЕНИЙ!
 export async function enqueue(ctx, userId, url) {
     let statusMessage = null;
     try {
