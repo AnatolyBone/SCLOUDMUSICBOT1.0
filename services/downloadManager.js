@@ -1,4 +1,4 @@
-// services/downloadManager.js (ФИНАЛЬНАЯ, ПОЛНАЯ, ИСПРАВЛЕННАЯ ВЕРСИЯ)
+// services/downloadManager.js (ФИНАЛЬНАЯ ВЕРСИЯ 3.0)
 
 import { STORAGE_CHANNEL_ID, CHANNEL_USERNAME, PROXY_URL, ADMIN_ID } from '../config.js';
 import { Markup } from 'telegraf';
@@ -6,7 +6,6 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import crypto from 'crypto';
-// ==> ИЗМЕНЕНИЕ 1: Импортируем 'spawn', он заменит все другие способы вызова
 import { spawn } from 'child_process';
 import { bot } from '../bot.js';
 import { T } from '../config/texts.js';
@@ -20,7 +19,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(path.dirname(__filename));
 const cacheDir = path.join(__dirname, 'cache');
 
-const YTDL_TIMEOUT = 120; // Увеличиваем на всякий случай
+const YTDL_TIMEOUT = 120;
 const TRACK_TITLE_LIMIT = 100;
 const UNLIMITED_PLAYLIST_LIMIT = 100;
 const FAKE_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36';
@@ -44,11 +43,9 @@ async function safeSendMessage(userId, text, extra = {}) {
     }
 }
 
-// ==> ИЗМЕНЕНИЕ 2: НАША ЕДИНСТВЕННАЯ, НАДЕЖНАЯ ФУНКЦИЯ ДЛЯ ВЫЗОВА ПРОГРАММ
 function spawnAsync(command, args) {
     return new Promise((resolve, reject) => {
-        // Вызываем spawn БЕЗ shell: true. Аргументы передаются как безопасный массив.
-        const process = spawn(command, args);
+        const process = spawn(command, args, { timeout: YTDL_TIMEOUT * 1000 }); // Добавляем глобальный таймаут
         let stdout = '';
         let stderr = '';
 
@@ -65,11 +62,20 @@ function spawnAsync(command, args) {
                 reject(error);
             }
         });
-        process.on('error', (err) => reject(err));
+
+        process.on('error', (err) => {
+            // Если ошибка запуска (e.g., ETIMEDOUT), оборачиваем её
+            if (err.code === 'ETIMEDOUT') {
+                const timeoutError = new Error('Process timed out');
+                timeoutError.name = 'TimeoutError';
+                reject(timeoutError);
+            } else {
+                reject(err);
+            }
+        });
     });
 }
 
-// ==> ИЗМЕНЕНИЕ 3: ФУНКЦИЯ-ВОРКЕР, ИСПОЛЬЗУЮЩАЯ SPAWN ДЛЯ ВСЕХ СКАЧИВАНИЙ
 async function trackDownloadProcessor(task) {
     const { userId, source, metadata } = task;
     const { title, uploader, id: trackId, duration, thumbnail } = metadata;
@@ -80,23 +86,23 @@ async function trackDownloadProcessor(task) {
     
     try {
         statusMessage = await safeSendMessage(userId, `⏳ Начинаю скачивание трека: "${title}"`);
-        console.log(`[Worker] Начинаю скачивание "${title}" (источник: ${source || 'soundcloud'})`);
+        console.log(`[Worker] Начинаю скачивание "${title}" (источник: ${source})`);
+        
         const tempFileName = `${trackId}-${crypto.randomUUID()}.mp3`;
         tempFilePath = path.join(cacheDir, tempFileName);
         
         const command = 'yt-dlp';
         const args = [];
         
+        // ==> ИСПРАВЛЕНИЕ SPOTIFY №1: Теперь воркер правильно определяет источник
         if (source === 'spotify') {
             const searchQuery = `${title} ${uploader}`;
-            console.log(`[Worker] Ищу на YouTube Music по запросу: "${searchQuery}"`);
+            console.log(`[Worker] Spotify трек. Ищу на YouTube Music по запросу: "${searchQuery}"`);
             args.push('--default-search', 'ytmsearch1', searchQuery);
-        } else {
+        } else { // Для SoundCloud и других
             args.push(task.url);
         }
 
-        // Аргументы передаются как чистые строки, без лишних кавычек.
-        // spawn сам их обработает правильно.
         args.push(
             '--max-downloads', '1',
             '-o', tempFilePath,
@@ -104,18 +110,23 @@ async function trackDownloadProcessor(task) {
             '--audio-format', 'mp3',
             '--embed-thumbnail',
             '--retries', '3',
-            '--socket-timeout', String(YTDL_TIMEOUT),
+            '--socket-timeout', '30', // Уменьшим таймаут сокета, т.к. есть глобальный
             '--user-agent', FAKE_USER_AGENT
         );
 
+        // ==> ИСПРАВЛЕНИЕ ПРОКСИ №1: Проверяем, есть ли PROXY_URL перед добавлением
         if (PROXY_URL) {
+            console.log(`[Worker] Использую прокси: ${PROXY_URL}`);
             args.push('--proxy', PROXY_URL);
+        } else {
+            console.log(`[Worker] Работаю без прокси.`);
         }
         
         console.log(`[Worker] Выполняю команду: ${command} ${args.map(a => a.includes(' ') ? `"${a}"` : a).join(' ')}`);
+        
         await spawnAsync(command, args);
         
-        if (!fs.existsSync(tempFilePath)) throw new Error(`Файл не был создан`);
+        if (!fs.existsSync(tempFilePath)) throw new Error(`Файл не был создан после выполнения yt-dlp`);
         
         if (statusMessage) await bot.telegram.editMessageText(userId, statusMessage.message_id, undefined, `✅ Скачал. Отправляю...`).catch(() => {});
         
@@ -133,6 +144,7 @@ async function trackDownloadProcessor(task) {
             await incrementDownloadsAndSaveTrack(userId, title, sentToUserMessage.audio.file_id, cacheUrl);
         }
         
+        // Асинхронное кэширование, чтобы не задерживать пользователя
         (async () => {
             if (STORAGE_CHANNEL_ID && sentToUserMessage?.audio?.file_id) {
                 try {
@@ -168,6 +180,8 @@ async function trackDownloadProcessor(task) {
         const errorDetails = err.stderr || err.message || '';
         if (err.name === 'TimeoutError' || errorDetails.includes('timed out')) {
             userErrorMessage += '. Причина: таймаут.';
+        } else if (errorDetails.includes('exit code 101')) {
+            userErrorMessage += '. Причина: сетевая ошибка при скачивании.';
         }
         console.error(`❌ Ошибка воркера при обработке "${title}":`, errorDetails);
         if (statusMessage) {
@@ -183,11 +197,10 @@ async function trackDownloadProcessor(task) {
 }
 
 export const downloadQueue = new TaskQueue({
-    maxConcurrent: 1,
+    maxConcurrent: 1, // Оставляем 1, чтобы не перегружать сеть/диск
     taskProcessor: trackDownloadProcessor
 });
 
-// ==> ИЗМЕНЕНИЕ 4: ФУНКЦИЯ ENQUEUE ТЕПЕРЬ ТОЖЕ ИСПОЛЬЗУЕТ SPAWN
 export async function enqueue(ctx, userId, url) {
     let statusMessage = null;
     try {
@@ -216,27 +229,35 @@ export async function enqueue(ctx, userId, url) {
             url,
             '--dump-single-json',
             '--retries', '2',
-            '--socket-timeout', String(YTDL_TIMEOUT),
+            '--socket-timeout', '20',
             '--user-agent', FAKE_USER_AGENT,
         ];
+        
+        // ==> ИСПРАВЛЕНИЕ ПРОКСИ №2: Проверяем, есть ли PROXY_URL перед добавлением
         if (PROXY_URL) {
             infoArgs.push('--proxy', PROXY_URL);
         }
+        
         const { stdout } = await spawnAsync('yt-dlp', infoArgs);
-
         const info = JSON.parse(stdout);
         if (!info) throw new Error('Не удалось получить метаданные');
-
+        
+        // ==> ИСПРАВЛЕНИЕ SPOTIFY №2: Определяем источник и готовим задачи
+        const source = url.includes('spotify.com') ? 'spotify' : 'soundcloud';
         const isPlaylist = Array.isArray(info.entries);
         const entries = isPlaylist ? info.entries : [info];
+
         let tracksToProcess = entries
-            .filter(e => e && e.webpage_url)
+            .filter(e => e && (e.webpage_url || e.url))
             .map(e => ({
-                url: e.webpage_url,
+                // Для Spotify yt-dlp часто возвращает url в другом поле
+                url: e.webpage_url || e.url, 
+                source: source, // Передаем источник
+                spotifyUrl: source === 'spotify' ? url : null, // Сохраняем оригинальную Spotify ссылку для кэша
                 metadata: {
                     id: e.id,
                     title: sanitizeFilename(e.title || 'Unknown Title').slice(0, TRACK_TITLE_LIMIT),
-                    uploader: e.uploader,
+                    uploader: e.uploader || e.artist, // Spotify использует 'artist'
                     duration: e.duration,
                     thumbnail: e.thumbnail,
                 }
@@ -265,37 +286,34 @@ export async function enqueue(ctx, userId, url) {
             await bot.telegram.editMessageText(userId, statusMessage.message_id, undefined, '🔄 Проверяю кэш...').catch(() => {});
         }
 
-        const tasksFromCache = [];
         const tasksToDownload = [];
-        for (const track of tracksToProcess) {
-            const cached = await findCachedTrack(track.url);
-            if (cached) {
-                tasksFromCache.push({ ...track, ...cached });
-            } else {
-                tasksToDownload.push(track);
-            }
-        }
-        
         let sentFromCacheCount = 0;
-        if (tasksFromCache.length > 0) {
-            for (const track of tasksFromCache) {
-                user = await getUser(userId);
+
+        for (const track of tracksToProcess) {
+            // Для Spotify кэш ищется по оригинальной ссылке
+            const cacheKey = track.spotifyUrl || track.url;
+            const cached = await findCachedTrack(cacheKey);
+
+            if (cached) {
+                 user = await getUser(userId);
                 if (user.downloads_today >= user.premium_limit) break;
                 try {
-                    await bot.telegram.sendAudio(userId, track.fileId, { title: track.metadata.title, performer: track.metadata.uploader });
-                    await incrementDownloadsAndSaveTrack(userId, track.metadata.title, track.fileId, track.url);
+                    await bot.telegram.sendAudio(userId, cached.fileId, { title: track.metadata.title, performer: track.metadata.uploader });
+                    await incrementDownloadsAndSaveTrack(userId, track.metadata.title, cached.fileId, cacheKey);
                     sentFromCacheCount++;
                 } catch (err) {
                     if (err.response?.error_code === 403) { await updateUserField(userId, 'active', false); return; }
                     else if (err.description?.includes('FILE_REFERENCE_EXPIRED')) tasksToDownload.push(track);
                     else console.error(`⚠️ Ошибка отправки из кэша для ${userId}: ${err.message}`);
                 }
+            } else {
+                tasksToDownload.push(track);
             }
         }
         
        let finalMessage = '';
         if (sentFromCacheCount > 0) {
-            finalMessage += `✅ ${sentFromCacheCount} трек(ов) отправлено .\n`;
+            finalMessage += `✅ ${sentFromCacheCount} трек(ов) отправлено из кэша.\n`;
         }
         
         if (tasksToDownload.length > 0) {
@@ -309,7 +327,8 @@ export async function enqueue(ctx, userId, url) {
                 if (isPlaylist) await logEvent(userId, 'download_playlist');
                 
                 for (const track of tasksToReallyDownload) {
-                    downloadQueue.add({ userId, url: track.url, metadata: track.metadata, priority: user.premium_limit });
+                    // Передаем всю подготовленную задачу в очередь
+                    downloadQueue.add({ userId, ...track, priority: user.premium_limit });
                     if (!isPlaylist) await logEvent(userId, 'download');
                 }
             } else if (sentFromCacheCount === 0) {
@@ -328,7 +347,7 @@ export async function enqueue(ctx, userId, url) {
         let userMessage = `❌ Произошла ошибка при обработке ссылки.`;
         if (err.name === 'TimeoutError' || errorMessage.includes('timed out')) {
             console.error(`❌ Таймаут в enqueue для ${userId}:`, errorMessage);
-            userMessage = '❌ Ошибка: SoundCloud отвечает слишком долго. Попробуйте позже.';
+            userMessage = '❌ Ошибка: Сервис (SoundCloud/Spotify) отвечает слишком долго. Попробуйте позже.';
         } else if (errorMessage.includes('404: Not Found') || errorMessage.includes('403: Forbidden')) {
             console.warn(`[User Error] Трек не найден (404/403) для ${userId}.`);
             userMessage = '❌ Трек по этой ссылке не найден или доступ к нему ограничен.';
