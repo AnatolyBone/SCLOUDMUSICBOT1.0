@@ -7,9 +7,11 @@ echo ">>> Installing system dependencies (ffmpeg)..."
 apt-get update && apt-get install -y ffmpeg
 
 # Устанавливаем Python зависимости
-echo ">>> Installing Python packages (yt-dlp, spotdl)..."
+echo ">>> Installing Python packages (yt-dlp, spotdl) without cache..."
 pip install --upgrade pip
-pip install --upgrade yt-dlp spotdl
+
+# ДОБАВЛЕН ФЛАГ --no-cache-dir ДЛЯ ГАРАНТИРОВАННОЙ ЧИСТОЙ УСТАНОВКИ
+pip install --no-cache-dir --upgrade yt-dlp spotdl
 
 # Устанавливаем npm зависимости
 echo ">>> Installing Node.js packages..."
