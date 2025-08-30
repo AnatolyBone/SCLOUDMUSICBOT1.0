@@ -62,21 +62,22 @@ async function trackDownloadProcessor(task) {
         const tempFileName = `${trackId}-${crypto.randomUUID()}.mp3`;
         tempFilePath = path.join(cacheDir, tempFileName);
         
-        // ======================= ПРЯМОЙ ВЫЗОВ YT-DLP ДЛЯ МАКСИМАЛЬНОЙ НАДЕЖНОСТИ =======================
-        let commandQuery;
+        // ======================= САМЫЙ ПРАВИЛЬНЫЙ СПОСОБ ВЫЗОВА YT-DLP =======================
+        const ytdlCommand = ['yt-dlp'];
+        
         if (source === 'spotify') {
-            // Формируем поисковый запрос для YouTube Music
-            commandQuery = `ytmsearch1:"${title} ${uploader}"`;
-            console.log(`[Worker] Ищу на YouTube Music по запросу: ${commandQuery}`);
+            const searchQuery = `"${title} ${uploader}"`;
+            console.log(`[Worker] Ищу на YouTube Music по запросу: ${searchQuery}`);
+            // Говорим yt-dlp: "По умолчанию ищи на YouTube Music и бери первый результат"
+            ytdlCommand.push('--default-search', 'ytmsearch1');
+            ytdlCommand.push(searchQuery);
         } else {
-            // Для SoundCloud используем прямую ссылку
-            commandQuery = `"${task.url}"`;
+            // Для SoundCloud просто передаем URL
+            ytdlCommand.push(`"${task.url}"`);
         }
         
-        // Собираем команду как массив для безопасности и читаемости
-        const ytdlCommand = [
-            'yt-dlp',
-            commandQuery,
+        // Добавляем остальные опции
+        ytdlCommand.push(
             '--max-downloads', '1',
             '-o', `"${tempFilePath}"`,
             '-x', // Извлечь аудио
@@ -85,14 +86,16 @@ async function trackDownloadProcessor(task) {
             '--retries', '3',
             '--socket-timeout', YTDL_TIMEOUT,
             '--user-agent', `"${FAKE_USER_AGENT}"`
-        ];
+        );
         
         if (PROXY_URL) {
             ytdlCommand.push('--proxy', `"${PROXY_URL}"`);
         }
         
-        // Выполняем команду напрямую, как мы это делаем со spotdl
-        await execAsync(ytdlCommand.join(' '));
+        // Выполняем собранную команду
+        const fullCommand = ytdlCommand.join(' ');
+        console.log(`[Worker] Выполняю команду: ${fullCommand}`);
+        await execAsync(fullCommand);
         // ==============================================================================================
         
         if (!fs.existsSync(tempFilePath)) throw new Error(`Файл не был создан`);
