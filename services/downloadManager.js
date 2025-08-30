@@ -47,7 +47,41 @@ async function safeSendMessage(userId, text, extra = {}) {
         return null;
     }
 }
-// ЗАМЕНИТЕ ЭТУ ФУНКЦИЮ В ВАШЕМ ФАЙЛЕ services/downloadManager.js
+// ЗАМЕНИТЕ ЭТУ ФУНКЦИЮ И ДОБАВЬТЕ НОВУЮ ВСПОМОГАТЕЛЬНУЮ ФУНКЦИЮ
+// В ВАШЕМ ФАЙЛЕ services/downloadManager.js
+
+// Новая вспомогательная функция для надежного вызова внешних команд
+function spawnAsync(command, args) {
+    return new Promise((resolve, reject) => {
+        const process = exec(command + ' ' + args.join(' ')); // Используем exec, так как spawn может быть сложнее в настройке PATH
+        let stdout = '';
+        let stderr = '';
+        
+        process.stdout.on('data', (data) => {
+            stdout += data;
+        });
+        
+        process.stderr.on('data', (data) => {
+            stderr += data;
+        });
+        
+        process.on('close', (code) => {
+            if (code === 0) {
+                resolve({ stdout, stderr });
+            } else {
+                const error = new Error(`Command failed with exit code ${code}`);
+                error.stdout = stdout;
+                error.stderr = stderr;
+                reject(error);
+            }
+        });
+        
+        process.on('error', (err) => {
+            reject(err);
+        });
+    });
+}
+
 async function trackDownloadProcessor(task) {
     const { userId, source, metadata } = task;
     const { title, uploader, id: trackId, duration, thumbnail } = metadata;
@@ -62,40 +96,40 @@ async function trackDownloadProcessor(task) {
         const tempFileName = `${trackId}-${crypto.randomUUID()}.mp3`;
         tempFilePath = path.join(cacheDir, tempFileName);
         
-        // ======================= САМЫЙ ПРАВИЛЬНЫЙ СПОСОБ ВЫЗОВА YT-DLP =======================
-        const ytdlCommand = ['yt-dlp'];
+        // ======================= САМЫЙ НАДЕЖНЫЙ СПОСОБ ВЫЗОВА YT-DLP =======================
+        const command = 'yt-dlp';
+        const args = [];
         
         if (source === 'spotify') {
-            const searchQuery = `"${title} ${uploader}"`;
-            console.log(`[Worker] Ищу на YouTube Music по запросу: ${searchQuery}`);
+            const searchQuery = `${title} ${uploader}`;
+            console.log(`[Worker] Ищу на YouTube Music по запросу: "${searchQuery}"`);
             // Говорим yt-dlp: "По умолчанию ищи на YouTube Music и бери первый результат"
-            ytdlCommand.push('--default-search', 'ytmsearch1');
-            ytdlCommand.push(searchQuery);
+            args.push('--default-search', 'ytmsearch1');
+            args.push(`"${searchQuery}"`);
         } else {
             // Для SoundCloud просто передаем URL
-            ytdlCommand.push(`"${task.url}"`);
+            args.push(`"${task.url}"`);
         }
         
         // Добавляем остальные опции
-        ytdlCommand.push(
+        args.push(
             '--max-downloads', '1',
             '-o', `"${tempFilePath}"`,
             '-x', // Извлечь аудио
             '--audio-format', 'mp3',
             '--embed-thumbnail',
             '--retries', '3',
-            '--socket-timeout', YTDL_TIMEOUT,
+            '--socket-timeout', String(YTDL_TIMEOUT),
             '--user-agent', `"${FAKE_USER_AGENT}"`
         );
         
         if (PROXY_URL) {
-            ytdlCommand.push('--proxy', `"${PROXY_URL}"`);
+            args.push('--proxy', `"${PROXY_URL}"`);
         }
         
-        // Выполняем собранную команду
-        const fullCommand = ytdlCommand.join(' ');
-        console.log(`[Worker] Выполняю команду: ${fullCommand}`);
-        await execAsync(fullCommand);
+        // Выполняем команду с помощью нашей новой надежной функции
+        console.log(`[Worker] Выполняю команду: ${command} ${args.join(' ')}`);
+        await spawnAsync(command, args);
         // ==============================================================================================
         
         if (!fs.existsSync(tempFilePath)) throw new Error(`Файл не был создан`);
