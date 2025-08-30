@@ -47,7 +47,6 @@ async function safeSendMessage(userId, text, extra = {}) {
         return null;
     }
 }
-
 // ЗАМЕНИТЕ ЭТУ ФУНКЦИЮ В ВАШЕМ ФАЙЛЕ services/downloadManager.js
 async function trackDownloadProcessor(task) {
     const { userId, source, metadata } = task;
@@ -77,16 +76,13 @@ async function trackDownloadProcessor(task) {
         };
         
         if (source === 'spotify') {
-            // Если трек из Spotify, формируем специальный поисковый запрос для yt-dlp
-            // "ytsearch1:" означает "найди на YouTube и скачай ПЕРВЫЙ результат"
-            downloadUrlOrQuery = `ytsearch1:"${title} ${uploader}"`;
+            // УБИРАЕМ ЛИШНИЕ КАВЫЧКИ ВНУТРИ СТРОКИ
+            downloadUrlOrQuery = `ytsearch1:${title} ${uploader}`;
             console.log(`[Worker] Ищу на YouTube по запросу: "${downloadUrlOrQuery}"`);
         } else {
-            // Если трек из SoundCloud, используем прямую ссылку
             downloadUrlOrQuery = task.url;
         }
         
-        // Выполняем скачивание с помощью yt-dlp для обоих случаев
         await ytdl(downloadUrlOrQuery, ytdlOptions);
         // =========================================================================
         
