@@ -2,16 +2,29 @@
 # exit on error
 set -o errexit
 
-# Устанавливаем системные зависимости с правами sudo
-echo ">>> Installing system dependencies (ffmpeg)..."
-sudo apt-get update && sudo apt-get install -y ffmpeg
+# --- УСТАНОВКА ИНСТРУМЕНТОВ ---
+# Обновляем список пакетов и устанавливаем базовые утилиты
+echo ">>> Updating package lists and installing core utilities..."
+sudo apt-get update
+sudo apt-get install -y curl software-properties-common
 
-# Устанавливаем Python зависимости ИЗ ФАЙЛА requirements.txt
-echo ">>> Installing Python packages from requirements.txt..."
-pip install --upgrade pip
-pip install -r requirements.txt
+# --- УСТАНОВКА NODE.JS v18 ---
+echo ">>> Installing Node.js v18..."
+curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
+sudo apt-get install -y nodejs
 
-# Устанавливаем npm зависимости
+# --- УСТАНОВКА PYTHON v3.11 ---
+echo ">>> Installing Python v3.11..."
+sudo add-apt-repository ppa:deadsnakes/ppa -y
+sudo apt-get update
+sudo apt-get install -y python3.11 python3.11-venv python3-pip ffmpeg
+
+# --- УСТАНОВКА ЗАВИСИМОСТЕЙ ПРОЕКТА ---
+# Устанавливаем Python пакеты из requirements.txt
+echo ">>> Installing Python packages..."
+pip3 install -r requirements.txt
+
+# Устанавливаем Node.js пакеты
 echo ">>> Installing Node.js packages..."
 npm install
 
