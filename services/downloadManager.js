@@ -52,35 +52,45 @@ async function trackDownloadProcessor(task) {
     const roundedDuration = duration ? Math.round(duration) : undefined;
     
     let tempFilePath = null;
+    let tempDownloadDir = null; // Для Spotify
     let statusMessage = null;
     
     try {
         statusMessage = await safeSendMessage(userId, `⏳ Начинаю скачивание трека: "${title}"`);
         console.log(`[Worker] Начинаю скачивание "${title}" (источник: ${source})`);
-        const tempFileName = `${trackId}-${crypto.randomUUID()}.mp3`;
-        tempFilePath = path.join(cacheDir, tempFileName);
         
         if (source === 'spotify') {
-    const command = `spotdl download "${task.spotifyUrl}" --output "${tempFilePath}"`;
-    const execOptions = {
-        env: { ...process.env, SPOTIPY_CLIENT_ID, SPOTIPY_CLIENT_SECRET }
-    };
-    
-    // Если прокси задан, передаем его через переменные окружения
-    if (PROXY_URL) {
-        console.log('[Worker] Устанавливаю HTTP_PROXY и HTTPS_PROXY для spotdl.');
-        execOptions.env['HTTP_PROXY'] = PROXY_URL;
-        execOptions.env['HTTPS_PROXY'] = PROXY_URL;
-    }
-    
-    console.log(`[Worker] Выполняю команду spotdl: ${command}`);
-    await execAsync(command, execOptions);
-            await execAsync(command, {
+            tempDownloadDir = path.join(cacheDir, crypto.randomUUID());
+            await fs.promises.mkdir(tempDownloadDir, { recursive: true });
+            
+            const command = `spotdl download "${task.spotifyUrl}"`;
+            const execOptions = {
+                cwd: tempDownloadDir,
                 env: { ...process.env, SPOTIPY_CLIENT_ID, SPOTIPY_CLIENT_SECRET }
-            });
-
+            };
+            
+            if (PROXY_URL) {
+                console.log('[Worker] Устанавливаю HTTP_PROXY и HTTPS_PROXY для spotdl.');
+                execOptions.env['HTTP_PROXY'] = PROXY_URL;
+                execOptions.env['HTTPS_PROXY'] = PROXY_URL;
+            }
+            
+            console.log(`[Worker] Выполняю команду spotdl: ${command} в директории ${tempDownloadDir}`);
+            await execAsync(command, execOptions);
+            
+            const files = await fs.promises.readdir(tempDownloadDir);
+            const downloadedFile = files.find(f => f.endsWith('.mp3'));
+            
+            if (!downloadedFile) {
+                throw new Error('spotdl не создал mp3 файл во временной директории.');
+            }
+            tempFilePath = path.join(tempDownloadDir, downloadedFile);
+            console.log(`[Worker] spotdl успешно скачал файл: ${tempFilePath}`);
+            
         } else { // Для SoundCloud
-            // ИСПОЛЬЗУЕМ ВАШ РАБОЧИЙ МЕТОД С YOUTUBE-DL-EXEC
+            const tempFileName = `${trackId}-${crypto.randomUUID()}.mp3`;
+            tempFilePath = path.join(cacheDir, tempFileName);
+            
             console.log(`[Worker] Использую ytdl для SoundCloud`);
             await ytdl(task.url, {
                 output: tempFilePath,
@@ -94,7 +104,7 @@ async function trackDownloadProcessor(task) {
             });
         }
         
-        if (!fs.existsSync(tempFilePath)) throw new Error(`Файл не был создан`);
+        if (!fs.existsSync(tempFilePath)) throw new Error(`Файл не был создан: ${tempFilePath}`);
         
         if (statusMessage) await bot.telegram.editMessageText(userId, statusMessage.message_id, undefined, `✅ Скачал. Отправляю...`).catch(() => {});
         
@@ -135,11 +145,7 @@ async function trackDownloadProcessor(task) {
                     console.error(`❌ [Cache] Ошибка при кэшировании трека "${title}":`, e.message);
                 }
             }
-        })().finally(() => {
-            if (fs.existsSync(tempFilePath)) {
-                fs.promises.unlink(tempFilePath).catch(err => console.error("Ошибка удаления временного файла:", err));
-            }
-        });
+        })();
         
     } catch (err) {
         let userErrorMessage = `❌ Не удалось обработать трек: "${title}"`;
@@ -153,13 +159,16 @@ async function trackDownloadProcessor(task) {
         } else {
             await safeSendMessage(userId, userErrorMessage);
         }
-        
-        if (tempFilePath && fs.existsSync(tempFilePath)) {
-            await fs.promises.unlink(tempFilePath).catch(() => {});
+    } finally {
+        if (tempFilePath && fs.existsSync(tempFilePath) && !tempDownloadDir) {
+            fs.promises.unlink(tempFilePath).catch(err => console.error("Ошибка удаления временного файла SoundCloud:", err));
+        }
+        if (tempDownloadDir && fs.existsSync(tempDownloadDir)) {
+            console.log(`[Worker] Удаляю временную директорию: ${tempDownloadDir}`);
+            fs.promises.rm(tempDownloadDir, { recursive: true, force: true }).catch(err => console.error("Ошибка удаления временной директории Spotify:", err));
         }
     }
 }
-
 export const downloadQueue = new TaskQueue({
     maxConcurrent: 1,
     taskProcessor: trackDownloadProcessor
