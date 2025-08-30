@@ -63,7 +63,7 @@ async function trackDownloadProcessor(task) {
         const tempFileName = `${trackId}-${crypto.randomUUID()}.mp3`;
         tempFilePath = path.join(cacheDir, tempFileName);
         
-        // ======================= ГЛАВНОЕ ИЗМЕНЕНИЕ =======================
+        // ======================= ФИНАЛЬНОЕ ИСПРАВЛЕНИЕ ЗДЕСЬ =======================
         let downloadUrlOrQuery;
         const ytdlOptions = {
             output: tempFilePath,
@@ -77,9 +77,9 @@ async function trackDownloadProcessor(task) {
         };
         
         if (source === 'spotify') {
-            // Если трек из Spotify, формируем поисковый запрос для yt-dlp
-            downloadUrlOrQuery = `${title} ${uploader}`;
-            ytdlOptions.defaultSearch = 'ytsearch'; // Указываем yt-dlp искать на YouTube
+            // Если трек из Spotify, формируем специальный поисковый запрос для yt-dlp
+            // "ytsearch1:" означает "найди на YouTube и скачай ПЕРВЫЙ результат"
+            downloadUrlOrQuery = `ytsearch1:"${title} ${uploader}"`;
             console.log(`[Worker] Ищу на YouTube по запросу: "${downloadUrlOrQuery}"`);
         } else {
             // Если трек из SoundCloud, используем прямую ссылку
@@ -88,7 +88,7 @@ async function trackDownloadProcessor(task) {
         
         // Выполняем скачивание с помощью yt-dlp для обоих случаев
         await ytdl(downloadUrlOrQuery, ytdlOptions);
-        // =================================================================
+        // =========================================================================
         
         if (!fs.existsSync(tempFilePath)) throw new Error(`Файл не был создан`);
         
