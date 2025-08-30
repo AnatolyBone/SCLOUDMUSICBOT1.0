@@ -1,16 +1,12 @@
-// services/downloadManager.js (ФИНАЛЬНАЯ, ПОЛНАЯ, ИСПРАВЛЕННАЯ ВЕРСИЯ)
+// services/downloadManager.js (ФИНАЛЬНАЯ, ПОЛНАЯ ВЕРСИЯ БЕЗ ПОСРЕДНИКОВ)
 
 import { STORAGE_CHANNEL_ID, CHANNEL_USERNAME, PROXY_URL, ADMIN_ID } from '../config.js';
 import { Markup } from 'telegraf';
 import path from 'path';
 import fs from 'fs';
-import ytdl from 'youtube-dl-exec';
 import { fileURLToPath } from 'url';
 import crypto from 'crypto';
-import pLimit from 'p-limit';
-// ==> ИЗМЕНЕНИЕ 1: Импортируем 'spawn' и 'exec'
-import { exec, spawn } from 'child_process';
-import { promisify } from 'util';
+import { spawn } from 'child_process';
 import { bot } from '../bot.js';
 import { T } from '../config/texts.js';
 import { TaskQueue } from '../lib/TaskQueue.js';
@@ -19,7 +15,6 @@ import {
     findCachedTrack, cacheTrack, incrementDownloadsAndSaveTrack
 } from '../db.js';
 
-const execAsync = promisify(exec);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(path.dirname(__filename));
 const cacheDir = path.join(__dirname, 'cache');
@@ -28,8 +23,6 @@ const YTDL_TIMEOUT = 120;
 const TRACK_TITLE_LIMIT = 100;
 const UNLIMITED_PLAYLIST_LIMIT = 100;
 const FAKE_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36';
-
-const ytdlLimit = pLimit(1);
 
 function sanitizeFilename(name) {
     return (name || 'track').replace(/[<>:"/\\|?*]+/g, '').trim();
@@ -50,10 +43,9 @@ async function safeSendMessage(userId, text, extra = {}) {
     }
 }
 
-// ==> ИЗМЕНЕНИЕ 2: НАСТОЯЩАЯ, ПРАВИЛЬНАЯ функция spawnAsync БЕЗ { shell: true }
+// НАДЕЖНАЯ ФУНКЦИЯ ДЛЯ ВЫЗОВА ВНЕШНИХ ПРОГРАММ
 function spawnAsync(command, args) {
     return new Promise((resolve, reject) => {
-        // Вызываем spawn в безопасном режиме. Аргументы передаются как чистый массив.
         const process = spawn(command, args);
         let stdout = '';
         let stderr = '';
@@ -75,7 +67,7 @@ function spawnAsync(command, args) {
     });
 }
 
-// ==> ИЗМЕНЕНИЕ 3: Исправляем функцию, чтобы она использовала новый, правильный spawn
+// ФУНКЦИЯ-ВОРКЕР, ИСПОЛЬЗУЮЩАЯ SPAWN ДЛЯ СКАЧИВАНИЯ
 async function trackDownloadProcessor(task) {
     const { userId, source, metadata } = task;
     const { title, uploader, id: trackId, duration, thumbnail } = metadata;
@@ -101,8 +93,6 @@ async function trackDownloadProcessor(task) {
             args.push(task.url);
         }
 
-        // Аргументы передаются как чистые строки, без лишних кавычек.
-        // spawn сам их обработает правильно.
         args.push(
             '--max-downloads', '1',
             '-o', tempFilePath,
@@ -193,6 +183,7 @@ export const downloadQueue = new TaskQueue({
     taskProcessor: trackDownloadProcessor
 });
 
+// ФУНКЦИЯ ENQUEUE, ТЕПЕРЬ ТОЖЕ ИСПОЛЬЗУЮЩАЯ SPAWN ДЛЯ ПОЛУЧЕНИЯ МЕТАДАННЫХ
 export async function enqueue(ctx, userId, url) {
     let statusMessage = null;
     try {
@@ -216,13 +207,21 @@ export async function enqueue(ctx, userId, url) {
         }
 
         statusMessage = await safeSendMessage(userId, '🔍 Получаю информацию о треке...');
-        // Здесь мы можем оставить ytdl, так как он используется только для получения метаданных, что менее критично.
-        const info = await ytdlLimit(() => ytdl(url, {
-            dumpSingleJson: true,
-            retries: 2, "socket-timeout": YTDL_TIMEOUT,
-            'user-agent': FAKE_USER_AGENT, proxy: PROXY_URL || undefined
-        }));
+
+        // Используем spawnAsync для получения метаданных
+        const infoArgs = [
+            url,
+            '--dump-single-json',
+            '--retries', '2',
+            '--socket-timeout', String(YTDL_TIMEOUT),
+            '--user-agent', FAKE_USER_AGENT,
+        ];
+        if (PROXY_URL) {
+            infoArgs.push('--proxy', PROXY_URL);
+        }
+        const { stdout } = await spawnAsync('yt-dlp', infoArgs);
         
+        const info = JSON.parse(stdout);
         if (!info) throw new Error('Не удалось получить метаданные');
 
         const isPlaylist = Array.isArray(info.entries);
