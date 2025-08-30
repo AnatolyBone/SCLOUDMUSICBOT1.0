@@ -61,14 +61,20 @@ async function trackDownloadProcessor(task) {
         tempFilePath = path.join(cacheDir, tempFileName);
         
         if (source === 'spotify') {
-            // ИСПОЛЬЗУЕМ НОВЫЙ СИНТАКСИС ДЛЯ SPOTDL v4+
-            // spotdl download [URL] --output [ПУТЬ]
-            // Стало:
-let command = `spotdl download "${task.spotifyUrl}" --output "${tempFilePath}"`;
-if (PROXY_URL) {
-    command += ` --proxy "${PROXY_URL}"`;
-}
-            console.log(`[Worker] Выполняю команду spotdl: ${command}`);
+    const command = `spotdl download "${task.spotifyUrl}" --output "${tempFilePath}"`;
+    const execOptions = {
+        env: { ...process.env, SPOTIPY_CLIENT_ID, SPOTIPY_CLIENT_SECRET }
+    };
+    
+    // Если прокси задан, передаем его через переменные окружения
+    if (PROXY_URL) {
+        console.log('[Worker] Устанавливаю HTTP_PROXY и HTTPS_PROXY для spotdl.');
+        execOptions.env['HTTP_PROXY'] = PROXY_URL;
+        execOptions.env['HTTPS_PROXY'] = PROXY_URL;
+    }
+    
+    console.log(`[Worker] Выполняю команду spotdl: ${command}`);
+    await execAsync(command, execOptions);
             await execAsync(command, {
                 env: { ...process.env, SPOTIPY_CLIENT_ID, SPOTIPY_CLIENT_SECRET }
             });
