@@ -62,33 +62,38 @@ async function trackDownloadProcessor(task) {
         const tempFileName = `${trackId}-${crypto.randomUUID()}.mp3`;
         tempFilePath = path.join(cacheDir, tempFileName);
         
-        // ======================= САМЫЙ ПРОСТОЙ И НАДЕЖНЫЙ СПОСОБ =======================
-        let downloadUrlOrQuery;
-        const ytdlOptions = {
-            output: tempFilePath,
-            extractAudio: true,
-            audioFormat: 'mp3',
-            embedThumbnail: true,
-            retries: 3,
-            "socket-timeout": YTDL_TIMEOUT,
-            'user-agent': FAKE_USER_AGENT,
-            proxy: PROXY_URL || undefined,
-        };
-        
+        // ======================= ПРЯМОЙ ВЫЗОВ YT-DLP ДЛЯ МАКСИМАЛЬНОЙ НАДЕЖНОСТИ =======================
+        let commandQuery;
         if (source === 'spotify') {
-            // Если трек из Spotify, мы не передаем URL, а просто текст для поиска
-            downloadUrlOrQuery = `${title} ${uploader}`;
-            // И добавляем специальную опцию, которая говорит "ищи на YouTube Music и бери первый результат"
-            ytdlOptions.defaultSearch = 'ytmsearch1';
-            console.log(`[Worker] Ищу на YouTube Music по запросу: "${downloadUrlOrQuery}"`);
+            // Формируем поисковый запрос для YouTube Music
+            commandQuery = `ytmsearch1:"${title} ${uploader}"`;
+            console.log(`[Worker] Ищу на YouTube Music по запросу: ${commandQuery}`);
         } else {
-            // Для SoundCloud все по-старому - передаем прямую ссылку
-            downloadUrlOrQuery = task.url;
+            // Для SoundCloud используем прямую ссылку
+            commandQuery = `"${task.url}"`;
         }
         
-        // Выполняем скачивание с помощью библиотеки ytdl, которая сама правильно сформирует команду
-        await ytdl(downloadUrlOrQuery, ytdlOptions);
-        // ===================================================================================
+        // Собираем команду как массив для безопасности и читаемости
+        const ytdlCommand = [
+            'yt-dlp',
+            commandQuery,
+            '--max-downloads', '1',
+            '-o', `"${tempFilePath}"`,
+            '-x', // Извлечь аудио
+            '--audio-format', 'mp3',
+            '--embed-thumbnail',
+            '--retries', '3',
+            '--socket-timeout', YTDL_TIMEOUT,
+            '--user-agent', `"${FAKE_USER_AGENT}"`
+        ];
+        
+        if (PROXY_URL) {
+            ytdlCommand.push('--proxy', `"${PROXY_URL}"`);
+        }
+        
+        // Выполняем команду напрямую, как мы это делаем со spotdl
+        await execAsync(ytdlCommand.join(' '));
+        // ==============================================================================================
         
         if (!fs.existsSync(tempFilePath)) throw new Error(`Файл не был создан`);
         
