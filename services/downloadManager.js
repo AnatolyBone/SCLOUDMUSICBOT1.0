@@ -62,35 +62,41 @@ async function trackDownloadProcessor(task) {
         const tempFileName = `${trackId}-${crypto.randomUUID()}.mp3`;
         tempFilePath = path.join(cacheDir, tempFileName);
         
-        // ======================= ФИНАЛЬНОЕ ИСПРАВЛЕНИЕ ЗДЕСЬ =======================
+        // ======================= ФИНАЛЬНЫЙ, НАДЕЖНЫЙ МЕТОД СКАЧИВАНИЯ =======================
         let downloadUrlOrQuery;
-        const ytdlOptions = {
-            output: tempFilePath,
-            extractAudio: true,
-            audioFormat: 'mp3',
-            embedThumbnail: true,
-            retries: 3,
-            "socket-timeout": YTDL_TIMEOUT,
-            'user-agent': FAKE_USER_AGENT,
-            proxy: PROXY_URL || undefined,
-        };
-        
         if (source === 'spotify') {
-            // УБИРАЕМ ЛИШНИЕ КАВЫЧКИ ВНУТРИ СТРОКИ
-            downloadUrlOrQuery = `ytsearch1:${title} ${uploader}`;
+            downloadUrlOrQuery = `ytsearch1:"${title} ${uploader}"`;
             console.log(`[Worker] Ищу на YouTube по запросу: "${downloadUrlOrQuery}"`);
         } else {
             downloadUrlOrQuery = task.url;
         }
         
-        await ytdl(downloadUrlOrQuery, ytdlOptions);
-        // =========================================================================
+        // Формируем прямую команду для yt-dlp
+        const ytdlCommand = [
+            'yt-dlp',
+            `"${downloadUrlOrQuery}"`, // Запрос или URL в кавычках
+            '-o', `"${tempFilePath}"`, // Путь вывода в кавычках
+            '-x', // Извлечь аудио
+            '--audio-format', 'mp3',
+            '--embed-thumbnail',
+            '--retries', '3',
+            '--socket-timeout', YTDL_TIMEOUT,
+            '--user-agent', `"${FAKE_USER_AGENT}"`
+        ];
+        
+        if (PROXY_URL) {
+            ytdlCommand.push('--proxy', `"${PROXY_URL}"`);
+        }
+        
+        // Выполняем команду напрямую через execAsync для максимальной надежности
+        await execAsync(ytdlCommand.join(' '));
+        // ===================================================================================
         
         if (!fs.existsSync(tempFilePath)) throw new Error(`Файл не был создан`);
         
         if (statusMessage) await bot.telegram.editMessageText(userId, statusMessage.message_id, undefined, `✅ Скачал. Отправляю...`).catch(() => {});
         
-        const sentToUserMessage = await bot.telegram.sendAudio(userId, { source: fs.createReadStream(tempFilePath) }, {
+        const sentToUserMessage = await bot.telegram.sendAudio(userId, { source: fs.createReadReadStream(tempFilePath) }, {
             title: title,
             performer: uploader || 'Unknown Artist',
             duration: roundedDuration
