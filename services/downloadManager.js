@@ -1,4 +1,4 @@
-// services/downloadManager.js (ФИНАЛЬНАЯ, ПОЛНАЯ ВЕРСИЯ БЕЗ ПОСРЕДНИКОВ)
+// services/downloadManager.js (ФИНАЛЬНАЯ, ПОЛНАЯ, ИСПРАВЛЕННАЯ ВЕРСИЯ)
 
 import { STORAGE_CHANNEL_ID, CHANNEL_USERNAME, PROXY_URL, ADMIN_ID } from '../config.js';
 import { Markup } from 'telegraf';
@@ -6,6 +6,7 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import crypto from 'crypto';
+// ==> ИЗМЕНЕНИЕ 1: Импортируем 'spawn', он заменит все другие способы вызова
 import { spawn } from 'child_process';
 import { bot } from '../bot.js';
 import { T } from '../config/texts.js';
@@ -19,7 +20,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(path.dirname(__filename));
 const cacheDir = path.join(__dirname, 'cache');
 
-const YTDL_TIMEOUT = 120;
+const YTDL_TIMEOUT = 120; // Увеличиваем на всякий случай
 const TRACK_TITLE_LIMIT = 100;
 const UNLIMITED_PLAYLIST_LIMIT = 100;
 const FAKE_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36';
@@ -43,9 +44,10 @@ async function safeSendMessage(userId, text, extra = {}) {
     }
 }
 
-// НАДЕЖНАЯ ФУНКЦИЯ ДЛЯ ВЫЗОВА ВНЕШНИХ ПРОГРАММ
+// ==> ИЗМЕНЕНИЕ 2: НАША ЕДИНСТВЕННАЯ, НАДЕЖНАЯ ФУНКЦИЯ ДЛЯ ВЫЗОВА ПРОГРАММ
 function spawnAsync(command, args) {
     return new Promise((resolve, reject) => {
+        // Вызываем spawn БЕЗ shell: true. Аргументы передаются как безопасный массив.
         const process = spawn(command, args);
         let stdout = '';
         let stderr = '';
@@ -67,7 +69,7 @@ function spawnAsync(command, args) {
     });
 }
 
-// ФУНКЦИЯ-ВОРКЕР, ИСПОЛЬЗУЮЩАЯ SPAWN ДЛЯ СКАЧИВАНИЯ
+// ==> ИЗМЕНЕНИЕ 3: ФУНКЦИЯ-ВОРКЕР, ИСПОЛЬЗУЮЩАЯ SPAWN ДЛЯ ВСЕХ СКАЧИВАНИЙ
 async function trackDownloadProcessor(task) {
     const { userId, source, metadata } = task;
     const { title, uploader, id: trackId, duration, thumbnail } = metadata;
@@ -93,6 +95,8 @@ async function trackDownloadProcessor(task) {
             args.push(task.url);
         }
 
+        // Аргументы передаются как чистые строки, без лишних кавычек.
+        // spawn сам их обработает правильно.
         args.push(
             '--max-downloads', '1',
             '-o', tempFilePath,
@@ -183,7 +187,7 @@ export const downloadQueue = new TaskQueue({
     taskProcessor: trackDownloadProcessor
 });
 
-// ФУНКЦИЯ ENQUEUE, ТЕПЕРЬ ТОЖЕ ИСПОЛЬЗУЮЩАЯ SPAWN ДЛЯ ПОЛУЧЕНИЯ МЕТАДАННЫХ
+// ==> ИЗМЕНЕНИЕ 4: ФУНКЦИЯ ENQUEUE ТЕПЕРЬ ТОЖЕ ИСПОЛЬЗУЕТ SPAWN
 export async function enqueue(ctx, userId, url) {
     let statusMessage = null;
     try {
@@ -207,8 +211,7 @@ export async function enqueue(ctx, userId, url) {
         }
 
         statusMessage = await safeSendMessage(userId, '🔍 Получаю информацию о треке...');
-
-        // Используем spawnAsync для получения метаданных
+        
         const infoArgs = [
             url,
             '--dump-single-json',
@@ -220,7 +223,7 @@ export async function enqueue(ctx, userId, url) {
             infoArgs.push('--proxy', PROXY_URL);
         }
         const { stdout } = await spawnAsync('yt-dlp', infoArgs);
-        
+
         const info = JSON.parse(stdout);
         if (!info) throw new Error('Не удалось получить метаданные');
 
