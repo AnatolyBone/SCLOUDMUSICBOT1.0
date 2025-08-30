@@ -4,8 +4,7 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import fs from 'fs/promises';
 import path from 'path';
-// ==> ИЗМЕНЕНИЕ 1: Добавляем импорт для работы с путями в ES Modules
-import { fileURLToPath } from 'url';
+// Убираем импорт 'fileURLToPath', он больше не нужен
 import { SPOTIPY_CLIENT_ID, SPOTIPY_CLIENT_SECRET } from '../config.js';
 import { downloadQueue } from './downloadManager.js';
 import { logEvent } from '../db.js';
@@ -27,12 +26,7 @@ async function ensureDirectoryExists(dirPath) {
 }
 
 export async function spotifyEnqueue(ctx, userId, url) {
-    // ==> ИЗМЕНЕНИЕ 2: Вычисляем абсолютный путь к файлу конфигурации
-    // Это гарантирует, что spotdl найдет config.toml, где бы ни был запущен скрипт.
-    const __filename = fileURLToPath(import.meta.url);
-    const __dirname = path.dirname(__filename);
-    // Путь к config.toml, который лежит в корне проекта (на уровень выше папки 'services')
-    const configPath = path.resolve(__dirname, '..', 'config.toml');
+    // Убрали вычисление абсолютного пути, оно больше не требуется
 
     try {
         await ctx.reply('🔍 Анализирую ссылку Spotify...');
@@ -43,9 +37,9 @@ export async function spotifyEnqueue(ctx, userId, url) {
         const tempFileName = `spotify_${userId}_${Date.now()}.spotdl`;
         const tempFilePath = path.join(uploadDir, tempFileName);
 
-        // ==> ИЗМЕНЕНИЕ 3: Используем вычисленный абсолютный путь в команде
-        // Кавычки вокруг "${configPath}" важны для надежности
-        const command = `spotdl --config "${configPath}" save "${url}" --save-file "${tempFilePath}"`;
+        // ==> ГЛАВНОЕ ИЗМЕНЕНИЕ: Убираем флаг --config.
+        // spotdl сам найдет config.toml в корневой папке.
+        const command = `spotdl save "${url}" --save-file "${tempFilePath}"`;
         
         console.log(`[Spotify Manager] Выполняю команду для ${userId}: ${command}`);
 
