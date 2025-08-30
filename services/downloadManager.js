@@ -62,10 +62,11 @@ async function trackDownloadProcessor(task) {
         const tempFileName = `${trackId}-${crypto.randomUUID()}.mp3`;
         tempFilePath = path.join(cacheDir, tempFileName);
         
-        // ======================= ФИНАЛЬНЫЙ, НАДЕЖНЫЙ МЕТОД СКАЧИВАНИЯ =======================
+        // ======================= ФИНАЛЬНОЕ ИСПРАВЛЕНИЕ ЗДЕСЬ =======================
         let downloadUrlOrQuery;
         if (source === 'spotify') {
-            downloadUrlOrQuery = `ytsearch1:"${title} ${uploader}"`;
+            // Используем обычный поиск, а не ytsearch1
+            downloadUrlOrQuery = `ytsearch:"${title} ${uploader}"`;
             console.log(`[Worker] Ищу на YouTube по запросу: "${downloadUrlOrQuery}"`);
         } else {
             downloadUrlOrQuery = task.url;
@@ -75,6 +76,7 @@ async function trackDownloadProcessor(task) {
         const ytdlCommand = [
             'yt-dlp',
             `"${downloadUrlOrQuery}"`, // Запрос или URL в кавычках
+            '--max-downloads', '1', // <--- ВОТ ОНО! Скачать только 1 файл.
             '-o', `"${tempFilePath}"`, // Путь вывода в кавычках
             '-x', // Извлечь аудио
             '--audio-format', 'mp3',
@@ -88,7 +90,6 @@ async function trackDownloadProcessor(task) {
             ytdlCommand.push('--proxy', `"${PROXY_URL}"`);
         }
         
-        // Выполняем команду напрямую через execAsync для максимальной надежности
         await execAsync(ytdlCommand.join(' '));
         // ===================================================================================
         
@@ -96,7 +97,7 @@ async function trackDownloadProcessor(task) {
         
         if (statusMessage) await bot.telegram.editMessageText(userId, statusMessage.message_id, undefined, `✅ Скачал. Отправляю...`).catch(() => {});
         
-        const sentToUserMessage = await bot.telegram.sendAudio(userId, { source: fs.createReadReadStream(tempFilePath) }, {
+        const sentToUserMessage = await bot.telegram.sendAudio(userId, { source: fs.createReadStream(tempFilePath) }, {
             title: title,
             performer: uploader || 'Unknown Artist',
             duration: roundedDuration
