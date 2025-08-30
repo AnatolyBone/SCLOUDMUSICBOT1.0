@@ -1,12 +1,15 @@
-// services/downloadManager.js (ФИНАЛЬНАЯ ВЕРСИЯ С РАСШИРЕННЫМ ЛОГГИРОВАНИЕМ)
+// services/downloadManager.js (ФИНАЛЬНАЯ ВЕРСИЯ 2.0 С ОКРУГЛЕНИЕМ)
 
-import { STORAGE_CHANNEL_ID, CHANNEL_USERNAME, PROXY_URL, ADMIN_ID } from '../config.js';
+import { STORAGE_CHANNEL_ID, CHANNEL_USERNAME, SPOTIPY_CLIENT_ID, SPOTIPY_CLIENT_SECRET, PROXY_URL, ADMIN_ID } from '../config.js';
 import { Markup } from 'telegraf';
 import path from 'path';
 import fs from 'fs';
+import ytdl from 'youtube-dl-exec';
 import { fileURLToPath } from 'url';
 import crypto from 'crypto';
-import { spawn } from 'child_process';
+import pLimit from 'p-limit';
+import { exec } from 'child_process';
+import { promisify } from 'util';
 import { bot } from '../bot.js';
 import { T } from '../config/texts.js';
 import { TaskQueue } from '../lib/TaskQueue.js';
@@ -14,15 +17,17 @@ import {
     getUser, resetDailyLimitIfNeeded, logEvent, updateUserField,
     findCachedTrack, cacheTrack, incrementDownloadsAndSaveTrack
 } from '../db.js';
-
+const execAsync = promisify(exec);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(path.dirname(__filename));
 const cacheDir = path.join(__dirname, 'cache');
 
-const YTDL_TIMEOUT = 180;
+const YTDL_TIMEOUT = 60;
 const TRACK_TITLE_LIMIT = 100;
 const UNLIMITED_PLAYLIST_LIMIT = 100;
 const FAKE_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36';
+
+const ytdlLimit = pLimit(1);
 
 function sanitizeFilename(name) {
     return (name || 'track').replace(/[<>:"/\\|?*]+/g, '').trim();
@@ -43,39 +48,12 @@ async function safeSendMessage(userId, text, extra = {}) {
     }
 }
 
-function spawnAsync(command, args) {
-    return new Promise((resolve, reject) => {
-        const process = spawn(command, args, { timeout: YTDL_TIMEOUT * 1000 });
-        let stdout = '';
-        let stderr = '';
+// services/downloadManager.js -> ЗАМЕНИТЬ ФУНКЦИЮ trackDownloadProcessor
 
-        process.stdout.on('data', (data) => stdout += data.toString());
-        process.stderr.on('data', (data) => stderr += data.toString());
 
-        process.on('close', (code) => {
-            if (code === 0) {
-                resolve({ stdout, stderr });
-            } else {
-                const error = new Error(`Command failed with exit code ${code}`);
-                error.stdout = stdout;
-                error.stderr = stderr;
-                reject(error);
-            }
-        });
-
-        process.on('error', (err) => {
-            if (err.code === 'ETIMEDOUT') {
-                const timeoutError = new Error('Process timed out');
-                timeoutError.name = 'TimeoutError';
-                reject(timeoutError);
-            } else {
-                reject(err);
-            }
-        });
-    });
-}
 
 async function trackDownloadProcessor(task) {
+    // В задаче теперь есть поле 'source', которое говорит нам, откуда она пришла
     const { userId, source, metadata } = task;
     const { title, uploader, id: trackId, duration, thumbnail } = metadata;
     const roundedDuration = duration ? Math.round(duration) : undefined;
@@ -85,57 +63,52 @@ async function trackDownloadProcessor(task) {
     
     try {
         statusMessage = await safeSendMessage(userId, `⏳ Начинаю скачивание трека: "${title}"`);
-        console.log(`[Worker] Начинаю скачивание "${title}" (источник: ${source})`);
-        
+        console.log(`[Worker] Начинаю скачивание "${title}" (источник: ${source || 'soundcloud'})`);
         const tempFileName = `${trackId}-${crypto.randomUUID()}.mp3`;
         tempFilePath = path.join(cacheDir, tempFileName);
         
-        const command = 'yt-dlp';
-        const args = [];
-        
+        // ======================= ГЛАВНОЕ ИЗМЕНЕНИЕ ЗДЕСЬ =======================
         if (source === 'spotify') {
-            const searchQuery = `${title} ${uploader}`;
-            console.log(`[Worker] Spotify трек. Ищу на YouTube Music по запросу: "${searchQuery}"`);
-            args.push('--default-search', 'ytmsearch1', searchQuery);
+            // Если трек из Spotify, используем spotdl
+            // --output использует фигурные скобки, поэтому заключаем путь в одинарные кавычки
+           // Команда для spotdl v4: spotdl [URL трека] [путь к файлу]
+const command = `spotdl "${task.spotifyUrl}" "${tempFilePath}"`;
+            console.log(`[Worker] Выполняю команду spotdl: ${command}`);
+            await execAsync(command, {
+                env: {
+                    ...process.env,
+                    SPOTIPY_CLIENT_ID,
+                    SPOTIPY_CLIENT_SECRET
+                }
+            });
         } else {
-            args.push(task.url);
+            // Если трек из SoundCloud (или источник не указан), используем старую логику с yt-dlp
+            await ytdl(task.url, {
+                output: tempFilePath,
+                extractAudio: true,
+                audioFormat: 'mp3',
+                embedThumbnail: true,
+                retries: 3,
+                "socket-timeout": YTDL_TIMEOUT,
+                'user-agent': FAKE_USER_AGENT,
+                proxy: PROXY_URL || undefined,
+            });
         }
-
-        args.push(
-            '--verbose', // <== ВОТ ЭТО ИЗМЕНЕНИЕ ДЛЯ ДЕТАЛЬНОЙ ДИАГНОСТИКИ
-            '--max-downloads', '1',
-            '-o', tempFilePath,
-            '-x',
-            '--audio-format', 'mp3',
-            '--embed-thumbnail',
-            '--retries', '3',
-            '--socket-timeout', '30',
-            '--user-agent', FAKE_USER_AGENT
-        );
-
-        if (PROXY_URL) {
-            console.log(`[Worker] Использую прокси: ${PROXY_URL}`);
-            args.push('--proxy', PROXY_URL);
-        } else {
-            console.log(`[Worker] Работаю без прокси.`);
-        }
+        // =========================================================================
         
-        console.log(`[Worker] Выполняю команду: ${command} ${args.map(a => a.includes(' ') ? `"${a}"` : a).join(' ')}`);
-        
-        await spawnAsync(command, args);
-        
-        if (!fs.existsSync(tempFilePath)) throw new Error(`Файл не был создан после выполнения yt-dlp`);
+        if (!fs.existsSync(tempFilePath)) throw new Error(`Файл не был создан`);
         
         if (statusMessage) await bot.telegram.editMessageText(userId, statusMessage.message_id, undefined, `✅ Скачал. Отправляю...`).catch(() => {});
         
         const sentToUserMessage = await bot.telegram.sendAudio(userId, { source: fs.createReadStream(tempFilePath) }, {
             title: title,
-            performer: uploader || 'Unknown Artist',
+            performer: uploader || 'Unknown Artist', // Обобщаем, т.к. может быть не только SoundCloud
             duration: roundedDuration
         });
         
         if (statusMessage) await bot.telegram.deleteMessage(userId, statusMessage.message_id).catch(() => {});
         
+        // Универсальная ссылка для кэша - ссылка на Spotify, если есть, иначе SoundCloud
         const cacheUrl = task.spotifyUrl || task.url;
         
         if (sentToUserMessage?.audio?.file_id) {
@@ -153,7 +126,7 @@ async function trackDownloadProcessor(task) {
                     
                     if (sentToStorageMessage?.audio?.file_id) {
                         await cacheTrack({
-                            url: cacheUrl,
+                            url: cacheUrl, // Кэшируем по ссылке Spotify или SoundCloud
                             fileId: sentToStorageMessage.audio.file_id,
                             title: title,
                             artist: uploader,
@@ -174,14 +147,11 @@ async function trackDownloadProcessor(task) {
         
     } catch (err) {
         let userErrorMessage = `❌ Не удалось обработать трек: "${title}"`;
-        const errorDetails = err.stderr || err.message || ''; // stderr будет содержать детальный лог
+        const errorDetails = err.stderr || err.message || '';
         if (err.name === 'TimeoutError' || errorDetails.includes('timed out')) {
             userErrorMessage += '. Причина: таймаут.';
-        } else if (errorDetails.includes('exit code 101')) {
-            userErrorMessage += '. Причина: сетевая ошибка при скачивании.';
         }
-        // Выводим в консоль полный детальный лог ошибки
-        console.error(`❌ Ошибка воркера при обработке "${title}":\n---STDERR---\n${errorDetails}\n------------`);
+        console.error(`❌ Ошибка воркера при обработке "${title}":`, errorDetails);
         if (statusMessage) {
             await bot.telegram.editMessageText(userId, statusMessage.message_id, undefined, userErrorMessage).catch(() => {});
         } else {
@@ -193,7 +163,6 @@ async function trackDownloadProcessor(task) {
         }
     }
 }
-
 export const downloadQueue = new TaskQueue({
     maxConcurrent: 1,
     taskProcessor: trackDownloadProcessor
@@ -222,37 +191,24 @@ export async function enqueue(ctx, userId, url) {
         }
 
         statusMessage = await safeSendMessage(userId, '🔍 Получаю информацию о треке...');
+        const info = await ytdlLimit(() => ytdl(url, {
+            dumpSingleJson: true,
+            retries: 2, "socket-timeout": YTDL_TIMEOUT,
+            'user-agent': FAKE_USER_AGENT, proxy: PROXY_URL || undefined
+        }));
         
-        const infoArgs = [
-            url,
-            '--dump-single-json',
-            '--retries', '2',
-            '--socket-timeout', '20',
-            '--user-agent', FAKE_USER_AGENT,
-        ];
-        
-        if (PROXY_URL) {
-            infoArgs.push('--proxy', PROXY_URL);
-        }
-        
-        const { stdout } = await spawnAsync('yt-dlp', infoArgs);
-        const info = JSON.parse(stdout);
         if (!info) throw new Error('Не удалось получить метаданные');
-        
-        const source = url.includes('spotify.com') ? 'spotify' : 'soundcloud';
+
         const isPlaylist = Array.isArray(info.entries);
         const entries = isPlaylist ? info.entries : [info];
-
         let tracksToProcess = entries
-            .filter(e => e && (e.webpage_url || e.url))
+            .filter(e => e && e.webpage_url)
             .map(e => ({
-                url: e.webpage_url || e.url, 
-                source: source,
-                spotifyUrl: source === 'spotify' ? (e.webpage_url || e.url) : null,
+                url: e.webpage_url,
                 metadata: {
                     id: e.id,
                     title: sanitizeFilename(e.title || 'Unknown Title').slice(0, TRACK_TITLE_LIMIT),
-                    uploader: e.uploader || e.artist || 'Unknown Artist',
+                    uploader: e.uploader,
                     duration: e.duration,
                     thumbnail: e.thumbnail,
                 }
@@ -262,6 +218,7 @@ export async function enqueue(ctx, userId, url) {
             return await safeSendMessage(userId, 'Не удалось найти треки для загрузки.');
         }
 
+        // Логика плейлистов
         if (isPlaylist) {
             let playlistLimit = Infinity;
             let originalCount = tracksToProcess.length;
@@ -274,40 +231,44 @@ export async function enqueue(ctx, userId, url) {
             if (limitToProcess < originalCount) {
                  await safeSendMessage(userId, `ℹ️ В плейлисте ${originalCount} треков. С учетом вашего тарифа и дневного лимита будет загружено: ${limitToProcess}.`);
             }
-            tracksToProcess.length = limitToProcess;
+            tracksToProcess.length = limitToProcess; // Обрезаем массив
         }
         
         if (statusMessage) {
             await bot.telegram.editMessageText(userId, statusMessage.message_id, undefined, '🔄 Проверяю кэш...').catch(() => {});
         }
 
+        const tasksFromCache = [];
         const tasksToDownload = [];
-        let sentFromCacheCount = 0;
-
         for (const track of tracksToProcess) {
-            const cacheKey = track.spotifyUrl || track.url;
-            const cached = await findCachedTrack(cacheKey);
-
+            const cached = await findCachedTrack(track.url);
             if (cached) {
+                tasksFromCache.push({ ...track, ...cached });
+            } else {
+                tasksToDownload.push(track);
+            }
+        }
+        
+        let sentFromCacheCount = 0;
+        if (tasksFromCache.length > 0) {
+            for (const track of tasksFromCache) {
                 user = await getUser(userId);
                 if (user.downloads_today >= user.premium_limit) break;
                 try {
-                    await bot.telegram.sendAudio(userId, cached.fileId, { title: track.metadata.title, performer: track.metadata.uploader });
-                    await incrementDownloadsAndSaveTrack(userId, track.metadata.title, cached.fileId, cacheKey);
+                    await bot.telegram.sendAudio(userId, track.fileId, { title: track.metadata.title, performer: track.metadata.uploader });
+                    await incrementDownloadsAndSaveTrack(userId, track.metadata.title, track.fileId, track.url);
                     sentFromCacheCount++;
                 } catch (err) {
                     if (err.response?.error_code === 403) { await updateUserField(userId, 'active', false); return; }
                     else if (err.description?.includes('FILE_REFERENCE_EXPIRED')) tasksToDownload.push(track);
                     else console.error(`⚠️ Ошибка отправки из кэша для ${userId}: ${err.message}`);
                 }
-            } else {
-                tasksToDownload.push(track);
             }
         }
         
        let finalMessage = '';
         if (sentFromCacheCount > 0) {
-            finalMessage += `✅ ${sentFromCacheCount} трек(ов) отправлено из кэша.\n`;
+            finalMessage += `✅ ${sentFromCacheCount} трек(ов) отправлено .\n`;
         }
         
         if (tasksToDownload.length > 0) {
@@ -321,7 +282,7 @@ export async function enqueue(ctx, userId, url) {
                 if (isPlaylist) await logEvent(userId, 'download_playlist');
                 
                 for (const track of tasksToReallyDownload) {
-                    downloadQueue.add({ userId, ...track, priority: user.premium_limit });
+                    downloadQueue.add({ userId, url: track.url, metadata: track.metadata, priority: user.premium_limit });
                     if (!isPlaylist) await logEvent(userId, 'download');
                 }
             } else if (sentFromCacheCount === 0) {
@@ -340,7 +301,7 @@ export async function enqueue(ctx, userId, url) {
         let userMessage = `❌ Произошла ошибка при обработке ссылки.`;
         if (err.name === 'TimeoutError' || errorMessage.includes('timed out')) {
             console.error(`❌ Таймаут в enqueue для ${userId}:`, errorMessage);
-            userMessage = '❌ Ошибка: Сервис (SoundCloud/Spotify) отвечает слишком долго. Попробуйте позже.';
+            userMessage = '❌ Ошибка: SoundCloud отвечает слишком долго. Попробуйте позже.';
         } else if (errorMessage.includes('404: Not Found') || errorMessage.includes('403: Forbidden')) {
             console.warn(`[User Error] Трек не найден (404/403) для ${userId}.`);
             userMessage = '❌ Трек по этой ссылке не найден или доступ к нему ограничен.';
