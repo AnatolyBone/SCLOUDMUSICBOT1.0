@@ -1,1 +1,2 @@
 spotdl==4.2.5
+yt-dlp
