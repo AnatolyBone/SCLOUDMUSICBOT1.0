@@ -2,7 +2,7 @@
 
 import { exec } from 'child_process';
 import { promisify } from 'util';
-//import { PROXY_URL } from '../config.js';
+import { PROXY_URL } from '../config.js';
 import { searchTracksInCache } from '../db.js';
 
 const execAsync = promisify(exec);
