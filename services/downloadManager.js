@@ -1,4 +1,4 @@
-// services/downloadManager.js (ФИНАЛЬНАЯ, ИСПРАВЛЕННАЯ ВЕРСИЯ - ВАШ КОД + МОИ ПРАВКИ)
+// services/downloadManager.js (ФИНАЛЬНАЯ, ПОЛНАЯ, ИСПРАВЛЕННАЯ ВЕРСИЯ)
 
 import { STORAGE_CHANNEL_ID, CHANNEL_USERNAME, SPOTIPY_CLIENT_ID, SPOTIPY_CLIENT_SECRET, PROXY_URL, ADMIN_ID } from '../config.js';
 import { Markup } from 'telegraf';
@@ -8,7 +8,7 @@ import ytdl from 'youtube-dl-exec';
 import { fileURLToPath } from 'url';
 import crypto from 'crypto';
 import pLimit from 'p-limit';
-// ==> ИЗМЕНЕНИЕ 1: Импортируем 'spawn' для надежного вызова
+// ==> ИЗМЕНЕНИЕ 1: Импортируем 'spawn' и оставляем 'exec' для совместимости
 import { exec, spawn } from 'child_process';
 import { promisify } from 'util';
 import { bot } from '../bot.js';
@@ -24,7 +24,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(path.dirname(__filename));
 const cacheDir = path.join(__dirname, 'cache');
 
-const YTDL_TIMEOUT = 120; // Увеличим на всякий случай
+const YTDL_TIMEOUT = 120; // Увеличиваем на всякий случай
 const TRACK_TITLE_LIMIT = 100;
 const UNLIMITED_PLAYLIST_LIMIT = 100;
 const FAKE_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36';
@@ -50,10 +50,11 @@ async function safeSendMessage(userId, text, extra = {}) {
     }
 }
 
-// ==> ИЗМЕНЕНИЕ 2: Новая вспомогательная функция spawnAsync
+// ==> ИЗМЕНЕНИЕ 2: Новая, правильная вспомогательная функция spawnAsync
 function spawnAsync(command, args) {
     return new Promise((resolve, reject) => {
-        const process = spawn(command, args, { shell: true });
+        // Вызываем spawn БЕЗ shell: true. Аргументы передаются как безопасный массив.
+        const process = spawn(command, args);
         let stdout = '';
         let stderr = '';
 
@@ -75,7 +76,7 @@ function spawnAsync(command, args) {
     });
 }
 
-// ==> ИЗМЕНЕНИЕ 3: Исправляем только эту функцию
+// ==> ИЗМЕНЕНИЕ 3: Исправляем только эту функцию, используя новый spawnAsync
 async function trackDownloadProcessor(task) {
     const { userId, source, metadata } = task;
     const { title, uploader, id: trackId, duration, thumbnail } = metadata;
@@ -101,6 +102,7 @@ async function trackDownloadProcessor(task) {
             args.push(task.url);
         }
 
+        // Аргументы передаются без лишних кавычек, spawn их обработает правильно
         args.push(
             '--max-downloads', '1',
             '-o', tempFilePath,
@@ -191,7 +193,6 @@ export const downloadQueue = new TaskQueue({
     taskProcessor: trackDownloadProcessor
 });
 
-// ==> ЭТА ФУНКЦИЯ ОСТАЕТСЯ БЕЗ ИЗМЕНЕНИЙ!
 export async function enqueue(ctx, userId, url) {
     let statusMessage = null;
     try {
@@ -242,7 +243,6 @@ export async function enqueue(ctx, userId, url) {
             return await safeSendMessage(userId, 'Не удалось найти треки для загрузки.');
         }
 
-        // Логика плейлистов
         if (isPlaylist) {
             let playlistLimit = Infinity;
             let originalCount = tracksToProcess.length;
@@ -255,7 +255,7 @@ export async function enqueue(ctx, userId, url) {
             if (limitToProcess < originalCount) {
                  await safeSendMessage(userId, `ℹ️ В плейлисте ${originalCount} треков. С учетом вашего тарифа и дневного лимита будет загружено: ${limitToProcess}.`);
             }
-            tracksToProcess.length = limitToProcess; // Обрезаем массив
+            tracksToProcess.length = limitToProcess;
         }
         
         if (statusMessage) {
