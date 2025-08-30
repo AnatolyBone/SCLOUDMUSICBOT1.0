@@ -4,14 +4,14 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import fs from 'fs/promises';
 import path from 'path';
-// Убираем импорт 'fileURLToPath', он больше не нужен
+// ==> СНОВА ВОЗВРАЩАЕМ ЭТОТ ИМПОРТ
+import { fileURLToPath } from 'url';
 import { SPOTIPY_CLIENT_ID, SPOTIPY_CLIENT_SECRET } from '../config.js';
 import { downloadQueue } from './downloadManager.js';
 import { logEvent } from '../db.js';
 
 const execAsync = promisify(exec);
 
-// Вспомогательная функция для создания директории, если она не существует
 async function ensureDirectoryExists(dirPath) {
     try {
         await fs.access(dirPath);
@@ -26,7 +26,10 @@ async function ensureDirectoryExists(dirPath) {
 }
 
 export async function spotifyEnqueue(ctx, userId, url) {
-    // Убрали вычисление абсолютного пути, оно больше не требуется
+    // ==> СНОВА ВОЗВРАЩАЕМ ВЫЧИСЛЕНИЕ ПУТИ
+    const __filename = fileURLToPath(import.meta.url);
+    const __dirname = path.dirname(__filename);
+    const configPath = path.resolve(__dirname, '..', 'config.toml');
 
     try {
         await ctx.reply('🔍 Анализирую ссылку Spotify...');
@@ -37,14 +40,19 @@ export async function spotifyEnqueue(ctx, userId, url) {
         const tempFileName = `spotify_${userId}_${Date.now()}.spotdl`;
         const tempFilePath = path.join(uploadDir, tempFileName);
 
-        // ==> ГЛАВНОЕ ИЗМЕНЕНИЕ: Убираем флаг --config.
-        // spotdl сам найдет config.toml в корневой папке.
+        // Команда снова простая, без флагов
         const command = `spotdl save "${url}" --save-file "${tempFilePath}"`;
         
         console.log(`[Spotify Manager] Выполняю команду для ${userId}: ${command}`);
 
+        // ==> ГЛАВНОЕ ИЗМЕНЕНИЕ: Передаем путь к конфигу через переменную окружения
         await execAsync(command, {
-            env: { ...process.env, SPOTIPY_CLIENT_ID, SPOTIPY_CLIENT_SECRET }
+            env: { 
+                ...process.env, 
+                SPOTIPY_CLIENT_ID, 
+                SPOTIPY_CLIENT_SECRET,
+                SPOTDL_CONFIG_PATH: configPath // Вот она, наша надежда!
+            }
         });
 
         const fileContent = await fs.readFile(tempFilePath, 'utf-8');
@@ -58,6 +66,7 @@ export async function spotifyEnqueue(ctx, userId, url) {
 
         await ctx.reply(`✅ Найдено треков: ${tracks.length}. Добавляю в очередь...`);
 
+        // ... остальной код без изменений ...
         if (tracks.length > 1) {
             await logEvent(userId, 'spotify_playlist_album');
         } else {
