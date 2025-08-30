@@ -62,12 +62,12 @@ async function trackDownloadProcessor(task) {
         const tempFileName = `${trackId}-${crypto.randomUUID()}.mp3`;
         tempFilePath = path.join(cacheDir, tempFileName);
         
-        // ======================= ФИНАЛЬНОЕ ИСПРАВЛЕНИЕ ЗДЕСЬ =======================
+        // ======================= ФИНАЛЬНОЕ ИЗМЕНЕНИЕ ЗДЕСЬ =======================
         let downloadUrlOrQuery;
         if (source === 'spotify') {
-            // Используем обычный поиск, а не ytsearch1
-            downloadUrlOrQuery = `ytsearch:"${title} ${uploader}"`;
-            console.log(`[Worker] Ищу на YouTube по запросу: "${downloadUrlOrQuery}"`);
+            // ИЗМЕНЯЕМ ПОИСК С YOUTUBE НА YOUTUBE MUSIC
+            downloadUrlOrQuery = `ytmsearch1:"${title} ${uploader}"`;
+            console.log(`[Worker] Ищу на YouTube Music по запросу: "${downloadUrlOrQuery}"`);
         } else {
             downloadUrlOrQuery = task.url;
         }
@@ -76,7 +76,7 @@ async function trackDownloadProcessor(task) {
         const ytdlCommand = [
             'yt-dlp',
             `"${downloadUrlOrQuery}"`, // Запрос или URL в кавычках
-            '--max-downloads', '1', // <--- ВОТ ОНО! Скачать только 1 файл.
+            '--max-downloads', '1', // Скачать только 1 файл
             '-o', `"${tempFilePath}"`, // Путь вывода в кавычках
             '-x', // Извлечь аудио
             '--audio-format', 'mp3',
