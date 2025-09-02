@@ -1,4 +1,4 @@
-// services/downloadManager.js (ФИНАЛЬНАЯ, УНИФИЦИРОВАННАЯ ВЕРСИЯ БЕЗ SPOTDL - ИСПРАВЛЕННАЯ)
+// services/downloadManager.js (ФИНАЛЬНАЯ ВЕРСИЯ 3.0 - УНИФИЦИРОВАННАЯ, С ИСПРАВЛЕННЫМ КЭШЕМ)
 
 import { STORAGE_CHANNEL_ID, CHANNEL_USERNAME, PROXY_URL, ADMIN_ID } from '../config.js';
 import { Markup } from 'telegraf';
@@ -74,9 +74,7 @@ async function trackDownloadProcessor(task) {
         if (!fs.existsSync(tempFilePath)) throw new Error(`Файл не был создан. Возможно, yt-dlp не смог найти трек.`);
         
         const stats = await fs.promises.stat(tempFilePath);
-        if (stats.size > MAX_FILE_SIZE_BYTES) {
-            throw new Error(`FILE_TOO_LARGE`);
-        }
+        if (stats.size > MAX_FILE_SIZE_BYTES) throw new Error(`FILE_TOO_LARGE`);
         
         if (statusMessage) await bot.telegram.editMessageText(userId, statusMessage.message_id, undefined, `✅ Скачал. Отправляю...`).catch(() => {});
         
@@ -120,15 +118,11 @@ async function trackDownloadProcessor(task) {
     } catch (err) {
         let userErrorMessage = `❌ Не удалось обработать трек: "${title}"`;
         const errorDetails = err.stderr || err.message || '';
-
         if (errorDetails.includes('FILE_TOO_LARGE')) {
             userErrorMessage += '. Он слишком большой (более 50 МБ) и не может быть отправлен через Telegram.';
         } else if (errorDetails.includes('timed out') || errorDetails.includes('Connection reset by peer')) {
             userErrorMessage += '. Проблема с сетью или прокси. Попробуйте еще раз.';
-        } else if (errorDetails.includes('Unsupported URL')) {
-            userErrorMessage = '❌ Извините, ссылка на этот ресурс не поддерживается.';
         }
-        
         console.error(`❌ Ошибка воркера при обработке "${title}":`, errorDetails);
         if (statusMessage) {
             await bot.telegram.editMessageText(userId, statusMessage.message_id, undefined, userErrorMessage).catch(() => {});
@@ -142,7 +136,6 @@ async function trackDownloadProcessor(task) {
     }
 }
 
-
 export const downloadQueue = new TaskQueue({
     maxConcurrent: 1,
     taskProcessor: trackDownloadProcessor
@@ -155,7 +148,7 @@ export async function enqueue(ctx, userId, url) {
         let user = await getUser(userId);
 
         if (user.downloads_today >= user.premium_limit) {
-            let message = T('limitReached');
+             let message = T('limitReached');
             let bonusMessageText = '';
             if (!user.subscribed_bonus_used) {
                 const cleanUsername = CHANNEL_USERNAME.replace('@', '');
@@ -194,26 +187,22 @@ export async function enqueue(ctx, userId, url) {
                 source: source,
                 metadata: {
                     id: e.id,
-                    title: sanitizeFilename(e.title || 'Unknown Title').slice(0, TRACK_TITLE_LIMIT),
+                    title: sanitizeFilename(e.title || 'Unknown Title'),
                     uploader: e.uploader || e.artist || 'Unknown Artist',
                     duration: e.duration,
                     thumbnail: e.thumbnail,
                 }
             }));
         
-        if (tracksToProcess.length === 0) {
-            return await safeSendMessage(userId, 'Не удалось найти треки для загрузки.');
-        }
+        if (tracksToProcess.length === 0) return await safeSendMessage(userId, 'Не удалось найти треки для загрузки.');
 
         if (isPlaylist) {
             let playlistLimit = Infinity;
             let originalCount = tracksToProcess.length;
             if (user.premium_limit <= 10) playlistLimit = 5;
             else if (user.premium_limit >= 10000) playlistLimit = UNLIMITED_PLAYLIST_LIMIT;
-            
             const remainingDailyLimit = user.premium_limit - user.downloads_today;
             const limitToProcess = Math.min(originalCount, playlistLimit, remainingDailyLimit);
-
             if (limitToProcess < originalCount) {
                  await safeSendMessage(userId, `ℹ️ В плейлисте ${originalCount} треков. С учетом вашего тарифа и дневного лимита будет загружено: ${limitToProcess}.`);
             }
@@ -229,18 +218,18 @@ export async function enqueue(ctx, userId, url) {
 
         for (const track of tracksToProcess) {
             const cached = await findCachedTrack(track.url);
-
             if (cached) {
                 user = await getUser(userId);
                 if (user.downloads_today >= user.premium_limit) break;
                 try {
+                    // ИСПРАВЛЕНИЕ БАГА С КЭШЕМ: передаем правильные метаданные
                     await bot.telegram.sendAudio(userId, cached.fileId, { title: track.metadata.title, performer: track.metadata.uploader });
-                    await incrementDownloadsAndSaveTrack(userId, title, cached.fileId, track.url);
+                    await incrementDownloadsAndSaveTrack(userId, track.metadata.title, cached.fileId, track.url);
                     sentFromCacheCount++;
                 } catch (err) {
                     if (err.response?.error_code === 403) { await updateUserField(userId, 'active', false); return; }
                     else if (err.description?.includes('FILE_REFERENCE_EXPIRED')) tasksToDownload.push(track);
-                    else console.error(`⚠️ Ошибка отправки из кэша для ${userId}: ${err.message}`);
+                    else console.error(`⚠️ Ошибка отправки из кэша для ${userId}:`, err.message);
                 }
             } else {
                 tasksToDownload.push(track);
@@ -255,15 +244,12 @@ export async function enqueue(ctx, userId, url) {
         if (tasksToDownload.length > 0) {
             user = await getUser(userId);
             const remainingLimit = user.premium_limit - user.downloads_today;
-            
             if (remainingLimit > 0) {
                 const tasksToReallyDownload = tasksToDownload.slice(0, remainingLimit);
                 finalMessage += `⏳ ${tasksToReallyDownload.length} трек(ов) добавлено в очередь. Вы получите их по мере готовности.`;
-                
                 if (isPlaylist) await logEvent(userId, 'download_playlist');
-                
-                for (const track of tasksToReallyDownload) {
-                    downloadQueue.add({ userId, ...track, priority: user.premium_limit });
+                for (const task of tasksToReallyDownload) {
+                    downloadQueue.add({ userId, ...task, priority: user.premium_limit });
                     if (!isPlaylist) await logEvent(userId, 'download');
                 }
             } else if (sentFromCacheCount === 0) {
@@ -281,21 +267,11 @@ export async function enqueue(ctx, userId, url) {
         const errorMessage = err.stderr || err.message || '';
         let userMessage = `❌ Произошла ошибка при обработке ссылки.`;
         if (err.name === 'TimeoutError' || errorMessage.includes('timed out') || errorMessage.includes('Connection reset by peer')) {
-            console.error(`❌ Сетевая ошибка в enqueue для ${userId}:`, errorMessage);
             userMessage = '❌ Ошибка сети при получении информации о треке. Возможно, сервис временно недоступен или блокирует запросы. Попробуйте позже.';
         } else if (errorMessage.includes('404: Not Found') || errorMessage.includes('403: Forbidden')) {
-            console.warn(`[User Error] Трек не найден (404/403) для ${userId}.`);
             userMessage = '❌ Трек по этой ссылке не найден или доступ к нему ограничен.';
         } else {
             console.error(`❌ Глобальная ошибка в enqueue для ${userId}:`, err);
-            try {
-                const adminErrorMessage = `🔴 **Критическая ошибка загрузки!**\n\n` +
-                                          `**Пользователь:** \`${userId}\`\n**URL:** \`${url}\`\n\n` +
-                                          `**Текст ошибки:**\n\`\`\`\n${errorMessage.slice(0, 1000)}\n\`\`\``;
-                await bot.telegram.sendMessage(ADMIN_ID, adminErrorMessage, { parse_mode: 'Markdown' });
-            } catch (adminNotifyError) {
-                console.error("!! Не удалось отправить уведомление об ошибке админу:", adminNotifyError.message);
-            }
         }
         if (statusMessage) {
             await bot.telegram.editMessageText(userId, statusMessage.message_id, undefined, userMessage).catch(() => {});
