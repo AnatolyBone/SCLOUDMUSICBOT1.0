@@ -11,7 +11,7 @@
         "fix:deps": "npm audit fix"
     },
     "dependencies": {
-        "@supabase/supabase-js": "^3.0.0",  // Изменена версия на актуальную
+        "@supabase/supabase-js": "^3.0.0",
         "axios": "^3.5.0",
         "compression": "^1.8.1",
         "connect-pg-simple": "^8.1.0",
