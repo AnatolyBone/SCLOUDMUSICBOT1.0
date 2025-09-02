@@ -3,5 +3,4 @@ yt-dlp
 ytmusicapi
 fastapi
 uvicorn
-telegraf
-# ... и другие ваши Python-зависимости, если они есть
+# ... возможно, что-то еще, но ТОЧНО НЕ telegraf
