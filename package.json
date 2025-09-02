@@ -5,10 +5,13 @@
     "main": "index.js",
     "type": "module",
     "scripts": {
-        "start": "node index.js"
+        "start": "node index.js",
+        "preinstall": "npx npm-force-resolutions",
+        "postinstall": "npm run fix:deps",
+        "fix:deps": "npm audit fix"
     },
     "dependencies": {
-        "@supabase/supabase-js": "^3.38.0",
+        "@supabase/supabase-js": "^3.0.0",  // Изменена версия на актуальную
         "axios": "^3.5.0",
         "compression": "^1.8.1",
         "connect-pg-simple": "^8.1.0",
