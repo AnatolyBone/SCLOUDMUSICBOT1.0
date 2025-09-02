@@ -4,7 +4,7 @@ import { STORAGE_CHANNEL_ID, CHANNEL_USERNAME, PROXY_URL, ADMIN_ID } from '../co
 import { Markup } from 'telegraf';
 import path from 'path';
 import fs from 'fs';
-import ytdl from 'youtube-dl-exec';
+import ytdl from 'yt-dl-exec';
 import { fileURLToPath } from 'url';
 import crypto from 'crypto';
 import { bot } from '../bot.js';
