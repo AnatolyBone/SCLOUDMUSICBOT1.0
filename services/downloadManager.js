@@ -1,10 +1,9 @@
 // services/downloadManager.js (ФИНАЛЬНАЯ РАБОЧАЯ ВЕРСИЯ - УНИВЕРСАЛЬНЫЙ ВОРКЕР)
-
 import { STORAGE_CHANNEL_ID, CHANNEL_USERNAME, PROXY_URL, ADMIN_ID } from '../config.js';
 import { Markup } from 'telegraf';
 import path from 'path';
 import fs from 'fs';
-import ytdl from 'yt-dl-exec';
+import ytdl from 'youtube-dl-exec'; // <-- ВОЗВРАЩАЕМ ПРАВИЛЬНЫЙ ИМПОРТ
 import { fileURLToPath } from 'url';
 import crypto from 'crypto';
 import { bot } from '../bot.js';
@@ -59,7 +58,6 @@ async function trackDownloadProcessor(task) {
         const tempFileName = `${trackId}-${crypto.randomUUID()}.mp3`;
         tempFilePath = path.join(cacheDir, tempFileName);
 
-        // ЕДИНЫЙ УНИВЕРСАЛЬНЫЙ МЕТОД СКАЧИВАНИЯ
         await ytdl(url, {
             output: tempFilePath,
             extractAudio: true,
@@ -86,7 +84,7 @@ async function trackDownloadProcessor(task) {
         
         if (statusMessage) await bot.telegram.deleteMessage(userId, statusMessage.message_id).catch(() => {});
         
-        const cacheKey = originalUrl || url; // Используем оригинальную ссылку Spotify для кэша, если она есть
+        const cacheKey = originalUrl || url;
         if (sentToUserMessage?.audio?.file_id) {
             await incrementDownloadsAndSaveTrack(userId, title, sentToUserMessage.audio.file_id, cacheKey);
         }
@@ -133,10 +131,6 @@ export const downloadQueue = new TaskQueue({
 });
 
 export async function enqueue(ctx, userId, url) {
-    // Эта функция теперь обрабатывает ТОЛЬКО SoundCloud
-    // Логика роутинга должна быть в вашем главном файле (index.js или где-то еще),
-    // где вы проверяете ссылку и вызываете либо enqueue, либо spotifyEnqueue.
-    // Если вся обработка идет через enqueue, то нужно добавить роутер сюда:
     if (url.includes('spotify.com')) {
         return spotifyEnqueue(ctx, userId, url);
     }
@@ -145,7 +139,6 @@ export async function enqueue(ctx, userId, url) {
     try {
         await resetDailyLimitIfNeeded(userId);
         let user = await getUser(userId);
-
         if (user.downloads_today >= user.premium_limit) {
             let message = T('limitReached');
             let bonusMessageText = '';
@@ -161,9 +154,7 @@ export async function enqueue(ctx, userId, url) {
             }
             return await safeSendMessage(userId, message, extra);
         }
-
         statusMessage = await safeSendMessage(userId, '🔍 Получаю информацию о треке...');
-        
         const info = await ytdl(url, {
             dumpSingleJson: true,
             retries: 2,
@@ -171,12 +162,9 @@ export async function enqueue(ctx, userId, url) {
             'user-agent': FAKE_USER_AGENT,
             proxy: PROXY_URL || undefined,
         });
-        
         if (!info) throw new Error('Не удалось получить метаданные');
-        
         const isPlaylist = Array.isArray(info.entries); 
         const entries = isPlaylist ? info.entries : [info];
-
         let tracksToProcess = entries
             .filter(e => e && (e.webpage_url || e.url))
             .map(e => ({
@@ -190,11 +178,9 @@ export async function enqueue(ctx, userId, url) {
                     thumbnail: e.thumbnail,
                 }
             }));
-        
         if (tracksToProcess.length === 0) {
             return await safeSendMessage(userId, 'Не удалось найти треки для загрузки.');
         }
-
         if (isPlaylist) {
             let playlistLimit = Infinity;
             let originalCount = tracksToProcess.length;
@@ -207,14 +193,11 @@ export async function enqueue(ctx, userId, url) {
             }
             tracksToProcess.length = limitToProcess;
         }
-        
         if (statusMessage) {
             await bot.telegram.editMessageText(userId, statusMessage.message_id, undefined, '🔄 Проверяю кэш...').catch(() => {});
         }
-
         const tasksToDownload = [];
         let sentFromCacheCount = 0;
-
         for (const track of tracksToProcess) {
             const cached = await findCachedTrack(track.url);
             if (cached) {
@@ -233,12 +216,10 @@ export async function enqueue(ctx, userId, url) {
                 tasksToDownload.push(track);
             }
         }
-        
        let finalMessage = '';
         if (sentFromCacheCount > 0) {
             finalMessage += `✅ ${sentFromCacheCount} трек(ов) отправлено из кэша.\n`;
         }
-        
         if (tasksToDownload.length > 0) {
             user = await getUser(userId);
             const remainingLimit = user.premium_limit - user.downloads_today;
@@ -254,13 +235,11 @@ export async function enqueue(ctx, userId, url) {
                 finalMessage += `🚫 Ваш дневной лимит исчерпан.`;
             }
         }
-        
         if (statusMessage) {
             await bot.telegram.editMessageText(userId, statusMessage.message_id, undefined, finalMessage || "Все треки отправлены.").catch(() => {});
         } else if (finalMessage) {
             await safeSendMessage(userId, finalMessage);
         }
-
     } catch (err) {
         const errorMessage = err.stderr || err.message || '';
         let userMessage = `❌ Произошла ошибка при обработке ссылки.`;
