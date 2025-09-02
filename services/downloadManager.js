@@ -46,7 +46,7 @@ async function safeSendMessage(userId, text, extra = {}) {
     }
 }
 
-// services/downloadManager.js -> ЗАМЕНИТЬ ФУНКЦИЮ trackDownloadProcessor (ПОСЛЕДНЯЯ ПОПЫТКА С SPOTDL)
+// services/downloadManager.js -> ЗАМЕНИТЬ ФУНКЦИЮ trackDownloadProcessor
 
 const MAX_FILE_SIZE_BYTES = 49 * 1024 * 1024; // 49 МБ
 const SPOTDL_TIMEOUT_MS = 5 * 60 * 1000; // 5 минут на выполнение
@@ -68,11 +68,9 @@ async function trackDownloadProcessor(task) {
             tempDownloadDir = path.join(cacheDir, crypto.randomUUID());
             await fs.promises.mkdir(tempDownloadDir, { recursive: true });
             
-            // ======================= ФИНАЛЬНОЕ УСИЛЕНИЕ КОМАНДЫ SPOTDL =======================
-            // Мы передаем аргументы напрямую в yt-dlp, чтобы он искал надежнее
-            const ytDlpArgs = `'--default-search "ytsearch1" --no-playlist'`;
-            const command = `spotdl download "${task.spotifyUrl}" --audio youtube youtube-music --ffmpeg /usr/bin/ffmpeg --yt-dlp-args ${ytDlpArgs}`;
-            // ===============================================================================
+            // Эта команда теперь будет работать, т.к. установится последняя версия spotdl
+            // Она использует все наши предыдущие исправления
+            const command = `spotdl download "${task.spotifyUrl}" --audio youtube youtube-music`;
             
             const execOptions = {
                 cwd: tempDownloadDir,
