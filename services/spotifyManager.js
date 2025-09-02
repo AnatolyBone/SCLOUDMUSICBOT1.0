@@ -8,7 +8,7 @@ import { fileURLToPath } from 'url';
 import { SPOTIPY_CLIENT_ID, SPOTIPY_CLIENT_SECRET } from '../config.js';
 import { downloadQueue } from './downloadManager.js';
 import { logEvent } from '../db.js';
-import ytdl from 'yt-dlp-exec';
+
 const execAsync = promisify(exec);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(path.dirname(__filename));
