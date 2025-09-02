@@ -48,7 +48,8 @@ async function safeSendMessage(userId, text, extra = {}) {
 
 // services/downloadManager.js -> ЗАМЕНИТЬ ФУНКЦИЮ trackDownloadProcessor
 
-const MAX_FILE_SIZE_BYTES = 49 * 1024 * 1024; // 49 МБ - безопасный лимит для Telegram
+const MAX_FILE_SIZE_BYTES = 49 * 1024 * 1024; // 49 МБ
+const SPOTDL_TIMEOUT_MS = 5 * 60 * 1000; // 5 минут на выполнение
 
 async function trackDownloadProcessor(task) {
     const { userId, source, metadata } = task;
@@ -56,7 +57,7 @@ async function trackDownloadProcessor(task) {
     const roundedDuration = duration ? Math.round(duration) : undefined;
     
     let tempFilePath = null;
-    let tempDownloadDir = null; // Для Spotify
+    let tempDownloadDir = null;
     let statusMessage = null;
     
     try {
@@ -67,12 +68,13 @@ async function trackDownloadProcessor(task) {
             tempDownloadDir = path.join(cacheDir, crypto.randomUUID());
             await fs.promises.mkdir(tempDownloadDir, { recursive: true });
             
-            // РЕШЕНИЕ №1: Добавляем поиск по YouTube, чтобы повысить шансы найти трек
-            const command = `spotdl download "${task.spotifyUrl}" --audio youtube youtube-music`;
+            // ФИНАЛЬНОЕ ИЗМЕНЕНИЕ: Добавляем --no-download-ffmpeg
+            const command = `spotdl download "${task.spotifyUrl}" --audio youtube youtube-music --no-download-ffmpeg`;
             
             const execOptions = {
                 cwd: tempDownloadDir,
-                env: { ...process.env, SPOTIPY_CLIENT_ID, SPOTIPY_CLIENT_SECRET }
+                env: { ...process.env, SPOTIPY_CLIENT_ID, SPOTIPY_CLIENT_SECRET },
+                timeout: SPOTDL_TIMEOUT_MS // ФИНАЛЬНОЕ ИЗМЕНЕНИЕ: Добавляем таймаут
             };
             
             if (PROXY_URL) {
@@ -112,11 +114,8 @@ async function trackDownloadProcessor(task) {
         
         if (!fs.existsSync(tempFilePath)) throw new Error(`Файл не был создан: ${tempFilePath}`);
         
-        // РЕШЕНИЕ №2: Проверяем размер файла ПЕРЕД отправкой в Telegram
         const stats = await fs.promises.stat(tempFilePath);
         if (stats.size > MAX_FILE_SIZE_BYTES) {
-            console.warn(`[Worker] Файл "${title}" слишком большой (${(stats.size / 1024 / 1024).toFixed(2)} MB), отмена отправки.`);
-            // Создаем кастомную ошибку, чтобы обработать ее в catch
             throw new Error(`FILE_TOO_LARGE`);
         }
         
@@ -165,11 +164,10 @@ async function trackDownloadProcessor(task) {
         let userErrorMessage = `❌ Не удалось обработать трек: "${title}"`;
         const errorDetails = err.stderr || err.message || '';
         
-        // Обрабатываем нашу кастомную ошибку о размере файла
         if (errorDetails.includes('FILE_TOO_LARGE')) {
             userErrorMessage += '. Он слишком большой (более 50 МБ) и не может быть отправлен через Telegram.';
-        } else if (errorDetails.includes('timed out')) {
-            userErrorMessage += '. Причина: таймаут.';
+        } else if (errorDetails.includes('timed out') || (err.code === 'ETIMEDOUT')) {
+            userErrorMessage += '. Превышено время ожидания скачивания.';
         }
         
         console.error(`❌ Ошибка воркера при обработке "${title}":`, errorDetails);
