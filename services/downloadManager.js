@@ -46,7 +46,7 @@ async function safeSendMessage(userId, text, extra = {}) {
     }
 }
 
-// services/downloadManager.js -> ЗАМЕНИТЬ ФУНКЦИЮ trackDownloadProcessor
+// services/downloadManager.js -> ЗАМЕНИТЬ ФУНКЦИЮ trackDownloadProcessor (ФИНАЛЬНАЯ ВЕРСИЯ)
 
 const MAX_FILE_SIZE_BYTES = 49 * 1024 * 1024; // 49 МБ
 const SPOTDL_TIMEOUT_MS = 5 * 60 * 1000; // 5 минут на выполнение
@@ -68,13 +68,13 @@ async function trackDownloadProcessor(task) {
             tempDownloadDir = path.join(cacheDir, crypto.randomUUID());
             await fs.promises.mkdir(tempDownloadDir, { recursive: true });
             
-            // ФИНАЛЬНОЕ ИЗМЕНЕНИЕ: Добавляем --no-download-ffmpeg
-            const command = `spotdl download "${task.spotifyUrl}" --audio youtube youtube-music --no-download-ffmpeg`;
+            // ФИНАЛЬНОЕ ИЗМЕНЕНИЕ: Убираем --no-download-ffmpeg
+            const command = `spotdl download "${task.spotifyUrl}" --audio youtube youtube-music`;
             
             const execOptions = {
                 cwd: tempDownloadDir,
                 env: { ...process.env, SPOTIPY_CLIENT_ID, SPOTIPY_CLIENT_SECRET },
-                timeout: SPOTDL_TIMEOUT_MS // ФИНАЛЬНОЕ ИЗМЕНЕНИЕ: Добавляем таймаут
+                timeout: SPOTDL_TIMEOUT_MS // Таймаут остается как наша главная защита
             };
             
             if (PROXY_URL) {
