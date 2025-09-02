@@ -25,7 +25,7 @@
     "telegraf": "^4.16.3",
  "node-cron": "^3.0.3",
 "mime-types": "^2.1.35",
-    "yt-dlp-exec": "^3.0.24"
+    "yt-dlp-exec": "^2.0.0"
   },
   "engines": {
     "node": ">=16"
