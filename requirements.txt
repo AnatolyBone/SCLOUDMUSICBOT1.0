@@ -1,4 +1,7 @@
 spotdl
 yt-dlp
-youtube-dl-exec
-# ... и все остальные ваши зависимости
+ytmusicapi
+fastapi
+uvicorn
+telegraf
+# ... и другие ваши Python-зависимости, если они есть
