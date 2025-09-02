@@ -1,2 +1,4 @@
-
+spotdl
 yt-dlp
+youtube-dl-exec
+# ... и все остальные ваши зависимости
