@@ -1,4 +1,4 @@
-// src/bot.js
+// src/bot.js (ФИНАЛЬНАЯ ВЕРСИЯ С ПРАВИЛЬНЫМ ПОРЯДКОМ ОБРАБОТЧИКОВ)
 
 import { Telegraf, Markup } from 'telegraf';
 import * as commands from './bot/commands.js';
@@ -12,7 +12,6 @@ const bot = new Telegraf(process.env.BOT_TOKEN, {
     handlerTimeout: 90_000 // 90 секунд
 });
 
-// <<< ИСПРАВЛЕНО: Глобальный обработчик ошибок - "спасательный круг" >>>
 bot.catch(async (err, ctx) => {
     console.error(`🔴 [Telegraf Catch] Глобальная ошибка для update ${ctx.update.update_id}:`, err);
     if (err instanceof Telegraf.TelegramError && err.response?.error_code === 403) {
@@ -26,48 +25,48 @@ bot.catch(async (err, ctx) => {
     }
 });
 
-// <<< ВАЖНО: Эти обработчики должны быть определены ЗДЕСЬ, а не импортированы, если они используют внешние зависимости, которые мы рефакторим >>>
-// Если ваши файлы commands.js, hears.js и т.д. не имеют сложных импортов, их можно оставить.
-// Если они импортируют что-то из index.js, их логику нужно перенести сюда.
-// Для безопасности, я перенесу логику text сюда.
+// ======================= СНАЧАЛА ИДУТ КОНКРЕТНЫЕ ОБРАБОТЧИКИ =======================
 
+// Команды
 bot.start(commands.start);
 bot.command('admin', commands.admin);
+bot.command('premium', hears.upgrade); // Этот обработчик теперь будет срабатывать ПЕРЕД .on('text')
 
+// Текстовые кнопки
 bot.hears('📋 Меню', hears.menu);
 bot.hears('ℹ️ Помощь', hears.help);
 bot.hears('🔓 Расширить лимит', hears.upgrade);
 bot.hears('🎵 Мои треки', hears.myTracks);
-bot.command('premium', hears.upgrade);
+
+// Inline-кнопки
 bot.action('check_subscription', actions.checkSubscription);
 
-// <<< ИСПРАВЛЕНО: Логика обработки текста перенесена сюда для ясности и избежания циклов >>>
+
+// ======================= И ТОЛЬКО В КОНЦЕ - УНИВЕРСАЛЬНЫЙ ОБРАБОТЧИК ТЕКСТА =======================
+// Он сработает только если ни один из обработчиков выше не подошел.
 bot.on('text', async (ctx) => {
     const userId = ctx.from.id;
     const userText = ctx.message.text;
 
-    // ======================= ФИНАЛЬНОЕ ИСПРАВЛЕНИЕ =======================
-    // Если сообщение начинается с "/", значит это команда. 
-    // Мы ее пропускаем, чтобы ее мог обработать `bot.command()`.
+    // Эти проверки теперь не так важны, так как команды и кнопки уже обработаны,
+    // но оставим их для надежности.
     if (userText.startsWith('/')) {
         return; 
     }
-    // ===================================================================
-
-    // Проверяем, не является ли текст командой с клавиатуры
     if (Object.values(allTextsSync()).includes(userText)) {
-        return; // `bot.hears` уже обработал
+        return;
     }
 
     console.log(`[Bot] Получено НЕкомандное сообщение от ${userId}, ищем ссылку...`);
     try {
-        const url = userText.match(/(https?:\/\/[^\s]+)/g)?.find(u => u.includes('soundcloud.com') || u.includes('spotify.com')); // Добавим и spotify на всякий случай
+        // Ищем ссылку на SoundCloud или Spotify
+        const url = userText.match(/(https?:\/\/[^\s]+)/g)?.find(u => u.includes('soundcloud.com') || u.includes('spotify.com'));
 
         if (url) {
             await enqueue(ctx, userId, url);
         } else {
-            // Уберем этот ответ, чтобы не спамить, если пользователь просто пишет текст
-            // await ctx.reply('Я не понял. Пожалуйста, пришлите ссылку или используйте кнопки меню.');
+            // Теперь это сообщение будет отправляться только на действительно "непонятный" текст
+            await ctx.reply('Я не понял. Пожалуйста, пришлите ссылку или используйте кнопки меню.');
         }
     } catch (e) {
         console.error(`[Bot] Ошибка в общем обработчике текста для ${userId}:`, e);
