@@ -46,6 +46,14 @@ bot.on('text', async (ctx) => {
     const userId = ctx.from.id;
     const userText = ctx.message.text;
 
+    // ======================= ФИНАЛЬНОЕ ИСПРАВЛЕНИЕ =======================
+    // Если сообщение начинается с "/", значит это команда. 
+    // Мы ее пропускаем, чтобы ее мог обработать `bot.command()`.
+    if (userText.startsWith('/')) {
+        return; 
+    }
+    // ===================================================================
+
     // Проверяем, не является ли текст командой с клавиатуры
     if (Object.values(allTextsSync()).includes(userText)) {
         return; // `bot.hears` уже обработал
@@ -53,12 +61,13 @@ bot.on('text', async (ctx) => {
 
     console.log(`[Bot] Получено НЕкомандное сообщение от ${userId}, ищем ссылку...`);
     try {
-        const url = userText.match(/(https?:\/\/[^\s]+)/g)?.find(u => u.includes('soundcloud.com'));
-        
+        const url = userText.match(/(https?:\/\/[^\s]+)/g)?.find(u => u.includes('soundcloud.com') || u.includes('spotify.com')); // Добавим и spotify на всякий случай
+
         if (url) {
             await enqueue(ctx, userId, url);
         } else {
-            await ctx.reply('Я не понял. Пожалуйста, пришлите ссылку или используйте кнопки меню.');
+            // Уберем этот ответ, чтобы не спамить, если пользователь просто пишет текст
+            // await ctx.reply('Я не понял. Пожалуйста, пришлите ссылку или используйте кнопки меню.');
         }
     } catch (e) {
         console.error(`[Bot] Ошибка в общем обработчике текста для ${userId}:`, e);
