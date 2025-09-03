@@ -38,7 +38,7 @@ bot.hears('📋 Меню', hears.menu);
 bot.hears('ℹ️ Помощь', hears.help);
 bot.hears('🔓 Расширить лимит', hears.upgrade);
 bot.hears('🎵 Мои треки', hears.myTracks);
-
+bot.command('premium', hears.upgrade);
 bot.action('check_subscription', actions.checkSubscription);
 
 // <<< ИСПРАВЛЕНО: Логика обработки текста перенесена сюда для ясности и избежания циклов >>>
