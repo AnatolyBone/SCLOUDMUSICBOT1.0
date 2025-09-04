@@ -1,34 +1,32 @@
-// services/searchManager.js (ФИНАЛЬНАЯ ВЕРСИЯ С ЛОГИРОВАНИЕМ)
+// services/searchManager.js (ФИНАЛЬНАЯ ВЕРСИЯ С ИСПРАВЛЕННЫМ ПОИСКОМ)
 
-import { exec } from 'child_process';
-import { promisify } from 'util';
+// Вместо 'exec' импортируем нашу рабочую обертку
+import ytdl from 'youtube-dl-exec';
 import { PROXY_URL } from '../config.js';
-// Импортируем наши новые функции
 import { searchTracksInCache, logSearchQuery, logFailedSearch } from '../db.js';
 
-const execAsync = promisify(exec);
-const SEARCH_TIMEOUT_MS = 8000;
-
-function escapeQuery(query) {
-    return query.replace(/"/g, '\\"').replace(/`/g, '\\`').replace(/\$/g, '\\$');
-}
+const SEARCH_TIMEOUT_MS = 8000; // 8 секунд
 
 async function searchLiveOnSoundCloud(query) {
     console.log(`[Search Live] INFO: Выполняю живой поиск для: "${query}"`);
     try {
-        // Убрал --proxy отсюда, т.к. ytdl-exec/spotdl лучше управляют им через переменные окружения
-        const command = `yt-dlp --dump-single-json "scsearch7:${escapeQuery(query)}"`;
-
+        // Создаем Promise с таймаутом
         const timeoutPromise = new Promise((_, reject) => 
             setTimeout(() => reject(new Error('Search timeout')), SEARCH_TIMEOUT_MS)
         );
 
-        const { stdout } = await Promise.race([
-            execAsync(command, { maxBuffer: 1024 * 1024 * 5, env: { ...process.env, HTTP_PROXY: PROXY_URL, HTTPS_PROXY: PROXY_URL } }),
+        // Используем ytdl для поиска. Он сам найдет yt-dlp и правильно его вызовет.
+        const ytdlPromise = ytdl(`scsearch7:${query}`, {
+            dumpSingleJson: true,
+            proxy: PROXY_URL || undefined
+        });
+
+        // Запускаем "гонку" между поиском и таймаутом
+        const searchData = await Promise.race([
+            ytdlPromise,
             timeoutPromise
         ]);
 
-        const searchData = JSON.parse(stdout);
         if (!searchData || !searchData.entries) return [];
 
         return searchData.entries.map(track => ({
@@ -42,12 +40,17 @@ async function searchLiveOnSoundCloud(query) {
             },
         }));
     } catch (error) {
-        console.error(`[Search Live] ERROR: Ошибка живого поиска для "${query}":`, error.message);
+        // Если ошибка - это наш кастомный таймаут, выводим соответствующее сообщение
+        if (error.message === 'Search timeout') {
+            console.warn(`[Search Live] WARN: Таймаут поиска для "${query}"`);
+        } else {
+            console.error(`[Search Live] ERROR: Ошибка живого поиска для "${query}":`, error.stderr || error.message);
+        }
         return [];
     }
 }
 
-// Теперь функция принимает userId для логирования
+// Эта функция остается почти без изменений
 export async function performInlineSearch(query, userId) {
     console.log(`[Search Hybrid] INFO: Поиск в кэше по запросу: "${query}"`);
     let results = [];
@@ -65,7 +68,7 @@ export async function performInlineSearch(query, userId) {
         foundInCache = false;
     }
     
-    // === ЛОГИРОВАНИЕ ВСЕХ ЗАПРОСОВ ===
+    // Логирование запросов (остается без изменений)
     await logSearchQuery({
         query,
         userId,
@@ -73,7 +76,6 @@ export async function performInlineSearch(query, userId) {
         foundInCache: foundInCache
     });
     
-    // === ЛОГИРОВАНИЕ НЕУДАЧНЫХ ЗАПРОСОВ ===
     if (results.length === 0) {
         console.log(`[Search] Полный провал поиска для запроса: "${query}"`);
         await logFailedSearch({
@@ -82,15 +84,15 @@ export async function performInlineSearch(query, userId) {
         });
     }
 
-    // Форматируем результат для Telegram
+    // Форматирование результата (остается без изменений)
     if (foundInCache) {
         return results.map(track => ({
             type: 'audio',
             id: `cache_${track.file_id.slice(-20)}_${Math.random()}`,
             audio_file_id: track.file_id,
-            caption: `via @SCloudMusicBot` // <-- ЗАМЕНИ SCloudMusicBot на реальный юзернейм твоего бота
+            caption: `via @SCloudMusicBot` // <-- ЗАМЕНИТЕ НА ЮЗЕРНЕЙМ ВАШЕГО БОТА
         }));
     } else {
-        return results; // searchLiveOnSoundCloud уже возвращает в правильном формате
+        return results;
     }
 }
