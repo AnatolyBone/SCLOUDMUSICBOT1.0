@@ -534,7 +534,57 @@ export async function getLatestReviews(limit = 10) {
   const { data } = await supabase.from('reviews').select('*').order('time', { ascending: false }).limit(limit);
   return data || [];
 }
+// ... (весь ваш существующий код в db.js) ...
 
+/**
+ * Логирует каждый поисковый запрос в базу данных.
+ * @param {object} logData - Данные для логирования.
+ * @param {string} logData.query - Поисковый запрос.
+ * @param {number} logData.userId - ID пользователя.
+ * @param {number} logData.resultsCount - Количество найденных результатов.
+ * @param {boolean} logData.foundInCache - Найдены ли результаты в кэше.
+ */
+export async function logSearchQuery({ query, userId, resultsCount, foundInCache }) {
+    if (!query || !userId) return;
+
+    const { error } = await supabase
+        .from('search_queries')
+        .insert({
+            query: query,
+            user_id: userId,
+            results_count: resultsCount,
+            found_in_cache: foundInCache
+        });
+
+    if (error) {
+        console.error('[DB] Ошибка логирования поискового запроса:', error.message);
+    }
+}
+
+/**
+ * Логирует неудачный поисковый запрос или инкрементирует счетчик, если он уже есть.
+ * @param {object} logData - Данные для логирования.
+ * @param {string} logData.query - Поисковый запрос.
+ * @param {string} logData.searchType - Тип поиска ('inline', 'direct_message').
+ */
+export async function logFailedSearch({ query, searchType }) {
+    if (!query) return;
+
+    // Используем `upsert` (update or insert).
+    // Если запись с таким `query` и `searchType` уже существует, она обновится.
+    // Если нет - создастся новая.
+    // `search_count: 1` здесь неверно, нужно инкрементировать. Сделаем это через RPC.
+    
+    // Для этого лучше создать функцию в Supabase
+    const { error } = await supabase.rpc('increment_failed_search', {
+        p_query: query,
+        p_search_type: searchType
+    });
+    
+    if (error) {
+        console.error('[DB] Ошибка логирования неудачного поиска:', error.message);
+    }
+}
 export async function getUserActivityByDayHour(days = 30) {
     const { rows } = await query(`
         SELECT TO_CHAR(last_active, 'YYYY-MM-DD') AS day, EXTRACT(HOUR FROM last_active) AS hour, COUNT(*) AS count
