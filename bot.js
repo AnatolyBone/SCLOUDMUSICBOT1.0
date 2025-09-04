@@ -80,8 +80,8 @@ bot.use(async (ctx, next) => {
     ctx.state.user = user;
     if (user && user.active === false) {
         console.log(`[Access Denied] Заблокированный пользователь ${ctx.from.id} попытался использовать бота.`);
-        ctx.reply(T('blockedMessage')).catch(() => {});
-        return;
+        ctx.reply(T('blockedMessage'), { parse_mode: 'HTML' }).catch(() => {});
+        return; // Останавливаем обработку для заблокированных
     }
     await resetDailyLimitIfNeeded(ctx.from.id);
     return next();
