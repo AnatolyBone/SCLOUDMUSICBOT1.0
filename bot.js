@@ -196,7 +196,7 @@ bot.on('inline_query', async (ctx) => {
         });
     }
     try {
-        const results = await performInlineSearch(query);
+        const results = await performInlineSearch(query, ctx.from.id);
         await ctx.answerInlineQuery(results, { cache_time: 60 });
     } catch (error) {
         console.error('[Inline Query] Глобальная ошибка обработчика:', error);
