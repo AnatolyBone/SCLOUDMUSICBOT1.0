@@ -136,6 +136,7 @@ bot.use(async (ctx, next) => {
 // bot.js
 
 bot.start(async (ctx) => {
+    console.log(`[DEBUG] Checkpoint 1 (bot.start): startPayload = ${ctx.startPayload}`);
     // 1. Мы вызываем ТОЛЬКО getUser, передавая в него всю информацию, включая startPayload.
     // getUser сам разберется: если пользователя нет - создаст его с referrer_id, если есть - просто вернет.
     const user = await getUser(ctx.from.id, ctx.from.first_name, ctx.from.username, ctx.startPayload || null);
