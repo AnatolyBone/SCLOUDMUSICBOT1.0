@@ -43,7 +43,7 @@ async function safeSendMessage(userId, text, extra = {}) {
 }
 
 async function trackDownloadProcessor(task) {
-    const { userId, source, url, originalUrl, metadata } = task;
+    const { userId, source, url, originalUrl, metadata, ctx } = task;
     const { title, uploader, id: trackId, duration, thumbnail } = metadata;
     const roundedDuration = duration ? Math.round(duration) : undefined;
     
