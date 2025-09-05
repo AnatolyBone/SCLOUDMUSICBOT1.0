@@ -44,11 +44,23 @@ export async function createUser(id, firstName = '', username = '', startPayload
     await query(sql, [id, firstName, username, referrerId]);
 }
 
+// db.js
+
+// ЗАМЕНИТЕ ВАШУ ФУНКЦИЮ getUser НА ЭТУ
 export async function getUser(id, firstName = '', username = '', startPayload = null) {
-  const { rows } = await query('SELECT * FROM users WHERE id = $1', [id]);
+  // Этот запрос теперь не только получает пользователя, но и считает его рефералов с помощью подзапроса
+  const sql = `
+        SELECT 
+            *, 
+            (SELECT COUNT(*) FROM users AS referrals WHERE referrals.referrer_id = u.id) as referral_count 
+        FROM 
+            users u
+        WHERE 
+            u.id = $1
+    `;
+  const { rows } = await query(sql, [id]);
   
   if (rows.length > 0) {
-    // Если пользователь существует, просто обновляем его last_active
     if (rows[0].active) {
       await query('UPDATE users SET last_active = NOW() WHERE id = $1', [id]);
     }
@@ -58,8 +70,8 @@ export async function getUser(id, firstName = '', username = '', startPayload = 
   // Если пользователя нет, создаем его, передавая startPayload
   await createUser(id, firstName, username, startPayload);
   
-  // И возвращаем только что созданного пользователя
-  const newUserResult = await query('SELECT * FROM users WHERE id = $1', [id]);
+  // И возвращаем только что созданного пользователя (с referral_count = 0)
+  const newUserResult = await query(sql, [id]);
   return newUserResult.rows[0];
 }
 
