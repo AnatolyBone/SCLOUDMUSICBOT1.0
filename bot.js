@@ -387,7 +387,7 @@ if (data.entries && data.entries.length > 0) {
     // ЭТО ПЛЕЙЛИСТ
     
     // =====> ИСПРАВЛЕНИЕ №1: Фильтруем "плохие" треки <=====
-    const validTracks = data.entries.filter(track => track && track.title && track.url);
+    const validTracks = data.entries.filter(track => track && track.url);
     
     if (validTracks.length === 0) {
         await ctx.telegram.editMessageText(ctx.chat.id, loadingMessage.message_id, undefined, '❌ В этом плейлисте не найдено доступных для скачивания треков.').catch(() => {});
