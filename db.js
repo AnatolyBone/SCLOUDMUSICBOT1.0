@@ -585,6 +585,42 @@ export async function logFailedSearch({ query, searchType }) {
         console.error('[DB] Ошибка логирования неудачного поиска:', error.message);
     }
 }
+// ... (весь ваш существующий код в db.js) ...
+
+/**
+ * Получает топ-N самых частых неудачных поисковых запросов.
+ * @param {number} limit - Количество запросов для получения.
+ * @returns {Promise<Array<{query: string, search_count: number}>>}
+ */
+export async function getTopFailedSearches(limit = 5) {
+    const { data, error } = await supabase
+        .from('failed_searches')
+        .select('query, search_count')
+        .order('search_count', { ascending: false })
+        .limit(limit);
+
+    if (error) {
+        console.error('[DB] Ошибка получения топа неудачных запросов:', error.message);
+        return [];
+    }
+    return data;
+}
+
+/**
+ * Получает топ-N самых популярных поисковых запросов за последние 24 часа.
+ * @param {number} limit - Количество запросов для получения.
+ * @returns {Promise<Array<{query: string, total: number}>>}
+ */
+export async function getTopRecentSearches(limit = 5) {
+    // RPC (Remote Procedure Call) - это вызов функции, которую мы создадим в базе данных
+    const { data, error } = await supabase.rpc('get_top_recent_searches', { limit_count: limit });
+
+    if (error) {
+        console.error('[DB] Ошибка получения топа недавних запросов:', error.message);
+        return [];
+    }
+    return data;
+}
 export async function getUserActivityByDayHour(days = 30) {
     const { rows } = await query(`
         SELECT TO_CHAR(last_active, 'YYYY-MM-DD') AS day, EXTRACT(HOUR FROM last_active) AS hour, COUNT(*) AS count
