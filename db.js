@@ -621,6 +621,28 @@ export async function getTopRecentSearches(limit = 5) {
     }
     return data;
 }
+// ... (весь ваш существующий код в db.js) ...
+
+/**
+ * Считает количество новых пользователей за указанный период.
+ * @param {number} days - Количество дней (например, 1 для суток, 7 для недели).
+ * @returns {Promise<number>}
+ */
+export async function getNewUsersCount(days = 1) {
+    const date = new Date();
+    date.setDate(date.getDate() - days);
+
+    const { count, error } = await supabase
+        .from('users')
+        .select('*', { count: 'exact', head: true })
+        .gte('created_at', date.toISOString());
+
+    if (error) {
+        console.error(`[DB] Ошибка получения количества новых пользователей за ${days} дней:`, error.message);
+        return 0;
+    }
+    return count;
+}
 export async function getUserActivityByDayHour(days = 30) {
     const { rows } = await query(`
         SELECT TO_CHAR(last_active, 'YYYY-MM-DD') AS day, EXTRACT(HOUR FROM last_active) AS hour, COUNT(*) AS count
