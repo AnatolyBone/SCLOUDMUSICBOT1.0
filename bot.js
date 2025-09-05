@@ -80,13 +80,12 @@ function formatMenuMessage(user, botUsername) { // Добавили botUsername
     `.trim();
     
     // Добавляем новый блок с реферальной информацией
-    message += `
-
-<hr>
-
-🙋‍♂️ <b>Приглашено друзей:</b> <i>${referralCount}</i>
-🔗 <b>Твоя ссылка для бонусов:</b>
-<code>${referralLink}</code>`;
+    // ...
+message += `\n\n- - - - - - - - - - - - - - -\n\n` + // <--- ИСПОЛЬЗУЕМ ПРОСТОЙ РАЗДЕЛИТЕЛЬ
+    `🙋‍♂️ <b>Приглашено друзей:</b> <i>${referralCount}</i>\n` +
+    `🔗 <b>Твоя ссылка для бонусов:</b>\n` +
+    `<code>${referralLink}</code>`;
+// ...
     
     // Добавляем блок с бонусом за подписку (если нужно)
     if (!user.subscribed_bonus_used && CHANNEL_USERNAME) {
