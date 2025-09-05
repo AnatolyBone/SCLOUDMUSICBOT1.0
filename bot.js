@@ -318,7 +318,7 @@ bot.action(/pl_download_all:|pl_download_10:/, async (ctx) => {
     }
 
     let reportMessage = '';
-    if (sentFromCacheCount > 0) reportMessage += `✅ ${sentFromCacheCount} трек(ов) отправлено из кэша.\n`;
+    if (sentFromCacheCount > 0) reportMessage += `✅ ${sentFromCacheCount} трек(ов) отправлено.\n`;
     if (tasksToReallyDownload.length > 0) reportMessage += `⏳ ${tasksToReallyDownload.length} трек(ов) добавлено в очередь на скачивание.`;
     
     // Если ничего не было сделано (например, все в кэше, но лимит 0), даем фидбэк
@@ -417,7 +417,7 @@ bot.action(/pl_finish:(.+)/, async (ctx) => {
     }
     
     let reportMessage = '';
-    if (sentFromCacheCount > 0) reportMessage += `✅ ${sentFromCacheCount} трек(ов) отправлено из кэша.\n`;
+    if (sentFromCacheCount > 0) reportMessage += `✅ ${sentFromCacheCount} трек(ов) отправлено.\n`;
     if (tasksToReallyDownload.length > 0) reportMessage += `⏳ ${tasksToReallyDownload.length} трек(ов) добавлено в очередь.`;
     if (!reportMessage) reportMessage = 'Все выбранные треки уже в кэше, но ваш дневной лимит исчерпан.';
     
