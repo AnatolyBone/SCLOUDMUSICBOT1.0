@@ -267,29 +267,65 @@ bot.on('inline_query', async (ctx) => {
 // ======================= НОВЫЕ ОБРАБОТЧИКИ ДЛЯ ПЛЕЙЛИСТОВ =======================
 
 // Обработчик кнопки "Скачать первые 10"
+// Обработчик кнопки "Скачать первые 10"
 bot.action(/pl_download_10:(.+)/, async (ctx) => {
     const playlistId = ctx.match[1];
     const userId = ctx.from.id;
     const session = playlistSessions.get(userId);
-
+    
     if (!session || session.playlistId !== playlistId) {
         return await ctx.answerCbQuery('❗️ Сессия выбора истекла. Пожалуйста, отправьте ссылку на плейлист заново.', { show_alert: true });
     }
-
-    await ctx.editMessageText(`✅ Отлично! Ставлю первые 10 треков в очередь на скачивание...`);
     
-    const tracksToDownload = session.tracks.slice(0, 10);
-    for (const track of tracksToDownload) {
-        // Вызываем существующую функцию постановки в очередь
-        enqueue(ctx, userId, track.url).catch(err => {
-            console.error(`[Playlist Enqueue Error] Ошибка для user ${userId} трек ${track.url}:`, err.message);
-        });
+    // Перед добавлением в очередь, проверим лимиты пользователя
+    await resetDailyLimitIfNeeded(userId);
+    const user = await getUser(userId);
+    const remainingLimit = user.premium_limit - user.downloads_today;
+    
+    if (remainingLimit <= 0) {
+        await ctx.editMessageText(T('limitReached'), { parse_mode: 'HTML' });
+        playlistSessions.delete(userId); // Очищаем сессию
+        return;
     }
-
+    
+    const tracksFromPlaylist = session.tracks.slice(0, 10);
+    // Берем не больше, чем позволяет оставшийся лимит
+    const tracksToProcess = tracksFromPlaylist.slice(0, remainingLimit);
+    
+    if (tracksToProcess.length === 0) {
+        await ctx.editMessageText('Все треки из этой сессии уже не помещаются в ваш дневной лимит.');
+        playlistSessions.delete(userId);
+        return;
+    }
+    
+    let message = `✅ Отлично! Ставлю ${tracksToProcess.length} трек(ов) в очередь на скачивание...`;
+    if (tracksToProcess.length < tracksFromPlaylist.length) {
+        message += `\n(Остальные не поместились в ваш дневной лимит)`
+    }
+    await ctx.editMessageText(message);
+    
+    // НАПРЯМУЮ добавляем задачи в очередь, минуя enqueue
+    for (const track of tracksToProcess) {
+        // Формируем задачу в том же формате, который ожидает trackDownloadProcessor
+        const task = {
+            userId: userId,
+            source: 'soundcloud',
+            url: track.url, // URL для скачивания
+            originalUrl: track.url, // URL для ключа кэша
+            metadata: {
+                id: track.id,
+                title: track.title || 'Unknown Title',
+                uploader: track.uploader || 'Unknown Artist',
+                duration: track.duration,
+                thumbnail: track.thumbnail,
+            }
+        };
+        downloadQueue.add(task); // Используем метод .add() из вашего TaskQueue
+    }
+    
     // Очищаем сессию после использования
     playlistSessions.delete(userId);
 });
-
 // Обработчик кнопки "Выбрать треки вручную" (пока что заглушка)
 bot.action(/pl_select_manual:(.+)/, async (ctx) => {
     // В следующей итерации мы реализуем здесь логику пагинации
