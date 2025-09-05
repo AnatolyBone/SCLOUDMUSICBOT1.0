@@ -34,7 +34,10 @@ const editableTexts = {
     `👉 Донат: <a href="https://boosty.to/anatoly_bone/donate">boosty.to/anatoly_bone/donate</a>\n` +
     `✉️ После оплаты напиши: @anatolybone\n\n` +
     `📣 Новости и фишки: @SCMBLOG`,
-
+// ...
+menuHeader: '👋 Привет, {first_name}!\n<b>Твой профиль:</b>',
+menuReferralBlock: <b>Приглашено друзей:</b> <i>{referral_count}</i>\n🔗 <b>Твоя ссылка для бонусов:</b>\n<code>{referral_link}</code>',
+// ...
   helpInfo:
     'ℹ️ Пришли ссылку — получишь mp3.\n' +
     '🔓 «Расширить» — информация о тарифах.\n' +
