@@ -4,12 +4,13 @@ import { Telegraf, Markup, TelegramError } from 'telegraf';
 import { HttpsProxyAgent } from 'https-proxy-agent';
 import { ADMIN_ID, BOT_TOKEN, WEBHOOK_URL, CHANNEL_USERNAME, STORAGE_CHANNEL_ID, PROXY_URL } from './config.js';
 import { updateUserField, getUser, createUser, setPremium, getAllUsers, resetDailyLimitIfNeeded, getCachedTracksCount, logUserAction, getTopFailedSearches, getTopRecentSearches, getNewUsersCount,findCachedTrack,           // <--- ДОБАВИТЬ
-    incrementDownloadsAndSaveTrack } from './db.js';
+    incrementDownloadsAndSaveTrack, getReferrerInfo, getReferredUsers, getReferralStats} from './db.js';
 import { T, allTextsSync } from './config/texts.js';
 import { performInlineSearch } from './services/searchManager.js';
 import { spotifyEnqueue } from './services/spotifyManager.js';
 import { downloadQueue } from './services/downloadManager.js';
 import execYoutubeDl from 'youtube-dl-exec';
+import { handleReferralCommand, processNewUserReferral } from './services/referralManager.js';
 import { isShuttingDown, isMaintenanceMode, setMaintenanceMode } from './services/appState.js';
 
 // --- Глобальные переменные и хелперы ---
@@ -104,19 +105,38 @@ bot.use(async (ctx, next) => {
 });
 
 // --- Обработчики команд и кнопок ---
+// bot.js
+
 bot.start(async (ctx) => {
-    await createUser(ctx.from.id, ctx.from.first_name, ctx.from.username, ctx.startPayload || null);
-    const user = await getUser(ctx.from.id);
+    // 1. Мы вызываем ТОЛЬКО getUser, передавая в него всю информацию, включая startPayload.
+    // getUser сам разберется: если пользователя нет - создаст его с referrer_id, если есть - просто вернет.
+    const user = await getUser(ctx.from.id, ctx.from.first_name, ctx.from.username, ctx.startPayload || null);
+    
+    // 2. Проверяем, действительно ли это новая регистрация.
     const isNewRegistration = (Date.now() - new Date(user.created_at).getTime()) < 5000;
-    if (isNewRegistration) await logUserAction(ctx.from.id, 'registration');
+    
+    // 3. Если пользователь новый, запускаем всю логику для новичков.
+    if (isNewRegistration) {
+        // Логируем сам факт регистрации
+        await logUserAction(ctx.from.id, 'registration');
+        
+        // Запускаем нашу новую реферальную логику.
+        // Она сама проверит, есть ли у пользователя referrer_id, и начислит бонусы.
+        await processNewUserReferral(user, ctx);
+    }
+    
+    // 4. Отправляем приветственное сообщение.
     const startMessage = isNewRegistration ? T('start_new_user') : T('start');
+    
     await ctx.reply(startMessage, {
         parse_mode: 'HTML',
         disable_web_page_preview: true,
-        ...Markup.keyboard([[T('menu'), T('upgrade')], [T('mytracks'), T('help')]]).resize()
+        ...Markup.keyboard([
+            [T('menu'), T('upgrade')],
+            [T('mytracks'), T('help')]
+        ]).resize()
     });
 });
-
 bot.command('admin', async (ctx) => {
     if (ctx.from.id !== ADMIN_ID) return;
     try {
@@ -186,6 +206,7 @@ bot.command('admin', async (ctx) => {
         await ctx.reply('❌ Не удалось собрать статистику.');
     }
 });
+bot.command('referral', handleReferralCommand);
 bot.command('maintenance', (ctx) => {
     if (ctx.from.id !== ADMIN_ID) return;
     
