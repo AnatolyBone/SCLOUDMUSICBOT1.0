@@ -46,8 +46,7 @@ export async function createUser(id, firstName = '', username = '', startPayload
 
 // db.js
 
-// db.js
-
+// ЗАМЕНИТЕ ВАШУ getUser НА ЭТУ ВЕРСИЮ
 export async function getUser(id, firstName = '', username = '', startPayload = null) {
   // 1. Ищем пользователя и сразу считаем его рефералов
   const sqlSelect = `
@@ -61,8 +60,6 @@ export async function getUser(id, firstName = '', username = '', startPayload = 
   if (rows.length > 0) {
     // 2. ПОЛЬЗОВАТЕЛЬ НАЙДЕН
     // Он уже существует, поэтому он НЕ МОЖЕТ стать рефералом.
-    // Мы просто обновляем его last_active и возвращаем данные.
-    // Никакой логики с referrer_id здесь больше нет.
     const user = rows[0];
     if (user.active) {
       await query('UPDATE users SET last_active = NOW() WHERE id = $1', [id]);
@@ -74,21 +71,22 @@ export async function getUser(id, firstName = '', username = '', startPayload = 
     // СНАЧАЛА парсим startPayload, чтобы получить ID реферера
     let referrerId = null;
     if (startPayload && startPayload.startsWith('ref_')) {
+      // =====> ИСПРАВЛЕННАЯ СТРОКА <=====
       const parsedId = parseInt(startPayload.split('_')[1], 10);
       if (!isNaN(parsedId) && parsedId !== id) {
         referrerId = parsedId;
       }
     }
     
-    // Создаем его, передавая referrerId. Если startPayload не было, referrerId будет null.
-    await createUser(id, firstName, username, referrerId);
+    // Вызываем createUser, передавая 5 аргументов:
+    // referral_source (4-й) будет null, а referrerId (5-й) - наш ID.
+    await createUser(id, firstName, username, null, referrerId);
     
     // И возвращаем только что созданного пользователя
     const newUserResult = await query(sqlSelect, [id]);
     return newUserResult.rows[0];
   }
-}
-
+} // <--- ВОТ НЕДОСТАЮЩАЯ СКОБКА
 const allowedFields = new Set([
   'premium_limit', 'downloads_today', 'total_downloads', 'first_name', 'username',
   'premium_until', 'subscribed_bonus_used', 'tracks_today', 'last_reset_date',
