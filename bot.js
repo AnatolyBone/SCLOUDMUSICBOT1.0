@@ -3,7 +3,8 @@
 import { Telegraf, Markup, TelegramError } from 'telegraf';
 import { HttpsProxyAgent } from 'https-proxy-agent';
 import { ADMIN_ID, BOT_TOKEN, WEBHOOK_URL, CHANNEL_USERNAME, STORAGE_CHANNEL_ID, PROXY_URL } from './config.js';
-import { updateUserField, getUser, createUser, setPremium, getAllUsers, resetDailyLimitIfNeeded, getCachedTracksCount, logUserAction, getTopFailedSearches, getTopRecentSearches, getNewUsersCount } from './db.js';
+import { updateUserField, getUser, createUser, setPremium, getAllUsers, resetDailyLimitIfNeeded, getCachedTracksCount, logUserAction, getTopFailedSearches, getTopRecentSearches, getNewUsersCount,findCachedTrack,           // <--- ДОБАВИТЬ
+    incrementDownloadsAndSaveTrack } from './db.js';
 import { T, allTextsSync } from './config/texts.js';
 import { performInlineSearch } from './services/searchManager.js';
 import { spotifyEnqueue } from './services/spotifyManager.js';
@@ -270,23 +271,60 @@ bot.action(/pl_download_all:|pl_download_10:/, async (ctx) => {
     if (!session) return await ctx.answerCbQuery('❗️ Сессия выбора истекла.', { show_alert: true });
 
     const user = await getUser(userId);
-    const remainingLimit = user.premium_limit - (user.downloads_today || 0);
+    let remainingLimit = user.premium_limit - (user.downloads_today || 0);
     if (remainingLimit <= 0) {
         await ctx.editMessageText(T('limitReached'));
         return playlistSessions.delete(userId);
     }
+    
+    await ctx.editMessageText(`✅ Отлично! Проверяю кэш и формирую очередь...`);
+
     const tracksToTake = isAll ? session.tracks.length : 10;
-    const tracksToProcess = session.tracks.slice(0, tracksToTake).slice(0, remainingLimit);
-    let message = `✅ Отлично! Ставлю ${tracksToProcess.length} трек(ов) в очередь...`;
-    if (tracksToProcess.length < tracksToTake) message += `\n(Остальные не поместились в лимит)`;
-    await ctx.editMessageText(message);
+    const tracksToProcess = session.tracks.slice(0, tracksToTake);
+
+    let sentFromCacheCount = 0;
+    const tasksToDownload = [];
+
     for (const track of tracksToProcess) {
+        if (remainingLimit <= 0) break;
+
+        const url = track.webpage_url || track.url;
+        const cached = await findCachedTrack(url);
+
+        if (cached) {
+            try {
+                await bot.telegram.sendAudio(userId, cached.fileId);
+                await incrementDownloadsAndSaveTrack(userId, track.title, cached.fileId, url);
+                sentFromCacheCount++;
+                remainingLimit--;
+            } catch (e) {
+                if (e.description?.includes('FILE_REFERENCE_EXPIRED')) {
+                    tasksToDownload.push(track); // Если кэш битый, ставим на скачивание
+                } else {
+                    console.error(`Ошибка отправки из кэша для ${userId}:`, e.message);
+                }
+            }
+        } else {
+            tasksToDownload.push(track);
+        }
+    }
+    
+    const tasksToReallyDownload = tasksToDownload.slice(0, remainingLimit);
+    for (const track of tasksToReallyDownload) {
         addTaskToQueue({
-            userId, source: 'soundcloud', url: track.webpage_url || track.url,
-    originalUrl: track.webpage_url || track.url,
+            userId, source: 'soundcloud', url: track.webpage_url || track.url, originalUrl: track.webpage_url || track.url,
             metadata: { id: track.id, title: track.title, uploader: track.uploader, duration: track.duration, thumbnail: track.thumbnail }
         });
     }
+
+    let reportMessage = '';
+    if (sentFromCacheCount > 0) reportMessage += `✅ ${sentFromCacheCount} трек(ов) отправлено из кэша.\n`;
+    if (tasksToReallyDownload.length > 0) reportMessage += `⏳ ${tasksToReallyDownload.length} трек(ов) добавлено в очередь на скачивание.`;
+    
+    // Если ничего не было сделано (например, все в кэше, но лимит 0), даем фидбэк
+    if (!reportMessage) reportMessage = 'Все треки уже в кэше, но ваш дневной лимит исчерпан.';
+    
+    await ctx.reply(reportMessage);
     playlistSessions.delete(userId);
 });
 
@@ -331,24 +369,59 @@ bot.action(/pl_finish:(.+)/, async (ctx) => {
     const session = playlistSessions.get(userId);
     if (!session) return await ctx.answerCbQuery('❗️ Сессия выбора истекла.', { show_alert: true });
     if (session.selected.size === 0) return await ctx.answerCbQuery('Вы не выбрали ни одного трека.', { show_alert: true });
+
     const user = await getUser(userId);
-    const remainingLimit = user.premium_limit - (user.downloads_today || 0);
+    let remainingLimit = user.premium_limit - (user.downloads_today || 0);
     if (remainingLimit <= 0) {
         await ctx.editMessageText(T('limitReached'));
         return playlistSessions.delete(userId);
     }
+    
+    await ctx.editMessageText(`✅ Готово! Проверяю кэш и формирую очередь...`);
+    
     const selectedTracks = Array.from(session.selected).map(index => session.tracks[index]);
-    const tracksToProcess = selectedTracks.slice(0, remainingLimit);
-    let message = `✅ Готово! Добавляю ${tracksToProcess.length} треков в очередь...`;
-    if (tracksToProcess.length < selectedTracks.length) message += `\n(Остальные не поместились в лимит)`;
-    await ctx.editMessageText(message);
-    for (const track of tracksToProcess) {
+
+    let sentFromCacheCount = 0;
+    const tasksToDownload = [];
+
+    for (const track of selectedTracks) {
+        if (remainingLimit <= 0) break;
+
+        const url = track.webpage_url || track.url;
+        const cached = await findCachedTrack(url);
+
+        if (cached) {
+            try {
+                await bot.telegram.sendAudio(userId, cached.fileId);
+                await incrementDownloadsAndSaveTrack(userId, track.title, cached.fileId, url);
+                sentFromCacheCount++;
+                remainingLimit--;
+            } catch (e) {
+                if (e.description?.includes('FILE_REFERENCE_EXPIRED')) {
+                    tasksToDownload.push(track);
+                } else {
+                    console.error(`Ошибка отправки из кэша для ${userId}:`, e.message);
+                }
+            }
+        } else {
+            tasksToDownload.push(track);
+        }
+    }
+    
+    const tasksToReallyDownload = tasksToDownload.slice(0, remainingLimit);
+    for (const track of tasksToReallyDownload) {
         addTaskToQueue({
-            userId, source: 'soundcloud', url: track.webpage_url || track.url,
-    originalUrl: track.webpage_url || track.url,
+            userId, source: 'soundcloud', url: track.webpage_url || track.url, originalUrl: track.webpage_url || track.url,
             metadata: { id: track.id, title: track.title, uploader: track.uploader, duration: track.duration, thumbnail: track.thumbnail }
         });
     }
+    
+    let reportMessage = '';
+    if (sentFromCacheCount > 0) reportMessage += `✅ ${sentFromCacheCount} трек(ов) отправлено из кэша.\n`;
+    if (tasksToReallyDownload.length > 0) reportMessage += `⏳ ${tasksToReallyDownload.length} трек(ов) добавлено в очередь.`;
+    if (!reportMessage) reportMessage = 'Все выбранные треки уже в кэше, но ваш дневной лимит исчерпан.';
+    
+    await ctx.reply(reportMessage);
     playlistSessions.delete(userId);
 });
 
