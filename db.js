@@ -46,33 +46,47 @@ export async function createUser(id, firstName = '', username = '', startPayload
 
 // db.js
 
-// ЗАМЕНИТЕ ВАШУ ФУНКЦИЮ getUser НА ЭТУ
+// db.js
+
 export async function getUser(id, firstName = '', username = '', startPayload = null) {
-  // Этот запрос теперь не только получает пользователя, но и считает его рефералов с помощью подзапроса
-  const sql = `
+  // 1. Ищем пользователя и сразу считаем его рефералов
+  const sqlSelect = `
         SELECT 
             *, 
             (SELECT COUNT(*) FROM users AS referrals WHERE referrals.referrer_id = u.id) as referral_count 
-        FROM 
-            users u
-        WHERE 
-            u.id = $1
+        FROM users u WHERE u.id = $1
     `;
-  const { rows } = await query(sql, [id]);
+  const { rows } = await query(sqlSelect, [id]);
   
   if (rows.length > 0) {
-    if (rows[0].active) {
+    // 2. ПОЛЬЗОВАТЕЛЬ НАЙДЕН
+    // Он уже существует, поэтому он НЕ МОЖЕТ стать рефералом.
+    // Мы просто обновляем его last_active и возвращаем данные.
+    // Никакой логики с referrer_id здесь больше нет.
+    const user = rows[0];
+    if (user.active) {
       await query('UPDATE users SET last_active = NOW() WHERE id = $1', [id]);
     }
-    return rows[0];
+    return user;
+  } else {
+    // 3. ПОЛЬЗОВАТЕЛЬ НЕ НАЙДЕН - вот здесь происходит вся магия
+    
+    // СНАЧАЛА парсим startPayload, чтобы получить ID реферера
+    let referrerId = null;
+    if (startPayload && startPayload.startsWith('ref_')) {
+      const parsedId = parseInt(startPayload.split('_')[1], 10);
+      if (!isNaN(parsedId) && parsedId !== id) {
+        referrerId = parsedId;
+      }
+    }
+    
+    // Создаем его, передавая referrerId. Если startPayload не было, referrerId будет null.
+    await createUser(id, firstName, username, referrerId);
+    
+    // И возвращаем только что созданного пользователя
+    const newUserResult = await query(sqlSelect, [id]);
+    return newUserResult.rows[0];
   }
-  
-  // Если пользователя нет, создаем его, передавая startPayload
-  await createUser(id, firstName, username, startPayload);
-  
-  // И возвращаем только что созданного пользователя (с referral_count = 0)
-  const newUserResult = await query(sql, [id]);
-  return newUserResult.rows[0];
 }
 
 const allowedFields = new Set([
