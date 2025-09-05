@@ -1,528 +1,751 @@
-// ======================= ФИНАЛЬНАЯ ВЕРСИЯ BOT.JS =======================
+// db.js (ФИНАЛЬНАЯ ПОЛНАЯ ВЕРСИЯ БЕЗ ПРОПУСКОВ И ДУБЛИКАТОВ)
 
-import { Telegraf, Markup, TelegramError } from 'telegraf';
-import { HttpsProxyAgent } from 'https-proxy-agent';
-import { ADMIN_ID, BOT_TOKEN, WEBHOOK_URL, CHANNEL_USERNAME, STORAGE_CHANNEL_ID, PROXY_URL } from './config.js';
-import { updateUserField, getUser, createUser, setPremium, getAllUsers, resetDailyLimitIfNeeded, getCachedTracksCount, logUserAction, getTopFailedSearches, getTopRecentSearches, getNewUsersCount,findCachedTrack,           // <--- ДОБАВИТЬ
-    incrementDownloadsAndSaveTrack } from './db.js';
-import { T, allTextsSync } from './config/texts.js';
-import { performInlineSearch } from './services/searchManager.js';
-import { spotifyEnqueue } from './services/spotifyManager.js';
-import { downloadQueue } from './services/downloadManager.js';
-import execYoutubeDl from 'youtube-dl-exec';
-import { isShuttingDown, isMaintenanceMode, setMaintenanceMode } from './services/appState.js';
+import { Pool } from 'pg';
+import { createClient } from '@supabase/supabase-js';
+import { SUPABASE_URL, SUPABASE_KEY, DATABASE_URL } from './config.js';
 
-// --- Глобальные переменные и хелперы ---
-const playlistSessions = new Map();
-const TRACKS_PER_PAGE = 5;
+export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+export const pool = new Pool({
+  connectionString: DATABASE_URL,
+  ssl: { rejectUnauthorized: false },
+});
 
-function getYoutubeDl() {
-    const options = {};
-    if (PROXY_URL) options.proxy = PROXY_URL;
-    return (url, flags) => execYoutubeDl(url, flags, options);
+async function query(text, params) {
+  try {
+    return await pool.query(text, params);
+  } catch (e) {
+    console.error('❌ Ошибка запроса к БД:', e.message, { query: text });
+    throw e;
+  }
+}
+
+// --- Пользователи ---
+export async function getUserById(id) {
+  const { rows } = await query('SELECT * FROM users WHERE id = $1', [id]);
+  return rows[0] || null;
+}
+
+export async function createUser(id, firstName = '', username = '', startPayload = null) {
+    let referrerId = null;
+    if (startPayload && startPayload.startsWith('ref_')) {
+        const parsedId = parseInt(startPayload.split('_')[1], 10);
+        // Проверка, что ID корректный и пользователь не пригласил сам себя
+        if (!isNaN(parsedId) && parsedId !== id) {
+            referrerId = parsedId;
+        }
+    }
+
+    // Обратите внимание: мы используем вычисленный referrerId здесь
+    const sql = `
+        INSERT INTO users (id, first_name, username, referrer_id, last_active, last_reset_date)
+        VALUES ($1, $2, $3, $4, NOW(), CURRENT_DATE)
+        ON CONFLICT (id) DO NOTHING
+    `;
+    await query(sql, [id, firstName, username, referrerId]);
+}
+
+export async function getUser(id, firstName = '', username = '', startPayload = null) {
+  const { rows } = await query('SELECT * FROM users WHERE id = $1', [id]);
+  
+  if (rows.length > 0) {
+    // Если пользователь существует, просто обновляем его last_active
+    if (rows[0].active) {
+      await query('UPDATE users SET last_active = NOW() WHERE id = $1', [id]);
+    }
+    return rows[0];
+  }
+  
+  // Если пользователя нет, создаем его, передавая startPayload
+  await createUser(id, firstName, username, startPayload);
+  
+  // И возвращаем только что созданного пользователя
+  const newUserResult = await query('SELECT * FROM users WHERE id = $1', [id]);
+  return newUserResult.rows[0];
+}
+
+const allowedFields = new Set([
+  'premium_limit', 'downloads_today', 'total_downloads', 'first_name', 'username',
+  'premium_until', 'subscribed_bonus_used', 'tracks_today', 'last_reset_date',
+  'active', 'referred_count', 'promo_1plus1_used', 'has_reviewed'
+]);
+
+export async function updateUserField(id, field, value) {
+  if (!allowedFields.has(field)) {
+    throw new Error(`Недопустимое поле для обновления: ${field}`);
+  }
+  await query(`UPDATE users SET ${field} = $1 WHERE id = $2`, [value, id]);
+}
+
+export async function getAllUsers(includeInactive = true) {
+  const sql = includeInactive ? 'SELECT * FROM users ORDER BY created_at DESC' : 'SELECT * FROM users WHERE active = TRUE ORDER BY created_at DESC';
+  const { rows } = await query(sql);
+  return rows;
+}
+
+export async function getPaginatedUsers(options) {
+    const { searchQuery = '', statusFilter = '', page = 1, limit = 25, sortBy = 'created_at', sortOrder = 'desc' } = options;
+    const allowedSortFields = ['id', 'total_downloads', 'created_at', 'last_active', 'premium_limit', 'active'];
+    const safeSortBy = allowedSortFields.includes(sortBy) ? `"${sortBy}"` : '"created_at"';
+    const safeSortOrder = sortOrder.toLowerCase() === 'asc' ? 'ASC' : 'DESC';
+    const offset = (page - 1) * limit;
+    let whereClauses = [];
+    let queryParams = [];
+    let paramIndex = 1;
+    if (statusFilter === 'active') { whereClauses.push('active = TRUE'); } 
+    else if (statusFilter === 'inactive') { whereClauses.push('active = FALSE'); }
+    if (searchQuery) {
+        queryParams.push(`%${searchQuery}%`);
+        whereClauses.push(`(CAST(id AS TEXT) ILIKE $${paramIndex} OR first_name ILIKE $${paramIndex} OR username ILIKE $${paramIndex})`);
+        paramIndex++;
+    }
+    const whereString = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+    const totalQuery = `SELECT COUNT(*) FROM users ${whereString}`;
+    const totalResult = await query(totalQuery, queryParams);
+    const totalUsers = parseInt(totalResult.rows[0].count, 10);
+    const totalPages = Math.ceil(totalUsers / limit);
+    queryParams.push(limit);
+    queryParams.push(offset);
+    const usersQuery = `SELECT * FROM users ${whereString} ORDER BY ${safeSortBy} ${safeSortOrder} LIMIT $${paramIndex++} OFFSET $${paramIndex++}`;
+    const usersResult = await query(usersQuery, queryParams);
+    return { users: usersResult.rows, totalPages, currentPage: page, totalUsers };
+}
+
+function escapeCsv(str) {
+    if (str === null || str === undefined) return '';
+    const s = String(str);
+    if (s.includes(',') || s.includes('"') || s.includes('\n')) {
+        return `"${s.replace(/"/g, '""')}"`;
+    }
+    return s;
+}
+
+export async function getUsersAsCsv(options) {
+    const { searchQuery = '', statusFilter = '' } = options;
+    let whereClauses = [];
+    let queryParams = [];
+    let paramIndex = 1;
+    if (statusFilter === 'active') { whereClauses.push('active = TRUE'); } 
+    else if (statusFilter === 'inactive') { whereClauses.push('active = FALSE'); }
+    if (searchQuery) {
+        queryParams.push(`%${searchQuery}%`);
+        whereClauses.push(`(CAST(id AS TEXT) ILIKE $${paramIndex} OR first_name ILIKE $${paramIndex} OR username ILIKE $${paramIndex})`);
+    }
+    const whereString = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+
+    const { rows } = await query(`SELECT * FROM users ${whereString} ORDER BY created_at DESC`, queryParams);
+
+    const headers = 'ID,FirstName,Username,Status,TotalDownloads,PremiumLimit,PremiumUntil,CreatedAt,LastActive\n';
+    const csvRows = rows.map(u => [
+        u.id, escapeCsv(u.first_name), escapeCsv(u.username),
+        u.active ? 'active' : 'inactive',
+        u.total_downloads || 0, u.premium_limit || 0,
+        u.premium_until ? new Date(u.premium_until).toISOString() : '',
+        new Date(u.created_at).toISOString(),
+        u.last_active ? new Date(u.last_active).toISOString() : ''
+    ].join(','));
+
+    return headers + csvRows.join('\n');
+}
+
+// --- Тарифы и лимиты ---
+// ЗАМЕНИТЕ ВАШУ ФУНКЦИЮ setPremium НА ЭТУ
+export async function setPremium(userId, limit, days, addDays = false) {
+  const user = await getUser(userId);
+  if (!user) return;
+  
+  let newPremiumUntil;
+  const now = new Date();
+  
+  if (addDays && user.premium_until && new Date(user.premium_until) > now) {
+    // Если подписка активна и мы ДОБАВЛЯЕМ дни
+    newPremiumUntil = new Date(user.premium_until);
+    newPremiumUntil.setDate(newPremiumUntil.getDate() + days);
+  } else {
+    // Если подписка неактивна или мы ЗАМЕНЯЕМ дни
+    newPremiumUntil = new Date();
+    newPremiumUntil.setDate(now.getDate() + days);
+  }
+  
+  return updateUserField(userId, {
+    premium_limit: limit,
+    premium_until: newPremiumUntil.toISOString()
+  });
+}
+export async function resetDailyLimitIfNeeded(userId) {
+  const { rows } = await query('SELECT last_reset_date FROM users WHERE id = $1', [userId]);
+  if (rows.length > 0) {
+      const lastReset = new Date(rows[0].last_reset_date);
+      const today = new Date();
+      if(lastReset.toDateString() !== today.toDateString()){
+          await query(`UPDATE users SET downloads_today = 0, tracks_today = '[]'::jsonb, last_reset_date = CURRENT_DATE WHERE id = $1`, [userId]);
+      }
+  }
+}
+
+export async function resetDailyStats() {
+  await query(`UPDATE users SET downloads_today = 0, tracks_today = '[]'::jsonb, last_reset_date = CURRENT_DATE WHERE last_reset_date < CURRENT_DATE`);
+}
+
+export async function getExpiringUsers(days = 3) {
+    const { rows } = await query( `SELECT * FROM users WHERE premium_until IS NOT NULL AND premium_until BETWEEN NOW() AND NOW() + INTERVAL '${days} days' ORDER BY premium_until ASC`);
+    return rows;
+}
+
+// --- Кэш треков ---
+export async function searchTracksInCache(query, limit = 7) {
+  try {
+    const { data, error } = await supabase.rpc('search_tracks', { search_query: query, result_limit: limit });
+    if (error) {
+      console.error('[DB Search] Ошибка при вызове RPC search_tracks:', error);
+      return [];
+    }
+    return data;
+  } catch (e) {
+    console.error('[DB Search] Критическая ошибка при поиске в кэше:', e);
+    return [];
+  }
+}
+
+export async function cacheTrack(trackData) {
+  const { url, fileId, title, artist, duration, thumbnail } = trackData;
+  await pool.query(
+    `INSERT INTO track_cache (url, file_id, title, artist, duration, thumbnail)
+     VALUES ($1, $2, $3, $4, $5, $6)
+     ON CONFLICT (url) DO UPDATE SET
+       file_id = EXCLUDED.file_id, title = EXCLUDED.title, artist = EXCLUDED.artist,
+       duration = EXCLUDED.duration, thumbnail = EXCLUDED.thumbnail;`,
+    [url, fileId, title, artist, duration, thumbnail]
+  );
+}
+
+export async function findCachedTrack(trackUrl) {
+  try {
+    const { data, error } = await supabase.from('track_cache').select('file_id, title').eq('url', trackUrl).single();
+    if (error && error.code !== 'PGRST116') console.error('Ошибка поиска в кэше Supabase:', error);
+    return data ? { fileId: data.file_id, trackName: data.title } : null;
+  } catch (e) {
+    console.error('Критическая ошибка в findCachedTrack:', e);
+    return null;
+  }
+}
+
+export async function getCachedTracksCount() {
+  try {
+    const { rows } = await query('SELECT COUNT(*) FROM track_cache');
+    return parseInt(rows[0].count, 10);
+  } catch (e) {
+    console.error("Ошибка при подсчете кэшированных треков:", e.message);
+    return 0;
+  }
+}
+
+// --- Логирование ---
+export async function incrementDownloadsAndSaveTrack(userId, trackName, fileId, url) {
+  const newTrack = { title: trackName, fileId: fileId, url: url };
+  const res = await query(
+    `UPDATE users
+     SET downloads_today = downloads_today + 1, total_downloads = total_downloads + 1, tracks_today = COALESCE(tracks_today, '[]'::jsonb) || $1::jsonb
+     WHERE id = $2 AND downloads_today < premium_limit
+     RETURNING *`,
+    [newTrack, userId]
+  );
+  if (res.rowCount > 0) {
+    await logDownload(userId, trackName, url);
+  }
+  return res.rowCount > 0 ? res.rows[0] : null;
+}
+
+export async function logDownload(userId, trackTitle, url) { 
+  try {
+    await supabase.from('downloads_log').insert([{ user_id: userId, track_title: trackTitle, url: url }]);
+  } catch (e) {
+    console.error(`❌ Критическая ошибка вызова Supabase для logDownload:`, e.message);
+  }
+}
+
+export async function logEvent(userId, event) {
+  try {
+    await supabase.from('events').insert([{ user_id: userId, event_type: event }]);
+  } catch (e) {
+    console.error(`❌ Критическая ошибка вызова Supabase для logEvent:`, e.message);
+  }
+}
+
+export async function logUserAction(userId, actionType, details = null) {
+  try {
+    await supabase.from('user_actions_log').insert([
+      { user_id: userId, action_type: actionType, details: details }
+    ]);
+  } catch (e) {
+    console.error(`❌ Ошибка логирования действия для пользователя ${userId}:`, e.message);
+  }
+}
+
+export async function getUserActions(userId, limit = 20) {
+  try {
+    const { data, error } = await supabase
+      .from('user_actions_log').select('*')
+      .eq('user_id', userId).order('created_at', { ascending: false }).limit(limit);
+    if (error) throw error;
+    return data;
+  } catch (e) {
+    console.error(`❌ Ошибка получения лога действий для ${userId}:`, e.message);
+    return [];
+  }
+}
+
+// --- Статистика для дашборда ---
+export async function getReferralSourcesStats() {
+  const { rows } = await query(`SELECT referral_source, COUNT(*) as count FROM users WHERE referral_source IS NOT NULL GROUP BY referral_source ORDER BY count DESC`);
+  return rows.map(row => ({ source: row.referral_source, count: parseInt(row.count, 10) }));
+}
+
+export async function getRegistrationsByDate() {
+  const { rows } = await query(`SELECT TO_CHAR(created_at, 'YYYY-MM-DD') as date, COUNT(*) as count FROM users GROUP BY date ORDER BY date`);
+  return rows.reduce((acc, row) => ({ ...acc, [row.date]: parseInt(row.count, 10) }), {});
+}
+
+export async function getDownloadsByDate() {
+  const { rows } = await query(`SELECT TO_CHAR(downloaded_at, 'YYYY-MM-DD') as date, COUNT(*) as count FROM downloads_log GROUP BY date ORDER BY date`);
+  return rows.reduce((acc, row) => ({ ...acc, [row.date]: parseInt(row.count, 10) }), {});
+}
+
+// ВОССТАНОВЛЕННАЯ ФУНКЦИЯ
+export async function getActiveUsersByDate() {
+  const { rows } = await query(`SELECT TO_CHAR(last_active, 'YYYY-MM-DD') as date, COUNT(DISTINCT id) as count FROM users WHERE last_active IS NOT NULL GROUP BY date ORDER BY date`);
+  return rows.reduce((acc, row) => ({ ...acc, [row.date]: parseInt(row.count, 10) }), {});
+}
+
+export async function getDownloadsByUserId(userId, limit = 50) {
+  const { rows } = await query(
+    `SELECT track_title, downloaded_at FROM downloads_log WHERE user_id = $1 ORDER BY downloaded_at DESC LIMIT $2`,
+    [userId, limit]
+  );
+  return rows;
+}
+
+export async function getReferralsByUserId(userId) {
+  const { rows } = await query(
+    `SELECT id, first_name, username, created_at FROM users WHERE referrer_id = $1 ORDER BY created_at DESC`,
+    [userId]
+  );
+  return rows;
+}
+
+export async function getUsersCountByTariff() {
+  const { rows } = await query(`
+    SELECT CASE 
+        WHEN premium_limit <= 5 THEN 'Free' WHEN premium_limit = 30 THEN 'Plus'
+        WHEN premium_limit = 100 THEN 'Pro' WHEN premium_limit >= 10000 THEN 'Unlimited'
+        ELSE 'Other'
+      END as tariff, COUNT(id) as count
+    FROM users WHERE active = TRUE GROUP BY tariff;
+  `);
+  const result = { Free: 0, Plus: 0, Pro: 0, Unlimited: 0, Other: 0 };
+  rows.forEach(row => { result[row.tariff] = parseInt(row.count); });
+  return result;
+}
+
+export async function getTopReferralSources(limit = 5) {
+  const { rows } = await query(
+    `SELECT referral_source, COUNT(id) as count 
+     FROM users WHERE referral_source IS NOT NULL AND referral_source != ''
+     GROUP BY referral_source ORDER BY count DESC LIMIT $1`,
+    [limit]
+  );
+  return rows;
+}
+
+export async function getDailyStats(options = {}) {
+  const endDate = options.endDate ? new Date(options.endDate) : new Date();
+  const startDate = options.startDate ? new Date(options.startDate) : new Date(new Date().setDate(endDate.getDate() - 29));
+  const startDateSql = startDate.toISOString().slice(0, 10);
+  const endDateSql = endDate.toISOString().slice(0, 10);
+  const { rows } = await query(`
+    WITH date_series AS ( SELECT generate_series($1::date, $2::date, '1 day')::date AS day ),
+    daily_registrations AS ( SELECT created_at::date AS day, COUNT(id) AS registrations FROM users WHERE created_at::date BETWEEN $1 AND $2 GROUP BY created_at::date ),
+    daily_activity AS ( SELECT downloaded_at::date AS day, COUNT(id) AS downloads, COUNT(DISTINCT user_id) AS active_users FROM downloads_log WHERE downloaded_at::date BETWEEN $1 AND $2 GROUP BY downloaded_at::date )
+    SELECT to_char(ds.day, 'YYYY-MM-DD') as day, COALESCE(dr.registrations, 0)::int AS registrations,
+        COALESCE(da.active_users, 0)::int AS active_users, COALESCE(da.downloads, 0)::int AS downloads
+    FROM date_series ds LEFT JOIN daily_registrations dr ON ds.day = dr.day
+    LEFT JOIN daily_activity da ON ds.day = da.day
+    ORDER BY ds.day;
+  `, [startDateSql, endDateSql]);
+  return rows;
+}
+
+export async function getActivityByWeekday() {
+  const { rows } = await query(`
+    SELECT TO_CHAR(downloaded_at, 'ID') as weekday_num, COUNT(*) as count
+    FROM downloads_log WHERE downloaded_at >= NOW() - INTERVAL '90 days'
+    GROUP BY 1 ORDER BY 1;
+  `);
+  const weekdays = ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота', 'Воскресенье'];
+  const result = Array(7).fill(0).map((_, i) => ({ weekday: weekdays[i], count: 0 }));
+  rows.forEach(row => { result[parseInt(row.weekday_num) - 1].count = parseInt(row.count); });
+  return result;
+}
+
+export async function getHourlyActivity(days = 7) {
+  const { rows } = await query(
+    `SELECT EXTRACT(HOUR FROM downloaded_at AT TIME ZONE 'UTC') as hour, COUNT(*) as count
+     FROM downloads_log WHERE downloaded_at >= NOW() - INTERVAL '${days} days'
+     GROUP BY hour ORDER BY hour;`
+  );
+  const hourlyCounts = Array(24).fill(0);
+  rows.forEach(row => { hourlyCounts[parseInt(row.hour, 10)] = parseInt(row.count, 10); });
+  return hourlyCounts;
+}
+
+export async function getTopTracks(limit = 10) {
+  const { rows } = await query(
+    `SELECT track_title, COUNT(*) as count FROM downloads_log GROUP BY track_title ORDER BY count DESC LIMIT $1`,
+    [limit]
+  );
+  return rows;
+}
+
+export async function getTopUsers(limit = 15) {
+  const { rows } = await query(
+    `SELECT id, first_name, username, total_downloads FROM users WHERE total_downloads > 0 ORDER BY total_downloads DESC LIMIT $1`,
+    [limit]
+  );
+  return rows;
+}
+
+// --- Рассылки ---
+// db.js
+
+// db.js
+
+// >>>>> ЗАМЕНИТЕ СУЩЕСТВУЮЩУЮ ФУНКЦИЮ createBroadcastTask <<<<<
+export async function createBroadcastTask(taskData) {
+  const {
+    message,
+    file_id,
+    file_mime_type,
+    keyboard,
+    disable_web_page_preview,
+    targetAudience,
+    scheduledAt,
+    disableNotification
+  } = taskData;
+  
+  const queryText = `
+        INSERT INTO broadcast_tasks (
+            message,                  -- $1
+            file_id,                  -- $2
+            file_mime_type,           -- $3
+            keyboard,                 -- $4
+            disable_web_page_preview, -- $5
+            target_audience,          -- $6
+            status,                   -- hardcoded
+            scheduled_at,             -- $7
+            disable_notification      -- $8
+        ) VALUES ($1, $2, $3, $4, $5, $6, 'pending', $7, $8)
+        RETURNING *;
+    `;
+  
+  const values = [
+    message, // $1
+    file_id, // $2
+    file_mime_type, // $3
+    keyboard ? JSON.stringify(keyboard) : null, // $4 (Явное преобразование в JSON-строку)
+    disable_web_page_preview, // $5
+    targetAudience, // $6
+    scheduledAt || new Date(), // $7
+    !!disableNotification // $8
+  ];
+  
+  const result = await query(queryText, values);
+  return result.rows[0];
+}
+
+
+// >>>>> ЗАМЕНИТЕ СУЩЕСТВУЮЩУЮ ФУНКЦИЮ updateBroadcastTask <<<<<
+export async function updateBroadcastTask(id, taskData) {
+  const {
+    message,
+    file_id,
+    file_mime_type,
+    keyboard,
+    disable_web_page_preview,
+    targetAudience,
+    scheduledAt,
+    disableNotification
+  } = taskData;
+  
+  const queryText = `
+        UPDATE broadcast_tasks SET
+            message = $1,
+            file_id = $2,
+            file_mime_type = $3,
+            keyboard = $4,
+            disable_web_page_preview = $5,
+            target_audience = $6,
+            scheduled_at = $7,
+            disable_notification = $8,
+            status = 'pending'
+        WHERE id = $9
+        RETURNING *;
+    `;
+  
+  const values = [
+    message,
+    file_id,
+    file_mime_type,
+    keyboard ? JSON.stringify(keyboard) : null,
+    disable_web_page_preview,
+    targetAudience,
+    scheduledAt || new Date(),
+    !!disableNotification,
+    id
+  ];
+  
+  const result = await query(queryText, values);
+  return result.rows[0];
+}
+
+export async function getPendingBroadcastTask() {
+  const { rows } = await query(`
+    UPDATE broadcast_tasks SET status = 'processing'
+    WHERE id = (
+      SELECT id FROM broadcast_tasks
+      WHERE status = 'pending' AND scheduled_at <= NOW() AT TIME ZONE 'UTC'
+      ORDER BY scheduled_at LIMIT 1 FOR UPDATE SKIP LOCKED
+    ) RETURNING *;
+  `);
+  return rows[0] || null;
+}
+
+export async function completeBroadcastTask(taskId, report) {
+  await query(
+    `UPDATE broadcast_tasks SET status = 'completed', report = $1, completed_at = NOW() WHERE id = $2`,
+    [JSON.stringify(report), taskId]
+  );
+}
+
+export async function failBroadcastTask(taskId, error) {
+  await query(`UPDATE broadcast_tasks SET status = 'failed', report = $1 WHERE id = $2`, [JSON.stringify({ error }), taskId]);
+}
+
+export async function getAllBroadcastTasks() {
+  const { rows } = await query(`SELECT * FROM broadcast_tasks ORDER BY scheduled_at DESC`);
+  return rows;
+}
+
+export async function deleteBroadcastTask(taskId) {
+  await query(`DELETE FROM broadcast_tasks WHERE id = $1 AND status = 'pending'`, [taskId]);
+}
+
+export async function getBroadcastTaskById(taskId) {
+  const { rows } = await query(`SELECT * FROM broadcast_tasks WHERE id = $1`, [taskId]);
+  return rows[0] || null;
+}
+
+
+export async function resetOtherTariffsToFree() {
+  console.log('[DB-Admin] Начинаю сброс нестандартных тарифов...');
+  const { rowCount } = await query(`
+    UPDATE users SET premium_limit = 5, premium_until = NULL WHERE premium_limit NOT IN (5, 30, 100, 10000);
+  `);
+  console.log(`[DB-Admin] Сброшено ${rowCount} пользователей на тариф Free.`);
+  return rowCount;
+}
+
+export async function getActiveFreeUsers() {
+  const { rows } = await query(`SELECT id FROM users WHERE active = TRUE AND premium_limit <= 5`);
+  return rows;
+}
+
+export async function getActivePremiumUsers() {
+  const { rows } = await query(`SELECT id FROM users WHERE active = TRUE AND premium_limit > 5`);
+  return rows;
+}
+
+export async function getLatestReviews(limit = 10) {
+  const { data } = await supabase.from('reviews').select('*').order('time', { ascending: false }).limit(limit);
+  return data || [];
+}
+// ... (весь ваш существующий код в db.js) ...
+
+/**
+ * Логирует каждый поисковый запрос в базу данных.
+ * @param {object} logData - Данные для логирования.
+ * @param {string} logData.query - Поисковый запрос.
+ * @param {number} logData.userId - ID пользователя.
+ * @param {number} logData.resultsCount - Количество найденных результатов.
+ * @param {boolean} logData.foundInCache - Найдены ли результаты в кэше.
+ */
+export async function logSearchQuery({ query, userId, resultsCount, foundInCache }) {
+    if (!query || !userId) return;
+
+    const { error } = await supabase
+        .from('search_queries')
+        .insert({
+            query: query,
+            user_id: userId,
+            results_count: resultsCount,
+            found_in_cache: foundInCache
+        });
+
+    if (error) {
+        console.error('[DB] Ошибка логирования поискового запроса:', error.message);
+    }
 }
 
 /**
- * Асинхронно добавляет задачу в очередь, не блокируя основной поток.
- * Это позволяет боту мгновенно отвечать пользователю, а скачивание начинается в фоне.
- * @param {object} task - Объект задачи для downloadManager.
+ * Логирует неудачный поисковый запрос или инкрементирует счетчик, если он уже есть.
+ * @param {object} logData - Данные для логирования.
+ * @param {string} logData.query - Поисковый запрос.
+ * @param {string} logData.searchType - Тип поиска ('inline', 'direct_message').
  */
-function addTaskToQueue(task) {
-    setTimeout(() => {
-        downloadQueue.add(task);
-    }, 0);
-}
+export async function logFailedSearch({ query, searchType }) {
+    if (!query) return;
 
-// --- Вспомогательные функции ---
-async function isSubscribed(userId) {
-    if (!CHANNEL_USERNAME) return false;
-    try {
-        const member = await bot.telegram.getChatMember(CHANNEL_USERNAME, userId);
-        return ['creator', 'administrator', 'member'].includes(member.status);
-    } catch (e) {
-        console.error(`Ошибка проверки подписки для ${userId} на ${CHANNEL_USERNAME}:`, e.message);
-        return false;
-    }
-}
-
-function getTariffName(limit) {
-    if (limit >= 10000) return 'Unlimited — 💎';
-    if (limit >= 100) return 'Pro — 100 💪';
-    if (limit >= 30) return 'Plus — 30 🎯';
-    return '🆓 Free — 5 🟢';
-}
-
-function getDaysLeft(premiumUntil) {
-    if (!premiumUntil) return 0;
-    const diff = new Date(premiumUntil) - new Date();
-    return Math.max(Math.ceil(diff / 86400000), 0);
-}
-
-function formatMenuMessage(user) {
-    const tariffLabel = getTariffName(user.premium_limit);
-    const downloadsToday = user.downloads_today || 0;
-    const daysLeft = getDaysLeft(user.premium_until);
-    let message = `
-👋 Привет, ${user.first_name || 'пользователь'}!
-<b>Твой профиль:</b>
-💼 <b>Тариф:</b> <i>${tariffLabel}</i>
-⏳ <b>Осталось дней подписки:</b> <i>${daysLeft}</i>
-🎧 <b>Сегодня скачано:</b> <i>${downloadsToday}</i> из <i>${user.premium_limit}</i>
-    `.trim();
-    if (!user.subscribed_bonus_used && CHANNEL_USERNAME) {
-        const cleanUsername = CHANNEL_USERNAME.replace('@', '');
-        const channelLink = `<a href="https://t.me/${cleanUsername}">наш канал</a>`;
-        message += `\n\n🎁 <b>Бонус!</b> Подпишись на ${channelLink} и получи <b>7 дней тарифа Plus</b> бесплатно!`;
-    }
-    message += '\n\nПросто отправь мне ссылку, и я скачаю трек!';
-    return message;
-}
-
-// --- Инициализация Telegraf ---
-const telegrafOptions = { handlerTimeout: 300_000 };
-if (PROXY_URL) {
-    const agent = new HttpsProxyAgent(PROXY_URL);
-    telegrafOptions.telegram = { agent };
-    console.log('[App] Использую прокси для подключения к Telegram API.');
-}
-export const bot = new Telegraf(BOT_TOKEN, telegrafOptions);
-
-// --- Middleware ---
-bot.catch(async (err, ctx) => {
-    console.error(`🔴 [Telegraf Catch] Глобальная ошибка для update ${ctx.update.update_id}:`, err);
-    if (err instanceof TelegramError && err.response?.error_code === 403) {
-        if (ctx.from?.id) await updateUserField(ctx.from.id, 'active', false);
-    }
-});
-bot.use(async (ctx, next) => {
-    if (!ctx.from) return next();
-    const user = await getUser(ctx.from.id, ctx.from.first_name, ctx.from.username);
-    ctx.state.user = user;
-    if (user && user.active === false) return;
-    await resetDailyLimitIfNeeded(ctx.from.id);
-    return next();
-});
-
-// --- Обработчики команд и кнопок ---
-bot.start(async (ctx) => {
-    await createUser(ctx.from.id, ctx.from.first_name, ctx.from.username, ctx.startPayload || null);
-    const user = await getUser(ctx.from.id);
-    const isNewRegistration = (Date.now() - new Date(user.created_at).getTime()) < 5000;
-    if (isNewRegistration) await logUserAction(ctx.from.id, 'registration');
-    const startMessage = isNewRegistration ? T('start_new_user') : T('start');
-    await ctx.reply(startMessage, {
-        parse_mode: 'HTML',
-        disable_web_page_preview: true,
-        ...Markup.keyboard([[T('menu'), T('upgrade')], [T('mytracks'), T('help')]]).resize()
-    });
-});
-
-bot.command('admin', async (ctx) => {
-    if (ctx.from.id !== ADMIN_ID) return;
-    try {
-        await ctx.reply('⏳ Собираю статистику...');
-        
-        // Запускаем все запросы к базе параллельно для скорости
-        const [
-            users,
-            cachedTracksCount,
-            topFailed,
-            topRecent,
-            newUsersToday, // <-- Новый запрос
-            newUsersWeek // <-- Новый запрос
-        ] = await Promise.all([
-            getAllUsers(true),
-            getCachedTracksCount(),
-            getTopFailedSearches(5),
-            getTopRecentSearches(5),
-            getNewUsersCount(1), // Получаем новых за 1 день
-            getNewUsersCount(7) // Получаем новых за 7 дней
-        ]);
-        
-        // --- Формируем статистику пользователей ---
-        const totalUsers = users.length;
-        const activeUsers = users.filter(u => u.active).length;
-        const activeToday = users.filter(u => u.last_active && new Date(u.last_active).toDateString() === new Date().toDateString()).length;
-        const totalDownloads = users.reduce((sum, u) => sum + (u.total_downloads || 0), 0);
-        let storageStatusText = STORAGE_CHANNEL_ID ? '✅ Доступен' : '⚠️ Не настроен';
-        
-        // --- Собираем сообщение ---
-        let statsMessage = `<b>📊 Статистика Бота</b>\n\n` +
-            `<b>👤 Пользователи:</b>\n` +
-            `   - Всего: <i>${totalUsers}</i>\n` +
-            `   - Активных: <i>${activeUsers}</i>\n` +
-            `   - <b>Новых за 24ч: <i>${newUsersToday}</i></b>\n` + // <-- Новая строка
-            `   - <b>Новых за 7 дней: <i>${newUsersWeek}</i></b>\n` + // <-- Новая строка
-            `   - Активных сегодня: <i>${activeToday}</i>\n\n` +
-            `<b>📥 Загрузки:</b>\n   - Всего за все время: <i>${totalDownloads}</i>\n\n`;
-        
-        // Блок неудачных запросов
-        if (topFailed.length > 0) {
-            statsMessage += `---\n\n<b>🔥 Топ-5 неудачных запросов (всего):</b>\n`;
-            topFailed.forEach((item, index) => {
-                statsMessage += `${index + 1}. <code>${item.query.slice(0, 30)}</code> (искали <i>${item.search_count}</i> раз)\n`;
-            });
-            statsMessage += `\n`;
-        }
-        
-        // Блок популярных запросов
-        if (topRecent.length > 0) {
-            statsMessage += `<b>📈 Топ-5 запросов (за 24 часа):</b>\n`;
-            topRecent.forEach((item, index) => {
-                statsMessage += `${index + 1}. <code>${item.query.slice(0, 30)}</code> (искали <i>${item.total}</i> раз)\n`;
-            });
-            statsMessage += `\n`;
-        }
-        
-        // Системный блок
-        statsMessage += `---\n\n<b>⚙️ Система:</b>\n` +
-            `   - Очередь: <i>${downloadQueue.size}</i> в ож. / <i>${downloadQueue.active}</i> в раб.\n` +
-            `   - Канал-хранилище: <i>${storageStatusText}</i>\n   - Треков в кэше: <i>${cachedTracksCount}</i>\n\n` +
-            `<b>🔗 Админ-панель:</b>\n<a href="${WEBHOOK_URL.replace(/\/$/, '')}/dashboard">Открыть дашборд</a>`;
-        
-        await ctx.reply(statsMessage, { parse_mode: 'HTML', disable_web_page_preview: true });
-    } catch (e) {
-        console.error('❌ Ошибка в команде /admin:', e);
-        await ctx.reply('❌ Не удалось собрать статистику.');
-    }
-});
-bot.command('maintenance', (ctx) => {
-    if (ctx.from.id !== ADMIN_ID) return;
+    // Используем `upsert` (update or insert).
+    // Если запись с таким `query` и `searchType` уже существует, она обновится.
+    // Если нет - создастся новая.
+    // `search_count: 1` здесь неверно, нужно инкрементировать. Сделаем это через RPC.
     
-    const command = ctx.message.text.split(' ')[1]?.toLowerCase(); 
+    // Для этого лучше создать функцию в Supabase
+    const { error } = await supabase.rpc('increment_failed_search', {
+        p_query: query,
+        p_search_type: searchType
+    });
     
-    if (command === 'on') {
-        setMaintenanceMode(true);
-        ctx.reply('✅ Режим обслуживания ВКЛЮЧЕН.');
-    } else if (command === 'off') {
-        setMaintenanceMode(false);
-        ctx.reply('☑️ Режим обслуживания ВЫКЛЮЧЕН.');
-    } else {
-        ctx.reply('ℹ️ Статус: ' + (isMaintenanceMode ? 'ВКЛЮЧЕН' : 'ВЫКЛЮЧЕН') + '\n\nИспользуйте: `/maintenance on` или `/maintenance off`');
+    if (error) {
+        console.error('[DB] Ошибка логирования неудачного поиска:', error.message);
     }
-});
-bot.command('premium', (ctx) => ctx.reply(T('upgradeInfo'), { parse_mode: 'HTML', disable_web_page_preview: true }));
-bot.hears(T('menu'), async (ctx) => {
-    const user = await getUser(ctx.from.id);
-    const message = formatMenuMessage(user);
-    const extraOptions = { parse_mode: 'HTML', disable_web_page_preview: true };
-    if (!user.subscribed_bonus_used && CHANNEL_USERNAME) {
-        extraOptions.reply_markup = { inline_keyboard: [[Markup.button.callback('✅ Я подписался и хочу бонус!', 'check_subscription')]] };
-    }
-    await ctx.reply(message, extraOptions);
-});
-bot.hears(T('mytracks'), async (ctx) => {
-    try {
-        const user = await getUser(ctx.from.id);
-        if (!user.tracks_today || user.tracks_today.length === 0) return await ctx.reply(T('noTracks'));
-        for (let i = 0; i < user.tracks_today.length; i += 10) {
-            const chunk = user.tracks_today.slice(i, i + 10).filter(t => t && t.fileId);
-            if (chunk.length > 0) await ctx.replyWithMediaGroup(chunk.map(t => ({ type: 'audio', media: t.fileId })));
-        }
-    } catch (e) { console.error(`🔴 Ошибка в mytracks для ${ctx.from.id}:`, e.message); }
-});
-bot.hears(T('help'), (ctx) => ctx.reply(T('helpInfo'), { parse_mode: 'HTML', disable_web_page_preview: true }));
-bot.hears(T('upgrade'), (ctx) => ctx.reply(T('upgradeInfo'), { parse_mode: 'HTML', disable_web_page_preview: true }));
-bot.on('inline_query', async (ctx) => {
-    const query = ctx.inlineQuery.query;
-    if (!query || query.trim().length < 2) return await ctx.answerInlineQuery([], { switch_pm_text: 'Введите название трека для поиска...', switch_pm_parameter: 'start' });
-    try {
-        const results = await performInlineSearch(query, ctx.from.id);
-        await ctx.answerInlineQuery(results, { cache_time: 60 });
-    } catch (error) {
-        console.error('[Inline Query] Глобальная ошибка:', error);
-        await ctx.answerInlineQuery([]);
-    }
-});
+}
+// ... (весь ваш существующий код в db.js) ...
 
-// --- Логика обработки плейлистов ---
-function generateInitialPlaylistMenu(playlistId, trackCount) {
-    return Markup.inlineKeyboard([
-        [Markup.button.callback(`📥 Скачать все (${trackCount})`, `pl_download_all:${playlistId}`)],
-        [Markup.button.callback('📥 Скачать первые 10', `pl_download_10:${playlistId}`)],
-        [Markup.button.callback('📝 Выбрать треки вручную', `pl_select_manual:${playlistId}`)],
-        [Markup.button.callback('❌ Отмена', `pl_cancel:${playlistId}`)]
-    ]);
+/**
+ * Получает топ-N самых частых неудачных поисковых запросов.
+ * @param {number} limit - Количество запросов для получения.
+ * @returns {Promise<Array<{query: string, search_count: number}>>}
+ */
+export async function getTopFailedSearches(limit = 5) {
+    const { data, error } = await supabase
+        .from('failed_searches')
+        .select('query, search_count')
+        .order('search_count', { ascending: false })
+        .limit(limit);
+
+    if (error) {
+        console.error('[DB] Ошибка получения топа неудачных запросов:', error.message);
+        return [];
+    }
+    return data;
 }
 
-function generateSelectionMenu(userId) {
-    const session = playlistSessions.get(userId);
-    if (!session) return null;
-    const { tracks, selected, currentPage, playlistId, title } = session;
-    const totalPages = Math.ceil(tracks.length / TRACKS_PER_PAGE);
-    const startIndex = currentPage * TRACKS_PER_PAGE;
-    const tracksOnPage = tracks.slice(startIndex, startIndex + TRACKS_PER_PAGE);
-    const trackRows = tracksOnPage.map((track, index) => {
-        const absoluteIndex = startIndex + index;
-        const isSelected = selected.has(absoluteIndex);
-        const icon = isSelected ? '✅' : '⬜️';
-        const trackTitleText = track.title || 'Трек без названия';
-        const trackTitle = trackTitleText.length > 50 ? trackTitleText.slice(0, 47) + '...' : trackTitleText;
-        return [Markup.button.callback(`${icon} ${trackTitle}`, `pl_toggle:${playlistId}:${absoluteIndex}`)];
+/**
+ * Получает топ-N самых популярных поисковых запросов за последние 24 часа.
+ * @param {number} limit - Количество запросов для получения.
+ * @returns {Promise<Array<{query: string, total: number}>>}
+ */
+export async function getTopRecentSearches(limit = 5) {
+    // RPC (Remote Procedure Call) - это вызов функции, которую мы создадим в базе данных
+    const { data, error } = await supabase.rpc('get_top_recent_searches', { limit_count: limit });
+
+    if (error) {
+        console.error('[DB] Ошибка получения топа недавних запросов:', error.message);
+        return [];
+    }
+    return data;
+}
+// ... (весь ваш существующий код в db.js) ...
+
+/**
+ * Считает количество новых пользователей за указанный период.
+ * @param {number} days - Количество дней (например, 1 для суток, 7 для недели).
+ * @returns {Promise<number>}
+ */
+export async function getNewUsersCount(days = 1) {
+    const date = new Date();
+    date.setDate(date.getDate() - days);
+
+    const { count, error } = await supabase
+        .from('users')
+        .select('*', { count: 'exact', head: true })
+        .gte('created_at', date.toISOString());
+
+    if (error) {
+        console.error(`[DB] Ошибка получения количества новых пользователей за ${days} дней:`, error.message);
+        return 0;
+    }
+    return count;
+}
+export async function getUserActivityByDayHour(days = 30) {
+    const { rows } = await query(`
+        SELECT TO_CHAR(last_active, 'YYYY-MM-DD') AS day, EXTRACT(HOUR FROM last_active) AS hour, COUNT(*) AS count
+        FROM users WHERE last_active >= CURRENT_DATE - INTERVAL '${days} days'
+        GROUP BY day, hour ORDER BY day, hour
+    `);
+    const activity = {};
+    rows.forEach(row => {
+        if (!activity[row.day]) activity[row.day] = Array(24).fill(0);
+        activity[row.day][parseInt(row.hour, 10)] = parseInt(row.count, 10);
     });
-    const navRow = [];
-    if (currentPage > 0) navRow.push(Markup.button.callback('⬅️ Назад', `pl_page:${playlistId}:${currentPage - 1}`));
-    navRow.push(Markup.button.callback(`${currentPage + 1}/${totalPages}`, 'pl_nop'));
-    if (currentPage < totalPages - 1) navRow.push(Markup.button.callback('Вперед ➡️', `pl_page:${playlistId}:${currentPage + 1}`));
-    const actionRow = [
-        Markup.button.callback(`✅ Готово (${selected.size})`, `pl_finish:${playlistId}`),
-        Markup.button.callback(`❌ Отмена`, `pl_cancel:${playlistId}`)
-    ];
-    const messageText = `🎶 <b>${title}</b>\n\nВыберите треки (Стр. ${currentPage + 1}/${totalPages}):`;
+    return activity;
+}
+// ДОБАВЬТЕ ЭТИ ФУНКЦИИ В КОНЕЦ DB.JS
+
+// Получает информацию о том, кто пригласил данного пользователя
+export async function getReferrerInfo(userId) {
+    const { data, error } = await supabase
+        .from('users')
+        .select('referrer_id, referrers:referrer_id (id, first_name)')
+        .eq('id', userId)
+        .single();
+    return error ? null : data.referrers;
+}
+
+// Получает список пользователей, приглашенных данным пользователем
+export async function getReferredUsers(referrerId) {
+    const { data, error } = await supabase
+        .from('users')
+        .select('id, first_name, created_at')
+        .eq('referrer_id', referrerId)
+        .order('created_at', { ascending: false });
+    return error ? [] : data;
+}
+
+// Статистика для дашборда
+export async function getReferralStats() {
+    // Топ-5 рефоводов
+    const { data: topReferrers, error: topError } = await supabase.rpc('get_top_referrers', { limit_count: 5 });
+    // Общее число рефералов
+    const { count: totalReferred, error: countError } = await supabase
+        .from('users')
+        .select('*', { count: 'exact', head: true })
+        .not('referrer_id', 'is', null);
+        
     return {
-        text: messageText,
-        options: { parse_mode: 'HTML', ...Markup.inlineKeyboard([...trackRows, navRow, actionRow]) }
+        topReferrers: topError ? [] : topReferrers,
+        totalReferred: countError ? 0 : totalReferred
     };
 }
+// db.js (добавьте эту функцию в конец файла)
 
-// --- Обработчики кнопок плейлистов (actions) ---
-bot.action('pl_nop', (ctx) => ctx.answerCbQuery());
+/**
+ * Находит активную рассылку (в процессе) и помечает ее как прерванную.
+ * @returns {Promise<object|null>} Возвращает прерванную задачу или null.
+ */
+export async function findAndInterruptActiveBroadcast() {
+    const { data, error } = await supabase
+        .from('broadcast_tasks')
+        .update({ status: 'interrupted', finished_at: new Date() })
+        .eq('status', 'processing')
+        .select()
+        .single();
 
-bot.action(/pl_download_all:|pl_download_10:/, async (ctx) => {
-    const isAll = ctx.callbackQuery.data.includes('pl_download_all');
-    const playlistId = ctx.callbackQuery.data.split(':')[1];
-    const userId = ctx.from.id;
-    const session = playlistSessions.get(userId);
-    if (!session) return await ctx.answerCbQuery('❗️ Сессия выбора истекла.', { show_alert: true });
-
-    const user = await getUser(userId);
-    let remainingLimit = user.premium_limit - (user.downloads_today || 0);
-    if (remainingLimit <= 0) {
-        await ctx.editMessageText(T('limitReached'));
-        return playlistSessions.delete(userId);
+    if (error && error.code !== 'PGRST116') { // PGRST116 - это "not found", это не ошибка
+        console.error('[DB] Ошибка при прерывании рассылки:', error);
+        return null;
     }
-    
-    await ctx.editMessageText(`✅ Отлично! Проверяю кэш и формирую очередь...`);
-
-    const tracksToTake = isAll ? session.tracks.length : 10;
-    const tracksToProcess = session.tracks.slice(0, tracksToTake);
-
-    let sentFromCacheCount = 0;
-    const tasksToDownload = [];
-
-    for (const track of tracksToProcess) {
-        if (remainingLimit <= 0) break;
-
-        const url = track.webpage_url || track.url;
-        const cached = await findCachedTrack(url);
-
-        if (cached) {
-            try {
-                await bot.telegram.sendAudio(userId, cached.fileId);
-                await incrementDownloadsAndSaveTrack(userId, track.title, cached.fileId, url);
-                sentFromCacheCount++;
-                remainingLimit--;
-            } catch (e) {
-                if (e.description?.includes('FILE_REFERENCE_EXPIRED')) {
-                    tasksToDownload.push(track); // Если кэш битый, ставим на скачивание
-                } else {
-                    console.error(`Ошибка отправки из кэша для ${userId}:`, e.message);
-                }
-            }
-        } else {
-            tasksToDownload.push(track);
-        }
+    if (data) {
+        console.log(`[DB] Рассылка #${data.id} помечена как прерванная.`);
     }
-    
-    const tasksToReallyDownload = tasksToDownload.slice(0, remainingLimit);
-    for (const track of tasksToReallyDownload) {
-        addTaskToQueue({
-            userId, source: 'soundcloud', url: track.webpage_url || track.url, originalUrl: track.webpage_url || track.url,
-            metadata: { id: track.id, title: track.title, uploader: track.uploader, duration: track.duration, thumbnail: track.thumbnail }
-        });
-    }
-
-    let reportMessage = '';
-    if (sentFromCacheCount > 0) reportMessage += `✅ ${sentFromCacheCount} трек(ов) отправлено.\n`;
-    if (tasksToReallyDownload.length > 0) reportMessage += `⏳ ${tasksToReallyDownload.length} трек(ов) добавлено в очередь на скачивание.`;
-    
-    // Если ничего не было сделано (например, все в кэше, но лимит 0), даем фидбэк
-    if (!reportMessage) reportMessage = 'Все треки уже в кэше, но ваш дневной лимит исчерпан.';
-    
-    await ctx.reply(reportMessage);
-    playlistSessions.delete(userId);
-});
-
-bot.action(/pl_select_manual:(.+)/, async (ctx) => {
-    const playlistId = ctx.match[1];
-    const userId = ctx.from.id;
-    const session = playlistSessions.get(userId);
-    if (!session || session.playlistId !== playlistId) return await ctx.answerCbQuery('❗️ Сессия выбора истекла.', { show_alert: true });
-    session.currentPage = 0;
-    session.selected = new Set();
-    const menu = generateSelectionMenu(userId);
-    if (menu) await ctx.editMessageText(menu.text, menu.options);
-});
-
-bot.action(/pl_page:(.+):(\d+)/, async (ctx) => {
-    const [playlistId, pageStr] = ctx.match.slice(1);
-    const userId = ctx.from.id;
-    const session = playlistSessions.get(userId);
-    if (!session || session.playlistId !== playlistId) return await ctx.answerCbQuery('Сессия истекла.');
-    session.currentPage = parseInt(pageStr, 10);
-    const menu = generateSelectionMenu(userId);
-    if (menu) try { await ctx.editMessageText(menu.text, menu.options); } catch (e) {}
-    await ctx.answerCbQuery();
-});
-
-bot.action(/pl_toggle:(.+):(\d+)/, async (ctx) => {
-    const [playlistId, indexStr] = ctx.match.slice(1);
-    const userId = ctx.from.id;
-    const session = playlistSessions.get(userId);
-    if (!session || session.playlistId !== playlistId) return await ctx.answerCbQuery('Сессия истекла.');
-    const trackIndex = parseInt(indexStr, 10);
-    if (session.selected.has(trackIndex)) session.selected.delete(trackIndex);
-    else session.selected.add(trackIndex);
-    const menu = generateSelectionMenu(userId);
-    if (menu) try { await ctx.editMessageText(menu.text, menu.options); } catch (e) {}
-    await ctx.answerCbQuery();
-});
-
-bot.action(/pl_finish:(.+)/, async (ctx) => {
-    const playlistId = ctx.match[1];
-    const userId = ctx.from.id;
-    const session = playlistSessions.get(userId);
-    if (!session) return await ctx.answerCbQuery('❗️ Сессия выбора истекла.', { show_alert: true });
-    if (session.selected.size === 0) return await ctx.answerCbQuery('Вы не выбрали ни одного трека.', { show_alert: true });
-
-    const user = await getUser(userId);
-    let remainingLimit = user.premium_limit - (user.downloads_today || 0);
-    if (remainingLimit <= 0) {
-        await ctx.editMessageText(T('limitReached'));
-        return playlistSessions.delete(userId);
-    }
-    
-    await ctx.editMessageText(`✅ Готово! Проверяю кэш и формирую очередь...`);
-    
-    const selectedTracks = Array.from(session.selected).map(index => session.tracks[index]);
-
-    let sentFromCacheCount = 0;
-    const tasksToDownload = [];
-
-    for (const track of selectedTracks) {
-        if (remainingLimit <= 0) break;
-
-        const url = track.webpage_url || track.url;
-        const cached = await findCachedTrack(url);
-
-        if (cached) {
-            try {
-                await bot.telegram.sendAudio(userId, cached.fileId);
-                await incrementDownloadsAndSaveTrack(userId, track.title, cached.fileId, url);
-                sentFromCacheCount++;
-                remainingLimit--;
-            } catch (e) {
-                if (e.description?.includes('FILE_REFERENCE_EXPIRED')) {
-                    tasksToDownload.push(track);
-                } else {
-                    console.error(`Ошибка отправки из кэша для ${userId}:`, e.message);
-                }
-            }
-        } else {
-            tasksToDownload.push(track);
-        }
-    }
-    
-    const tasksToReallyDownload = tasksToDownload.slice(0, remainingLimit);
-    for (const track of tasksToReallyDownload) {
-        addTaskToQueue({
-            userId, source: 'soundcloud', url: track.webpage_url || track.url, originalUrl: track.webpage_url || track.url,
-            metadata: { id: track.id, title: track.title, uploader: track.uploader, duration: track.duration, thumbnail: track.thumbnail }
-        });
-    }
-    
-    let reportMessage = '';
-    if (sentFromCacheCount > 0) reportMessage += `✅ ${sentFromCacheCount} трек(ов) отправлено.\n`;
-    if (tasksToReallyDownload.length > 0) reportMessage += `⏳ ${tasksToReallyDownload.length} трек(ов) добавлено в очередь.`;
-    if (!reportMessage) reportMessage = 'Все выбранные треки уже в кэше, но ваш дневной лимит исчерпан.';
-    
-    await ctx.reply(reportMessage);
-    playlistSessions.delete(userId);
-});
-
-bot.action(/pl_cancel:(.+)/, async (ctx) => {
-    const userId = ctx.from.id;
-    const session = playlistSessions.get(userId);
-    
-    // Если по какой-то причине сессии уже нет, просто удаляем сообщение
-    if (!session) {
-        await ctx.deleteMessage().catch(() => {});
-        return await ctx.answerCbQuery();
-    }
-    
-    // Восстанавливаем текст и кнопки первоначального меню
-    const message = `🎶 В плейлисте <b>"${session.title}"</b> найдено <b>${session.tracks.length}</b> треков.\n\nЧто делаем?`;
-    const initialMenu = generateInitialPlaylistMenu(session.playlistId, session.tracks.length);
-    
-    // Редактируем текущее сообщение, возвращая его к исходному виду
-    try {
-        await ctx.editMessageText(message, {
-            parse_mode: 'HTML',
-            ...initialMenu
-        });
-        await ctx.answerCbQuery('Возвращаю...');
-    } catch (e) {
-        // Если сообщение не изменилось, просто игнорируем ошибку
-        await ctx.answerCbQuery();
-    }
-});
-
-// --- Главный обработчик ссылок ---
-async function handleSoundCloudUrl(ctx, url) {
-    let loadingMessage;
-    try {
-        loadingMessage = await ctx.reply('🔍 Анализирую ссылку... Это может занять некоторое время.');
-        const youtubeDl = getYoutubeDl();
-        const data = await youtubeDl(url, { dumpSingleJson: true });
-        if (data.entries && data.entries.length > 0) {
-            const validTracks = data.entries.filter(track => track && track.url);
-            if (validTracks.length === 0) {
-                return await ctx.telegram.editMessageText(ctx.chat.id, loadingMessage.message_id, undefined, '❌ В этом плейлисте не найдено доступных для скачивания треков.').catch(() => {});
-            }
-            await ctx.deleteMessage(loadingMessage.message_id).catch(() => {});
-            const playlistId = data.id || `pl_${Date.now()}`;
-            playlistSessions.set(ctx.from.id, {
-                playlistId, title: data.title, tracks: validTracks,
-                selected: new Set(), currentPage: 0
-            });
-            const message = `🎶 В плейлисте <b>"${data.title}"</b> найдено <b>${validTracks.length}</b> треков.\n\nЧто делаем?`;
-            await ctx.reply(message, { parse_mode: 'HTML', ...generateInitialPlaylistMenu(playlistId, validTracks.length) });
-        } else {
-            await ctx.telegram.editMessageText(ctx.chat.id, loadingMessage.message_id, undefined, '✅ Распознал трек, ставлю в очередь...');
-            addTaskToQueue({
-                userId: ctx.from.id, source: 'soundcloud', url: data.webpage_url || url, originalUrl: data.webpage_url || url,
-                metadata: { id: data.id, title: data.title, uploader: data.uploader, duration: data.duration, thumbnail: data.thumbnail }
-            });
-        }
-    } catch (error) {
-        console.error('Ошибка при обработке SoundCloud URL:', error.stderr || error.message);
-        const userMessage = '❌ Не удалось обработать ссылку. Убедитесь, что она корректна и контент доступен.';
-        if (loadingMessage) await ctx.telegram.editMessageText(ctx.chat.id, loadingMessage.message_id, undefined, userMessage).catch(() => {});
-        else await ctx.reply(userMessage);
-    }
+    return data;
 }
-
-bot.on('text', (ctx) => {
-            if (isShuttingDown) {
-                console.log('[Shutdown] Отклонен новый запрос, так как идет завершение работы.');
-                return;
-            }
-            
-            if (isMaintenanceMode && ctx.from.id !== ADMIN_ID) {
-                return ctx.reply('⏳ Бот на плановом обслуживании. Новые запросы временно не принимаются. Пожалуйста, попробуйте через 5-10 минут.');
-            }
-            
-            const text = ctx.message.text;
-    if (text.startsWith('/')) return;
-    if (Object.values(allTextsSync()).includes(text)) return;
-    const urlMatch = text.match(/(https?:\/\/[^\s]+)/g);
-    if (!urlMatch) return ctx.reply('Пожалуйста, отправьте мне ссылку.');
-    const url = urlMatch[0];
-    if (url.includes('soundcloud.com')) {
-        handleSoundCloudUrl(ctx, url);
-    } else if (url.includes('open.spotify.com')) {
-        spotifyEnqueue(ctx, ctx.from.id, url);
-    } else {
-        ctx.reply('Я умею скачивать только с SoundCloud и Spotify.');
-    }
-});
