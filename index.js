@@ -23,7 +23,7 @@ import {
     getActivityByWeekday, getTopTracks, getTopUsers, getHourlyActivity, getUsersAsCsv, 
     getUserActions, logUserAction,
     createBroadcastTask, getPendingBroadcastTask, completeBroadcastTask, failBroadcastTask,
-    getAllBroadcastTasks, deleteBroadcastTask, getBroadcastTaskById, updateBroadcastTask, findAndInterruptActiveBroadcast
+    getAllBroadcastTasks, deleteBroadcastTask, getBroadcastTaskById, updateBroadcastTask, findAndInterruptActiveBroadcast, getReferrerInfo, getReferredUsers, getReferralStats
 } from './db.js';
 import { setShuttingDown, setMaintenanceMode } from './services/appState.js';
 import { bot } from './bot.js';
@@ -160,80 +160,111 @@ function setupExpress() {
     });
     app.get('/logout', (req, res) => req.session.destroy(() => res.redirect('/admin')));
     
-    app.get('/dashboard', requireAuth, async (req, res) => {
-        try {
-            let storageStatus = { available: false, error: '' };
-            if (STORAGE_CHANNEL_ID) {
-                try {
-                    await bot.telegram.getChat(STORAGE_CHANNEL_ID);
-                    storageStatus.available = true;
-                } catch (e) {
-                    storageStatus.error = e.message;
-                }
+    // index.js
+
+app.get('/dashboard', requireAuth, async (req, res) => {
+    try {
+        let storageStatus = { available: false, error: '' };
+        if (STORAGE_CHANNEL_ID) {
+            try {
+                await bot.telegram.getChat(STORAGE_CHANNEL_ID);
+                storageStatus.available = true;
+            } catch (e) {
+                storageStatus.error = e.message;
             }
-            const [
-                users, registrationsRaw, cachedTracksCount, usersByTariff,
-                topSources, dailyStats, weekdayActivity, topTracks,
-                topUsers, hourlyActivity
-            ] = await Promise.all([
-                getAllUsers(true),
-                getRegistrationsByDate(),
-                getCachedTracksCount(),
-                getUsersCountByTariff(),
-                getTopReferralSources(),
-                getDailyStats({ startDate: req.query.startDate, endDate: req.query.endDate }),
-                getActivityByWeekday(),
-                getTopTracks(),
-                getTopUsers(),
-                getHourlyActivity()
-            ]);
-            const stats = {
-                total_users: users.length,
-                active_users: users.filter(u => u.active).length,
-                total_downloads: users.reduce((sum, u) => sum + (u.total_downloads || 0), 0),
-                active_today: users.filter(u => u.last_active && new Date(u.last_active).toDateString() === new Date().toDateString()).length,
-                queueWaiting: downloadQueue.size,
-                queueActive: downloadQueue.active,
-                cachedTracksCount: cachedTracksCount,
-                usersByTariff: usersByTariff || {},
-                topSources: topSources || []
-            };
-            const chartDataCombined = {
-                labels: (dailyStats || []).map(d => new Date(d.day).toLocaleDateString('ru-RU', {day: '2-digit', month: '2-digit'})),
-                datasets: [
-                    { label: 'Регистрации', data: (dailyStats || []).map(d => d.registrations), borderColor: '#198754', tension: 0.1, fill: false },
-                    { label: 'Активные юзеры', data: (dailyStats || []).map(d => d.active_users), borderColor: '#0d6efd', tension: 0.1, fill: false },
-                    { label: 'Загрузки', data: (dailyStats || []).map(d => d.downloads), borderColor: '#fd7e14', tension: 0.1, fill: false }
-                ]
-            };
-            const chartDataTariffs = {
-                labels: Object.keys(usersByTariff || {}),
-                datasets: [{ data: Object.values(usersByTariff || {}), backgroundColor: ['#6c757d', '#17a2b8', '#ffc107', '#007bff', '#dc3545'] }]
-            };
-            const chartDataWeekday = {
-                labels: (weekdayActivity || []).map(d => d.weekday.trim()),
-                datasets: [{ label: 'Загрузки', data: (weekdayActivity || []).map(d => d.count), backgroundColor: 'rgba(13, 110, 253, 0.5)' }]
-            };
-            const chartDataHourly = {
-                labels: Array.from({ length: 24 }, (_, i) => `${i.toString().padStart(2, '0')}:00`),
-                datasets: [{
-                    label: 'Загрузки',
-                    data: hourlyActivity,
-                    backgroundColor: 'rgba(255, 99, 132, 0.5)',
-                    borderColor: 'rgba(255, 99, 132, 1)',
-                    borderWidth: 1
-                }]
-            };
-            res.render('dashboard', { 
-                title: 'Дашборд', page: 'dashboard', stats, storageStatus, 
-                startDate: req.query.startDate, endDate: req.query.endDate,
-                chartDataCombined, chartDataTariffs, chartDataWeekday, topTracks, topUsers, chartDataHourly 
-            });
-        } catch (error) {
-            console.error("Ошибка дашборда:", error);
-            res.status(500).send("Ошибка сервера");
         }
-    });
+        
+        // 1. Правильный порядок вызовов
+        const [
+            users,
+            registrationsRaw,
+            cachedTracksCount,
+            usersByTariff,
+            topSources,
+            dailyStats,
+            weekdayActivity,
+            topTracks,
+            topUsers,
+            hourlyActivity,
+            referralStats // <-- Теперь на своем месте
+        ] = await Promise.all([
+            getAllUsers(true),
+            getRegistrationsByDate(),
+            getCachedTracksCount(),
+            getUsersCountByTariff(),
+            getTopReferralSources(),
+            getDailyStats({ startDate: req.query.startDate, endDate: req.query.endDate }),
+            getActivityByWeekday(),
+            getTopTracks(),
+            getTopUsers(),
+            getHourlyActivity(),
+            getReferralStats() // <-- И вызов на своем месте
+        ]);
+        
+        // 2. Правильный синтаксис объекта stats
+        const stats = {
+            total_users: users.length,
+            active_users: users.filter(u => u.active).length,
+            total_downloads: users.reduce((sum, u) => sum + (u.total_downloads || 0), 0),
+            active_today: users.filter(u => u.last_active && new Date(u.last_active).toDateString() === new Date().toDateString()).length,
+            queueWaiting: downloadQueue.size,
+            queueActive: downloadQueue.active,
+            cachedTracksCount: cachedTracksCount,
+            usersByTariff: usersByTariff || {},
+            topSources: topSources || [],
+            totalReferred: referralStats.totalReferred, // <-- Исправлено
+            topReferrers: referralStats.topReferrers // <-- Исправлено
+        };
+        
+        const chartDataCombined = {
+            labels: (dailyStats || []).map(d => new Date(d.day).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })),
+            datasets: [
+                { label: 'Регистрации', data: (dailyStats || []).map(d => d.registrations), borderColor: '#198754', tension: 0.1, fill: false },
+                { label: 'Активные юзеры', data: (dailyStats || []).map(d => d.active_users), borderColor: '#0d6efd', tension: 0.1, fill: false },
+                { label: 'Загрузки', data: (dailyStats || []).map(d => d.downloads), borderColor: '#fd7e14', tension: 0.1, fill: false }
+            ]
+        };
+        
+        const chartDataTariffs = {
+            labels: Object.keys(usersByTariff || {}),
+            datasets: [{ data: Object.values(usersByTariff || {}), backgroundColor: ['#6c757d', '#17a2b8', '#ffc107', '#007bff', '#dc3545'] }]
+        };
+        
+        const chartDataWeekday = {
+            labels: (weekdayActivity || []).map(d => d.weekday.trim()),
+            datasets: [{ label: 'Загрузки', data: (weekdayActivity || []).map(d => d.count), backgroundColor: 'rgba(13, 110, 253, 0.5)' }]
+        };
+        
+        const chartDataHourly = {
+            labels: Array.from({ length: 24 }, (_, i) => `${i.toString().padStart(2, '0')}:00`),
+            datasets: [{
+                label: 'Загрузки',
+                data: hourlyActivity,
+                backgroundColor: 'rgba(255, 99, 132, 0.5)',
+                borderColor: 'rgba(255, 99, 132, 1)',
+                borderWidth: 1
+            }]
+        };
+        
+        res.render('dashboard', {
+            title: 'Дашборд',
+            page: 'dashboard',
+            stats,
+            storageStatus,
+            startDate: req.query.startDate,
+            endDate: req.query.endDate,
+            chartDataCombined,
+            chartDataTariffs,
+            chartDataWeekday,
+            topTracks,
+            topUsers,
+            chartDataHourly
+        });
+    } catch (error) {
+        console.error("Ошибка дашборда:", error);
+        res.status(500).send("Ошибка сервера");
+    }
+});
 
     app.get('/users', requireAuth, async (req, res) => {
         try {
@@ -276,28 +307,56 @@ function setupExpress() {
         }
     });
     
-    app.get('/user/:id', requireAuth, async (req, res) => {
-        try {
-            const userId = req.params.id;
-            const [userProfile, downloads, referrals, actions] = await Promise.all([ 
-                getUserById(userId), 
-                getDownloadsByUserId(userId), 
-                getReferralsByUserId(userId),
-                getUserActions(userId)
-            ]);
-            if (!userProfile) {
-                return res.status(404).render('user-profile', { title: 'Пользователь не найден', page: 'users', userProfile: null, downloads: [], referrals: [], actions: [] });
-            }
-            res.render('user-profile', { 
-                title: `Профиль: ${userProfile.first_name || userId}`, 
-                page: 'users', 
-                userProfile, downloads, referrals, actions
+    // index.js
+
+app.get('/user/:id', requireAuth, async (req, res) => {
+    try {
+        const userId = req.params.id;
+        
+        // Теперь мы запрашиваем 5 порций данных параллельно
+        const [
+            userProfile,
+            downloads,
+            actions,
+            referrer, // <-- Кто пригласил ЭТОГО пользователя
+            referredUsers // <-- Кого пригласил ЭТОТ пользователь
+        ] = await Promise.all([
+            getUserById(userId),
+            getDownloadsByUserId(userId),
+            getUserActions(userId),
+            getReferrerInfo(userId), // <-- Наша новая функция
+            getReferredUsers(userId) // <-- Наша новая функция
+        ]);
+        
+        if (!userProfile) {
+            // Оставляем эту страницу как есть, на случай если пользователь не найден
+            return res.status(404).render('user-profile', {
+                title: 'Пользователь не найден',
+                page: 'users',
+                userProfile: null,
+                downloads: [],
+                actions: [],
+                referrer: null,
+                referredUsers: []
             });
-        } catch (error) {
-            console.error(`Ошибка при получении профиля пользователя ${req.params.id}:`, error);
-            res.status(500).send("Ошибка сервера");
         }
-    });
+        
+        // Передаем все 5 порций данных в шаблон для отрисовки
+        res.render('user-profile', {
+            title: `Профиль: ${userProfile.first_name || userId}`,
+            page: 'users',
+            userProfile,
+            downloads,
+            actions,
+            referrer, // <-- Передаем в шаблон
+            referredUsers // <-- Передаем в шаблон
+        });
+        
+    } catch (error) {
+        console.error(`Ошибка при получении профиля пользователя ${req.params.id}:`, error);
+        res.status(500).send("Ошибка сервера");
+    }
+});
     
     app.get('/broadcasts', requireAuth, async (req, res) => {
         const tasks = await getAllBroadcastTasks();
