@@ -61,41 +61,50 @@ function getDaysLeft(premiumUntil) {
 
 // bot.js
 
-function formatMenuMessage(user, botUsername) { // Добавили botUsername
+// bot.js
+
+function formatMenuMessage(user, botUsername) {
+    // 1. Сначала получаем все динамические данные (как и раньше)
     const tariffLabel = getTariffName(user.premium_limit);
     const downloadsToday = user.downloads_today || 0;
     const daysLeft = getDaysLeft(user.premium_until);
-    const referralCount = user.referral_count || 0; // Получаем кол-во рефералов
-    
-    // Генерируем ссылку прямо здесь
+    const referralCount = user.referral_count || 0;
     const referralLink = `https://t.me/${botUsername}?start=ref_${user.id}`;
     
-    // Собираем основное сообщение
-    let message = `
-👋 Привет, ${user.first_name || 'пользователь'}!
-<b>Твой профиль:</b>
-💼 <b>Тариф:</b> <i>${tariffLabel}</i>
-⏳ <b>Осталось дней подписки:</b> <i>${daysLeft}</i>
-🎧 <b>Сегодня скачано:</b> <i>${downloadsToday}</i> из <i>${user.premium_limit}</i>
-    `.trim();
+    // 2. Собираем основной блок статистики (он нередактируемый, т.к. это данные)
+    const statsBlock = [
+        `💼 <b>Тариф:</b> <i>${tariffLabel}</i>`,
+        `⏳ <b>Осталось дней подписки:</b> <i>${daysLeft}</i>`,
+        `🎧 <b>Сегодня скачано:</b> <i>${downloadsToday}</i> из <i>${user.premium_limit}</i>`
+    ].join('\n');
     
-    // Добавляем новый блок с реферальной информацией
-    // ...
-message += `\n\n- - - - - - - - - - - - - - -\n\n` + // <--- ИСПОЛЬЗУЕМ ПРОСТОЙ РАЗДЕЛИТЕЛЬ
-    `🙋‍♂️ <b>Приглашено друзей:</b> <i>${referralCount}</i>\n` +
-    `🔗 <b>Твоя ссылка для бонусов:</b>\n` +
-    `<code>${referralLink}</code>`;
-// ...
+    // 3. Берем шаблоны из T() и заменяем плейсхолдеры
+    const header = T('menu_header').replace('{first_name}', user.first_name || 'пользователь');
     
-    // Добавляем блок с бонусом за подписку (если нужно)
+    const referralBlock = T('menu_referral_block')
+        .replace('{referral_count}', referralCount)
+        .replace('{referral_link}', referralLink);
+    
+    let bonusBlock = '';
     if (!user.subscribed_bonus_used && CHANNEL_USERNAME) {
         const cleanUsername = CHANNEL_USERNAME.replace('@', '');
         const channelLink = `<a href="https://t.me/${cleanUsername}">наш канал</a>`;
-        message += `\n\n🎁 <b>Бонус!</b> Подпишись на ${channelLink} и получи <b>+7 дней тарифа Plus</b> бесплатно!`;
+        bonusBlock = T('menu_bonus_block').replace('{channel_link}', channelLink);
     }
     
-    message += '\n\nПросто отправь мне ссылку, и я скачаю трек!';
-    return message;
+    const footer = T('menu_footer');
+    
+    // 4. Собираем все части вместе, отфильтровывая пустые блоки
+    const messageParts = [
+        header,
+        statsBlock,
+        '\n- - - - - - - - - - - - - - -',
+        referralBlock,
+        bonusBlock, // Этот блок добавится, только если он не пустой
+        footer
+    ];
+    
+    return messageParts.filter(Boolean).join('\n\n');
 }
 
 // --- Инициализация Telegraf ---
