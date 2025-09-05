@@ -457,21 +457,23 @@ if (data.entries && data.entries.length > 0) {
     }
 }
 
-bot.on('text', async (ctx) => {
+bot.on('text', (ctx) => { // Убираем async, он здесь больше не нужен
     const text = ctx.message.text;
     if (text.startsWith('/')) return;
     if (Object.values(allTextsSync()).includes(text)) return;
-
+    
     const urlMatch = text.match(/(https?:\/\/[^\s]+)/g);
     if (!urlMatch) return ctx.reply('Пожалуйста, отправьте мне ссылку.');
     
     const url = urlMatch[0];
-
+    
     if (url.includes('soundcloud.com')) {
-        await handleSoundCloudUrl(ctx, url);
+        // ЗАПУСКАЕМ БЕЗ AWAIT
+        handleSoundCloudUrl(ctx, url);
     } else if (url.includes('open.spotify.com')) {
-        await spotifyEnqueue(ctx, ctx.from.id, url);
+        // ЗАПУСКАЕМ БЕЗ AWAIT
+        spotifyEnqueue(ctx, ctx.from.id, url);
     } else {
-        await ctx.reply('Я умею скачивать только с SoundCloud и Spotify.');
+        ctx.reply('Я умею скачивать только с SoundCloud и Spotify.');
     }
 });
