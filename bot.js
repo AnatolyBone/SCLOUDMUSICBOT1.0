@@ -377,9 +377,9 @@ bot.action(/pl_cancel:(.+)/, async (ctx) => {
 async function handleSoundCloudUrl(ctx, url) {
     let loadingMessage;
     try {
-        loadingMessage = await ctx.reply('🔍 Анализирую ссылку...');
+        loadingMessage = await ctx.reply('🔍 Анализирую плейлист... Это может занять некоторое время.');
         const youtubeDl = getYoutubeDl();
-        const data = await youtubeDl(url, { dumpSingleJson: true, flatPlaylist: true });
+        const data = await youtubeDl(url, { dumpSingleJson: true });
 
         // ПРОВЕРКА: ЭТО ПЛЕЙЛИСТ ИЛИ ТРЕК?
         // ...
