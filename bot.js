@@ -327,9 +327,186 @@ bot.action(/pl_download_10:(.+)/, async (ctx) => {
     playlistSessions.delete(userId);
 });
 // Обработчик кнопки "Выбрать треки вручную" (пока что заглушка)
+// ======================= КОД ДЛЯ РУЧНОГО ВЫБОРА ТРЕКОВ (ВСТАВИТЬ В BOT.JS) =======================
+
+const ITEMS_PER_PAGE = 5; // Количество треков на одной странице выбора
+
+/**
+ * Генерирует интерактивное меню для выбора треков с пагинацией.
+ * @param {number} userId ID пользователя, для которого генерируется меню.
+ * @returns {object} Готовый объект с текстом и клавиатурой для отправки/редактирования.
+ */
+function generateSelectionMenu(userId) {
+    const session = playlistSessions.get(userId);
+    if (!session) return null;
+    
+    const { tracks, selected, currentPage, playlistId, title } = session;
+    const totalPages = Math.ceil(tracks.length / ITEMS_PER_PAGE);
+    
+    // Определяем, какие треки показывать на текущей странице
+    const startIndex = currentPage * ITEMS_PER_PAGE;
+    const endIndex = startIndex + ITEMS_PER_PAGE;
+    const tracksOnPage = tracks.slice(startIndex, endIndex);
+    
+    // Формируем ряды кнопок с треками
+    const trackRows = tracksOnPage.map((track, index) => {
+        const absoluteIndex = startIndex + index;
+        const isSelected = selected.has(absoluteIndex);
+        const icon = isSelected ? '✅' : '⬜️';
+        // Ограничиваем длину названия трека, чтобы он поместился в кнопку
+        const trackTitle = track.title.length > 50 ? track.title.slice(0, 47) + '...' : track.title;
+        
+        return [Markup.button.callback(`${icon} ${trackTitle}`, `pl_toggle:${playlistId}:${absoluteIndex}`)];
+    });
+    
+    // Формируем ряд кнопок навигации
+    const navRow = [];
+    if (currentPage > 0) {
+        navRow.push(Markup.button.callback('⬅️ Назад', `pl_page:${playlistId}:${currentPage - 1}`));
+    }
+    navRow.push(Markup.button.callback(`Страница ${currentPage + 1}/${totalPages}`, 'pl_ignore')); // Кнопка-счетчик
+    if (currentPage < totalPages - 1) {
+        navRow.push(Markup.button.callback('Вперед ➡️', `pl_page:${playlistId}:${currentPage + 1}`));
+    }
+    
+    // Формируем ряд с кнопкой "Готово"
+    const actionRow = [
+        Markup.button.callback(`✅ Готово (${selected.size} выбрано)`, `pl_done:${playlistId}`)
+    ];
+    
+    const messageText = `🎶 <b>${title}</b>\n\nВыберите треки для скачивания:`;
+    
+    return {
+        text: messageText,
+        extra: {
+            parse_mode: 'HTML',
+            ...Markup.inlineKeyboard([
+                ...trackRows,
+                navRow,
+                actionRow
+            ])
+        }
+    };
+}
+
+// Пустышка, чтобы Telegram не показывал "часики" на кнопке со счетчиком страниц
+bot.action('pl_ignore', (ctx) => ctx.answerCbQuery());
+
+// Обработчик, который ЗАПУСКАЕТ ручной выбор
 bot.action(/pl_select_manual:(.+)/, async (ctx) => {
-    // В следующей итерации мы реализуем здесь логику пагинации
-    await ctx.answerCbQuery('Эта функция находится в разработке.', { show_alert: true });
+    const playlistId = ctx.match[1];
+    const userId = ctx.from.id;
+    const session = playlistSessions.get(userId);
+    
+    if (!session || session.playlistId !== playlistId) {
+        return await ctx.answerCbQuery('❗️ Сессия выбора истекла. Пожалуйста, отправьте ссылку заново.', { show_alert: true });
+    }
+    
+    const menu = generateSelectionMenu(userId);
+    if (menu) {
+        await ctx.editMessageText(menu.text, menu.extra);
+    }
+});
+
+// Обработчик ПЕРЕКЛЮЧЕНИЯ СТРАНИЦ
+bot.action(/pl_page:(.+):(\d+)/, async (ctx) => {
+    const [playlistId, pageStr] = ctx.match.slice(1);
+    const newPage = parseInt(pageStr, 10);
+    const userId = ctx.from.id;
+    
+    const session = playlistSessions.get(userId);
+    if (!session || session.playlistId !== playlistId) return await ctx.answerCbQuery('Сессия истекла.');
+    
+    session.currentPage = newPage;
+    const menu = generateSelectionMenu(userId);
+    if (menu) {
+        // Используем try-catch, т.к. пользователь может спамить кнопки, и сообщение не изменится
+        try {
+            await ctx.editMessageText(menu.text, menu.extra);
+        } catch (e) { /* ignore */ }
+    }
+    await ctx.answerCbQuery();
+});
+
+// Обработчик ВЫБОРА/СНЯТИЯ ВЫБОРА трека
+bot.action(/pl_toggle:(.+):(\d+)/, async (ctx) => {
+    const [playlistId, indexStr] = ctx.match.slice(1);
+    const trackIndex = parseInt(indexStr, 10);
+    const userId = ctx.from.id;
+    
+    const session = playlistSessions.get(userId);
+    if (!session || session.playlistId !== playlistId) return await ctx.answerCbQuery('Сессия истекла.');
+    
+    // Логика "переключателя"
+    if (session.selected.has(trackIndex)) {
+        session.selected.delete(trackIndex);
+    } else {
+        session.selected.add(trackIndex);
+    }
+    
+    const menu = generateSelectionMenu(userId);
+    if (menu) {
+        try {
+            await ctx.editMessageText(menu.text, menu.extra);
+        } catch (e) { /* ignore */ }
+    }
+    await ctx.answerCbQuery();
+});
+
+// Обработчик кнопки "Готово"
+bot.action(/pl_done:(.+)/, async (ctx) => {
+    const playlistId = ctx.match[1];
+    const userId = ctx.from.id;
+    const session = playlistSessions.get(userId);
+    
+    if (!session || session.playlistId !== playlistId) {
+        return await ctx.answerCbQuery('❗️ Сессия выбора истекла.', { show_alert: true });
+    }
+    
+    if (session.selected.size === 0) {
+        return await ctx.answerCbQuery('Вы не выбрали ни одного трека.', { show_alert: true });
+    }
+    
+    // Проверяем лимиты пользователя
+    await resetDailyLimitIfNeeded(userId);
+    const user = await getUser(userId);
+    const remainingLimit = user.premium_limit - user.downloads_today;
+    
+    if (remainingLimit <= 0) {
+        await ctx.editMessageText(T('limitReached'), { parse_mode: 'HTML' });
+        playlistSessions.delete(userId);
+        return;
+    }
+    
+    // Получаем реальные объекты треков по выбранным индексам
+    const selectedTracks = Array.from(session.selected).map(index => session.tracks[index]);
+    const tracksToProcess = selectedTracks.slice(0, remainingLimit);
+    
+    let message = `✅ Готово! Добавляю ${tracksToProcess.length} выбранных треков в очередь...`;
+    if (tracksToProcess.length < selectedTracks.length) {
+        message += `\n(Остальные не поместились в ваш дневной лимит)`;
+    }
+    await ctx.editMessageText(message);
+    
+    // Напрямую добавляем задачи в очередь
+    for (const track of tracksToProcess) {
+        const task = {
+            userId: userId,
+            source: 'soundcloud',
+            url: track.url,
+            originalUrl: track.url,
+            metadata: {
+                id: track.id,
+                title: track.title || 'Unknown Title',
+                uploader: track.uploader || 'Unknown Artist',
+                duration: track.duration,
+                thumbnail: track.thumbnail,
+            }
+        };
+        downloadQueue.add(task);
+    }
+    
+    playlistSessions.delete(userId); // Очищаем сессию
 });
 
 // Обработчик кнопки "Отмена"
