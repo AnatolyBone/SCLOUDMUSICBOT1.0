@@ -119,35 +119,65 @@ bot.command('admin', async (ctx) => {
     if (ctx.from.id !== ADMIN_ID) return;
     try {
         await ctx.reply('⏳ Собираю статистику...');
-        const [users, cachedTracksCount, topFailed, topRecent, newUsersToday, newUsersWeek] = await Promise.all([
-            getAllUsers(true), getCachedTracksCount(), getTopFailedSearches(5),
-            getTopRecentSearches(5), getNewUsersCount(1), getNewUsersCount(7)
+        
+        // Запускаем все запросы к базе параллельно для скорости
+        const [
+            users,
+            cachedTracksCount,
+            topFailed,
+            topRecent,
+            newUsersToday, // <-- Новый запрос
+            newUsersWeek // <-- Новый запрос
+        ] = await Promise.all([
+            getAllUsers(true),
+            getCachedTracksCount(),
+            getTopFailedSearches(5),
+            getTopRecentSearches(5),
+            getNewUsersCount(1), // Получаем новых за 1 день
+            getNewUsersCount(7) // Получаем новых за 7 дней
         ]);
+        
+        // --- Формируем статистику пользователей ---
         const totalUsers = users.length;
         const activeUsers = users.filter(u => u.active).length;
         const activeToday = users.filter(u => u.last_active && new Date(u.last_active).toDateString() === new Date().toDateString()).length;
         const totalDownloads = users.reduce((sum, u) => sum + (u.total_downloads || 0), 0);
+        let storageStatusText = STORAGE_CHANNEL_ID ? '✅ Доступен' : '⚠️ Не настроен';
+        
+        // --- Собираем сообщение ---
         let statsMessage = `<b>📊 Статистика Бота</b>\n\n` +
             `<b>👤 Пользователи:</b>\n` +
             `   - Всего: <i>${totalUsers}</i>\n` +
             `   - Активных: <i>${activeUsers}</i>\n` +
-            `   - Новых за 24ч: <i>${newUsersToday}</i>\n` +
-            `   - Новых за 7 дней: <i>${newUsersWeek}</i>\n` +
+            `   - <b>Новых за 24ч: <i>${newUsersToday}</i></b>\n` + // <-- Новая строка
+            `   - <b>Новых за 7 дней: <i>${newUsersWeek}</i></b>\n` + // <-- Новая строка
             `   - Активных сегодня: <i>${activeToday}</i>\n\n` +
             `<b>📥 Загрузки:</b>\n   - Всего за все время: <i>${totalDownloads}</i>\n\n`;
+        
+        // Блок неудачных запросов
         if (topFailed.length > 0) {
             statsMessage += `---\n\n<b>🔥 Топ-5 неудачных запросов (всего):</b>\n`;
-            topFailed.forEach((item, index) => { statsMessage += `${index + 1}. <code>${item.query.slice(0, 30)}</code> (искали <i>${item.search_count}</i> раз)\n`; });
+            topFailed.forEach((item, index) => {
+                statsMessage += `${index + 1}. <code>${item.query.slice(0, 30)}</code> (искали <i>${item.search_count}</i> раз)\n`;
+            });
             statsMessage += `\n`;
         }
+        
+        // Блок популярных запросов
         if (topRecent.length > 0) {
             statsMessage += `<b>📈 Топ-5 запросов (за 24 часа):</b>\n`;
-            topRecent.forEach((item, index) => { statsMessage += `${index + 1}. <code>${item.query.slice(0, 30)}</code> (искали <i>${item.total}</i> раз)\n`; });
+            topRecent.forEach((item, index) => {
+                statsMessage += `${index + 1}. <code>${item.query.slice(0, 30)}</code> (искали <i>${item.total}</i> раз)\n`;
+            });
             statsMessage += `\n`;
         }
+        
+        // Системный блок
         statsMessage += `---\n\n<b>⚙️ Система:</b>\n` +
             `   - Очередь: <i>${downloadQueue.size}</i> в ож. / <i>${downloadQueue.active}</i> в раб.\n` +
-            `   - Треков в кэше: <i>${cachedTracksCount}</i>`;
+            `   - Канал-хранилище: <i>${storageStatusText}</i>\n   - Треков в кэше: <i>${cachedTracksCount}</i>\n\n` +
+            `<b>🔗 Админ-панель:</b>\n<a href="${WEBHOOK_URL.replace(/\/$/, '')}/dashboard">Открыть дашборд</a>`;
+        
         await ctx.reply(statsMessage, { parse_mode: 'HTML', disable_web_page_preview: true });
     } catch (e) {
         console.error('❌ Ошибка в команде /admin:', e);
