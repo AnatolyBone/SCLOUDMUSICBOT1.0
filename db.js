@@ -148,12 +148,29 @@ export async function getUsersAsCsv(options) {
 }
 
 // --- Тарифы и лимиты ---
-export async function setPremium(id, limit, days = 30) {
-  const until = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
-  await updateUserField(id, 'premium_limit', limit);
-  await updateUserField(id, 'premium_until', until);
+// ЗАМЕНИТЕ ВАШУ ФУНКЦИЮ setPremium НА ЭТУ
+export async function setPremium(userId, limit, days, addDays = false) {
+  const user = await getUser(userId);
+  if (!user) return;
+  
+  let newPremiumUntil;
+  const now = new Date();
+  
+  if (addDays && user.premium_until && new Date(user.premium_until) > now) {
+    // Если подписка активна и мы ДОБАВЛЯЕМ дни
+    newPremiumUntil = new Date(user.premium_until);
+    newPremiumUntil.setDate(newPremiumUntil.getDate() + days);
+  } else {
+    // Если подписка неактивна или мы ЗАМЕНЯЕМ дни
+    newPremiumUntil = new Date();
+    newPremiumUntil.setDate(now.getDate() + days);
+  }
+  
+  return updateUserField(userId, {
+    premium_limit: limit,
+    premium_until: newPremiumUntil.toISOString()
+  });
 }
-
 export async function resetDailyLimitIfNeeded(userId) {
   const { rows } = await query('SELECT last_reset_date FROM users WHERE id = $1', [userId]);
   if (rows.length > 0) {
@@ -671,6 +688,43 @@ export async function getUserActivityByDayHour(days = 30) {
         activity[row.day][parseInt(row.hour, 10)] = parseInt(row.count, 10);
     });
     return activity;
+}
+// ДОБАВЬТЕ ЭТИ ФУНКЦИИ В КОНЕЦ DB.JS
+
+// Получает информацию о том, кто пригласил данного пользователя
+export async function getReferrerInfo(userId) {
+    const { data, error } = await supabase
+        .from('users')
+        .select('referrer_id, referrers:referrer_id (id, first_name)')
+        .eq('id', userId)
+        .single();
+    return error ? null : data.referrers;
+}
+
+// Получает список пользователей, приглашенных данным пользователем
+export async function getReferredUsers(referrerId) {
+    const { data, error } = await supabase
+        .from('users')
+        .select('id, first_name, created_at')
+        .eq('referrer_id', referrerId)
+        .order('created_at', { ascending: false });
+    return error ? [] : data;
+}
+
+// Статистика для дашборда
+export async function getReferralStats() {
+    // Топ-5 рефоводов
+    const { data: topReferrers, error: topError } = await supabase.rpc('get_top_referrers', { limit_count: 5 });
+    // Общее число рефералов
+    const { count: totalReferred, error: countError } = await supabase
+        .from('users')
+        .select('*', { count: 'exact', head: true })
+        .not('referrer_id', 'is', null);
+        
+    return {
+        topReferrers: topError ? [] : topReferrers,
+        totalReferred: countError ? 0 : totalReferred
+    };
 }
 // db.js (добавьте эту функцию в конец файла)
 
