@@ -353,9 +353,30 @@ bot.action(/pl_finish:(.+)/, async (ctx) => {
 });
 
 bot.action(/pl_cancel:(.+)/, async (ctx) => {
-    playlistSessions.delete(ctx.from.id);
-    await ctx.deleteMessage().catch(() => {});
-    await ctx.answerCbQuery('Действие отменено.');
+    const userId = ctx.from.id;
+    const session = playlistSessions.get(userId);
+    
+    // Если по какой-то причине сессии уже нет, просто удаляем сообщение
+    if (!session) {
+        await ctx.deleteMessage().catch(() => {});
+        return await ctx.answerCbQuery();
+    }
+    
+    // Восстанавливаем текст и кнопки первоначального меню
+    const message = `🎶 В плейлисте <b>"${session.title}"</b> найдено <b>${session.tracks.length}</b> треков.\n\nЧто делаем?`;
+    const initialMenu = generateInitialPlaylistMenu(session.playlistId, session.tracks.length);
+    
+    // Редактируем текущее сообщение, возвращая его к исходному виду
+    try {
+        await ctx.editMessageText(message, {
+            parse_mode: 'HTML',
+            ...initialMenu
+        });
+        await ctx.answerCbQuery('Возвращаю...');
+    } catch (e) {
+        // Если сообщение не изменилось, просто игнорируем ошибку
+        await ctx.answerCbQuery();
+    }
 });
 
 // --- Главный обработчик ссылок ---
