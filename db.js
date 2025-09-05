@@ -656,3 +656,26 @@ export async function getUserActivityByDayHour(days = 30) {
     });
     return activity;
 }
+// db.js (добавьте эту функцию в конец файла)
+
+/**
+ * Находит активную рассылку (в процессе) и помечает ее как прерванную.
+ * @returns {Promise<object|null>} Возвращает прерванную задачу или null.
+ */
+export async function findAndInterruptActiveBroadcast() {
+    const { data, error } = await supabase
+        .from('broadcast_tasks')
+        .update({ status: 'interrupted', finished_at: new Date() })
+        .eq('status', 'processing')
+        .select()
+        .single();
+
+    if (error && error.code !== 'PGRST116') { // PGRST116 - это "not found", это не ошибка
+        console.error('[DB] Ошибка при прерывании рассылки:', error);
+        return null;
+    }
+    if (data) {
+        console.log(`[DB] Рассылка #${data.id} помечена как прерванная.`);
+    }
+    return data;
+}
