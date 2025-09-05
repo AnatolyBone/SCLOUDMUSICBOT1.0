@@ -1,10 +1,8 @@
-// config/texts.js (ПОЛНАЯ ВЕРСИЯ С HTML И НОВЫМ ПРИВЕТСТВИЕМ)
+// config/texts.js
 
 import { supabase } from '../db.js';
 
-// config/texts.js
-
-// Системные ключи, которые НЕЛЬЗЯ редактировать в админке, т.к. на них завязана логика bot.hears()
+// --- Системные ключи, которые НЕЛЬЗЯ редактировать в админке ---
 const systemKeys = {
   menu: '📋 Меню',
   upgrade: '🔓 Расширить лимит',
@@ -12,10 +10,10 @@ const systemKeys = {
   help: 'ℹ️ Помощь',
 };
 
-// Тексты, которые МОЖНО редактировать в админке
+// --- Тексты, которые МОЖНО редактировать в админке ---
 const editableTexts = {
+  // Приветствия
   start: '👋 Снова здравствуйте! Пришлите ссылку на трек.', 
-
   start_new_user: 
     `<b>Добро пожаловать в SCloudMusicBot!</b>\n\n` +
     `Я помогу вам скачать любимые треки и <b>плейлисты</b> с SoundCloud в MP3.\n\n` +
@@ -25,6 +23,7 @@ const editableTexts = {
     `🔎 <b>2. Поиск музыки прямо в чате</b>\n` +
     `В любом другом чате (или здесь) начните вводить <code>@SCloudMusicBot</code> и через пробел название трека. Вы сможете найти и отправить музыку, не выходя из переписки в любом чате!`,
 
+  // Информация о тарифах и помощь
   upgradeInfo:
     `<b>🚀 Хочешь больше треков?</b>\n\n` +
     `<b>🆓 Free</b> — 5 🟢\n` +
@@ -34,26 +33,29 @@ const editableTexts = {
     `👉 Донат: <a href="https://boosty.to/anatoly_bone/donate">boosty.to/anatoly_bone/donate</a>\n` +
     `✉️ После оплаты напиши: @anatolybone\n\n` +
     `📣 Новости и фишки: @SCMBLOG`,
-// ...
-menuHeader: '👋 Привет, {first_name}!\n<b>Твой профиль:</b>',
-menuReferralBlock: <b>Приглашено друзей:</b> <i>{referral_count}</i>\n🔗 <b>Твоя ссылка для бонусов:</b>\n<code>{referral_link}</code>',
-// ...
   helpInfo:
     'ℹ️ Пришли ссылку — получишь mp3.\n' +
     '🔓 «Расширить» — информация о тарифах.\n' +
     '🎵 «Мои треки» — список за сегодня.\n' +
     '📣 Канал: @SCM_BLOG',
 
+  // Шаблоны для динамического меню
+  menu_header: '👋 Привет, {first_name}!\n<b>Твой профиль:</b>',
+  menu_referral_block: '🙋‍♂️ <b>Приглашено друзей:</b> <i>{referral_count}</i>\n🔗 <b>Твоя ссылка для бонусов:</b>\n<code>{referral_link}</code>',
+  menu_bonus_block: '🎁 <b>Бонус!</b> Подпишись на {channel_link} и получи <b>+7 дней тарифа Plus</b> бесплатно!',
+  menu_footer: 'Просто отправь мне ссылку, и я скачаю трек!',
+
+  // Системные сообщения
   error: '❌ Произошла непредвиденная ошибка.',
   noTracks: 'Вы еще не скачивали треков сегодня.',
   limitReached: '🚫 Дневной лимит загрузок исчерпан.\n\n{bonus_message}💡 Чтобы скачивать больше, воспользуйтесь кнопкой «Расширить лимит».',
   blockedMessage: '❌ Ваш аккаунт заблокирован администратором.',
 };
 
-// Объединяем их для внутренней логики
+// --- Внутренняя логика (остается без изменений) ---
+
 const defaults = { ...systemKeys, ...editableTexts };
 
-// Добавляем новую экспорт-функцию
 export function getEditableTexts() {
     const currentTexts = allTextsSync();
     const result = {};
@@ -63,37 +65,28 @@ export function getEditableTexts() {
     return result;
 }
 
-// --- ЛОГИКА КЭШИРОВАНИЯ И ЗАГРУЗКИ (остается без изменений) ---
-// ... (весь ваш остальной код файла texts.js)
-
 let cache = { ...defaults };
 let lastLoad = 0;
-const TTL_MS = 60 * 1000; // обновляем кэш не чаще раза в минуту
+const TTL_MS = 60 * 1000;
 
 export async function loadTexts(force = false) {
   const now = Date.now();
   if (!force && now - lastLoad < TTL_MS) return cache;
-
   try {
     const { data, error } = await supabase.from('bot_texts').select('key,value');
     if (error) {
       console.error('[texts] Ошибка загрузки из Supabase:', error.message);
-      // В случае ошибки используем кэш/дефолты
       return cache;
     }
-
     const map = { ...defaults };
     for (const row of data || []) {
       if (row?.key && typeof row.value === 'string') map[row.key] = row.value;
     }
-
     cache = map;
     lastLoad = now;
-
   } catch (e) {
     console.error('[texts] Критическая ошибка при загрузке текстов:', e.message);
   }
-
   return cache;
 }
 
@@ -112,6 +105,6 @@ export async function setText(key, value) {
     .upsert({ key, value }, { onConflict: 'key' });
   if (error) throw new Error(error.message);
   cache[key] = value;
-  lastLoad = 0; // Сбрасываем таймер кэша, чтобы при следующем запросе тексты загрузились заново
+  lastLoad = 0;
   return true;
 }
