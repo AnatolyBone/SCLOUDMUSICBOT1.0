@@ -391,7 +391,7 @@ bot.action(/pl_download_all:|pl_download_10:/, async (ctx) => {
     for (const track of tasksToReallyDownload) {
         addTaskToQueue({
             userId, source: 'soundcloud', url: track.webpage_url || track.url, originalUrl: track.webpage_url || track.url,
-            metadata: { id: track.id, title: track.title, uploader: track.uploader, duration: track.duration, thumbnail: track.thumbnail }
+            metadata: { id: track.id, title: track.title, uploader: track.uploader, duration: track.duration, thumbnail: track.thumbnail }, ctx: ctx
         });
     }
 
@@ -490,7 +490,7 @@ bot.action(/pl_finish:(.+)/, async (ctx) => {
     for (const track of tasksToReallyDownload) {
         addTaskToQueue({
             userId, source: 'soundcloud', url: track.webpage_url || track.url, originalUrl: track.webpage_url || track.url,
-            metadata: { id: track.id, title: track.title, uploader: track.uploader, duration: track.duration, thumbnail: track.thumbnail }
+            metadata: { id: track.id, title: track.title, uploader: track.uploader, duration: track.duration, thumbnail: track.thumbnail }, ctx: ctx
         });
     }
     
@@ -554,7 +554,7 @@ async function handleSoundCloudUrl(ctx, url) {
             await ctx.telegram.editMessageText(ctx.chat.id, loadingMessage.message_id, undefined, '✅ Распознал трек, ставлю в очередь...');
             addTaskToQueue({
                 userId: ctx.from.id, source: 'soundcloud', url: data.webpage_url || url, originalUrl: data.webpage_url || url,
-                metadata: { id: data.id, title: data.title, uploader: data.uploader, duration: data.duration, thumbnail: data.thumbnail }
+                metadata: { id: data.id, title: data.title, uploader: data.uploader, duration: data.duration, thumbnail: data.thumbnail }, ctx: ctx
             });
         }
     } catch (error) {
