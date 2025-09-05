@@ -6,7 +6,7 @@ import { performInlineSearch } from './services/searchManager.js';
 import { spotifyEnqueue } from './services/spotifyManager.js';
 import { enqueue, downloadQueue } from './services/downloadManager.js';
 // ======================= НОВЫЙ ИМПОРТ =======================
-import { exec as execYoutubeDl } from 'youtube-dl-exec';
+import execYoutubeDl from 'youtube-dl-exec';
 
 // ======================= НОВЫЕ ПЕРЕМЕННЫЕ И ФУНКЦИИ =======================
 
