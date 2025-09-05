@@ -1,7 +1,6 @@
 // ======================= ФИНАЛЬНАЯ ВЕРСИЯ BOT.JS =======================
 
 import { Telegraf, Markup, TelegramError } from 'telegraf';
-import { HttpsProxyAgent } from 'https-proxy-agent';
 import { ADMIN_ID, BOT_TOKEN, WEBHOOK_URL, CHANNEL_USERNAME, STORAGE_CHANNEL_ID, PROXY_URL } from './config.js';
 import { updateUserField, getUser, createUser, setPremium, getAllUsers, resetDailyLimitIfNeeded, getCachedTracksCount, logUserAction, getTopFailedSearches, getTopRecentSearches, getNewUsersCount } from './db.js';
 import { T, allTextsSync } from './config/texts.js';
@@ -74,7 +73,18 @@ function formatMenuMessage(user) {
 
 // --- Инициализация и Middleware ---
 
-export const bot = new Telegraf(BOT_TOKEN, { handlerTimeout: 300_000 });
+// ЗАМЕНИТЕ ЕЕ НА ЭТОТ БЛОК
+const telegrafOptions = {
+    handlerTimeout: 300_000,
+};
+
+if (PROXY_URL) {
+    const agent = new HttpsProxyAgent(PROXY_URL);
+    telegrafOptions.telegram = { agent };
+    console.log('[App] Использую прокси для подключения к Telegram API.');
+}
+
+export const bot = new Telegraf(BOT_TOKEN, telegrafOptions);
 
 bot.catch(async (err, ctx) => {
     console.error(`🔴 [Telegraf Catch] Глобальная ошибка для update ${ctx.update.update_id}:`, err);
