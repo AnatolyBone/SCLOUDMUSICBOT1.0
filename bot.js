@@ -282,7 +282,8 @@ bot.action(/pl_download_all:|pl_download_10:/, async (ctx) => {
     await ctx.editMessageText(message);
     for (const track of tracksToProcess) {
         addTaskToQueue({
-            userId, source: 'soundcloud', url: track.url, originalUrl: track.url,
+            userId, source: 'soundcloud', url: track.webpage_url || track.url,
+    originalUrl: track.webpage_url || track.url,
             metadata: { id: track.id, title: track.title, uploader: track.uploader, duration: track.duration, thumbnail: track.thumbnail }
         });
     }
@@ -343,7 +344,8 @@ bot.action(/pl_finish:(.+)/, async (ctx) => {
     await ctx.editMessageText(message);
     for (const track of tracksToProcess) {
         addTaskToQueue({
-            userId, source: 'soundcloud', url: track.url, originalUrl: track.url,
+            userId, source: 'soundcloud', url: track.webpage_url || track.url,
+    originalUrl: track.webpage_url || track.url,
             metadata: { id: track.id, title: track.title, uploader: track.uploader, duration: track.duration, thumbnail: track.thumbnail }
         });
     }
