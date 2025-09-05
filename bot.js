@@ -59,10 +59,18 @@ function getDaysLeft(premiumUntil) {
     return Math.max(Math.ceil(diff / 86400000), 0);
 }
 
-function formatMenuMessage(user) {
+// bot.js
+
+function formatMenuMessage(user, botUsername) { // Добавили botUsername
     const tariffLabel = getTariffName(user.premium_limit);
     const downloadsToday = user.downloads_today || 0;
     const daysLeft = getDaysLeft(user.premium_until);
+    const referralCount = user.referral_count || 0; // Получаем кол-во рефералов
+    
+    // Генерируем ссылку прямо здесь
+    const referralLink = `https://t.me/${botUsername}?start=ref_${user.id}`;
+    
+    // Собираем основное сообщение
     let message = `
 👋 Привет, ${user.first_name || 'пользователь'}!
 <b>Твой профиль:</b>
@@ -70,11 +78,23 @@ function formatMenuMessage(user) {
 ⏳ <b>Осталось дней подписки:</b> <i>${daysLeft}</i>
 🎧 <b>Сегодня скачано:</b> <i>${downloadsToday}</i> из <i>${user.premium_limit}</i>
     `.trim();
+    
+    // Добавляем новый блок с реферальной информацией
+    message += `
+
+<hr>
+
+🙋‍♂️ <b>Приглашено друзей:</b> <i>${referralCount}</i>
+🔗 <b>Твоя ссылка для бонусов:</b>
+<code>${referralLink}</code>`;
+    
+    // Добавляем блок с бонусом за подписку (если нужно)
     if (!user.subscribed_bonus_used && CHANNEL_USERNAME) {
         const cleanUsername = CHANNEL_USERNAME.replace('@', '');
         const channelLink = `<a href="https://t.me/${cleanUsername}">наш канал</a>`;
-        message += `\n\n🎁 <b>Бонус!</b> Подпишись на ${channelLink} и получи <b>7 дней тарифа Plus</b> бесплатно!`;
+        message += `\n\n🎁 <b>Бонус!</b> Подпишись на ${channelLink} и получи <b>+7 дней тарифа Plus</b> бесплатно!`;
     }
+    
     message += '\n\nПросто отправь мне ссылку, и я скачаю трек!';
     return message;
 }
@@ -223,13 +243,26 @@ bot.command('maintenance', (ctx) => {
     }
 });
 bot.command('premium', (ctx) => ctx.reply(T('upgradeInfo'), { parse_mode: 'HTML', disable_web_page_preview: true }));
+// bot.js
+
 bot.hears(T('menu'), async (ctx) => {
+    // 1. Получаем пользователя. Наша новая функция getUser теперь вернет и user.referral_count
     const user = await getUser(ctx.from.id);
-    const message = formatMenuMessage(user);
-    const extraOptions = { parse_mode: 'HTML', disable_web_page_preview: true };
+
+    // 2. Вызываем обновленную formatMenuMessage, передавая ей объект user и имя бота
+    const message = formatMenuMessage(user, ctx.botInfo.username);
+
+    // 3. Остальная логика остается без изменений
+    const extraOptions = { 
+        parse_mode: 'HTML',
+        disable_web_page_preview: true
+    };
     if (!user.subscribed_bonus_used && CHANNEL_USERNAME) {
-        extraOptions.reply_markup = { inline_keyboard: [[Markup.button.callback('✅ Я подписался и хочу бонус!', 'check_subscription')]] };
+        extraOptions.reply_markup = { 
+            inline_keyboard: [[ Markup.button.callback('✅ Я подписался и хочу бонус!', 'check_subscription') ]] 
+        };
     }
+    
     await ctx.reply(message, extraOptions);
 });
 bot.hears(T('mytracks'), async (ctx) => {
