@@ -25,24 +25,40 @@ export async function getUserById(id) {
   return rows[0] || null;
 }
 
-export async function createUser(id, first_name = '', username = '', referral_source = null, referrer_id = null) {
-  await query(
-    `INSERT INTO users (id, username, first_name, downloads_today, premium_limit, total_downloads, tracks_today, created_at, last_active, referral_source, referrer_id, active, last_reset_date)
-     VALUES ($1, $2, $3, 0, 5, 0, '[]'::jsonb, NOW(), NOW(), $4, $5, TRUE, CURRENT_DATE)
-     ON CONFLICT (id) DO NOTHING`,
-    [id, username || '', first_name || '', referral_source, referrer_id]
-  );
+export async function createUser(id, firstName = '', username = '', startPayload = null) {
+    let referrerId = null;
+    if (startPayload && startPayload.startsWith('ref_')) {
+        const parsedId = parseInt(startPayload.split('_')[1], 10);
+        // Проверка, что ID корректный и пользователь не пригласил сам себя
+        if (!isNaN(parsedId) && parsedId !== id) {
+            referrerId = parsedId;
+        }
+    }
+
+    // Обратите внимание: мы используем вычисленный referrerId здесь
+    const sql = `
+        INSERT INTO users (id, first_name, username, referrer_id, last_active, last_reset_date)
+        VALUES ($1, $2, $3, $4, NOW(), CURRENT_DATE)
+        ON CONFLICT (id) DO NOTHING
+    `;
+    await query(sql, [id, firstName, username, referrerId]);
 }
 
-export async function getUser(id, first_name = '', username = '') {
+export async function getUser(id, firstName = '', username = '', startPayload = null) {
   const { rows } = await query('SELECT * FROM users WHERE id = $1', [id]);
+  
   if (rows.length > 0) {
+    // Если пользователь существует, просто обновляем его last_active
     if (rows[0].active) {
-        await query('UPDATE users SET last_active = NOW() WHERE id = $1', [id]);
+      await query('UPDATE users SET last_active = NOW() WHERE id = $1', [id]);
     }
     return rows[0];
   }
-  await createUser(id, first_name, username);
+  
+  // Если пользователя нет, создаем его, передавая startPayload
+  await createUser(id, firstName, username, startPayload);
+  
+  // И возвращаем только что созданного пользователя
   const newUserResult = await query('SELECT * FROM users WHERE id = $1', [id]);
   return newUserResult.rows[0];
 }
