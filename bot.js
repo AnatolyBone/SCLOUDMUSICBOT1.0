@@ -10,6 +10,7 @@ import { performInlineSearch } from './services/searchManager.js';
 import { spotifyEnqueue } from './services/spotifyManager.js';
 import { downloadQueue } from './services/downloadManager.js';
 import execYoutubeDl from 'youtube-dl-exec';
+import { isShuttingDown, isMaintenanceMode, setMaintenanceMode } from './services/appState.js';
 
 // --- Глобальные переменные и хелперы ---
 const playlistSessions = new Map();
