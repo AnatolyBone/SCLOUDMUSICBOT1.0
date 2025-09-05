@@ -1,6 +1,7 @@
 // ======================= ФИНАЛЬНАЯ ВЕРСИЯ BOT.JS =======================
 
 import { Telegraf, Markup, TelegramError } from 'telegraf';
+import { HttpsProxyAgent } from 'https-proxy-agent';
 import { ADMIN_ID, BOT_TOKEN, WEBHOOK_URL, CHANNEL_USERNAME, STORAGE_CHANNEL_ID, PROXY_URL } from './config.js';
 import { updateUserField, getUser, createUser, setPremium, getAllUsers, resetDailyLimitIfNeeded, getCachedTracksCount, logUserAction, getTopFailedSearches, getTopRecentSearches, getNewUsersCount } from './db.js';
 import { T, allTextsSync } from './config/texts.js';
