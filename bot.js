@@ -1,12 +1,33 @@
-// bot.js (ФИНАЛЬНАЯ РАБОЧАЯ ВЕРСИЯ С ИСПРАВЛЕННЫМИ КОМАНДАМИ)
-
 import { Telegraf, Markup, TelegramError } from 'telegraf';
-import { ADMIN_ID, BOT_TOKEN, WEBHOOK_URL, CHANNEL_USERNAME, STORAGE_CHANNEL_ID } from './config.js';
+import { ADMIN_ID, BOT_TOKEN, WEBHOOK_URL, CHANNEL_USERNAME, STORAGE_CHANNEL_ID, PROXY_URL } from './config.js'; // Убедитесь, что PROXY_URL импортирован
 import { updateUserField, getUser, createUser, setPremium, getAllUsers, resetDailyLimitIfNeeded, getCachedTracksCount, logUserAction, getTopFailedSearches, getTopRecentSearches, getNewUsersCount } from './db.js';
 import { T, allTextsSync } from './config/texts.js';
 import { performInlineSearch } from './services/searchManager.js';
 import { spotifyEnqueue } from './services/spotifyManager.js';
 import { enqueue, downloadQueue } from './services/downloadManager.js';
+// ======================= НОВЫЙ ИМПОРТ =======================
+import { exec as execYoutubeDl } from 'youtube-dl-exec';
+
+// ======================= НОВЫЕ ПЕРЕМЕННЫЕ И ФУНКЦИИ =======================
+
+// Простое in-memory хранилище для сессий выбора плейлистов
+// Ключ - userId, Значение - объект сессии
+const playlistSessions = new Map();
+
+// Регулярное выражение для плейлистов SoundCloud
+const SOUNDCLOUD_PLAYLIST_REGEX = /soundcloud\.com\/([\w-]+)\/sets\/([\w-]+)/i;
+
+// Хелпер для получения инстанса youtube-dl-exec с прокси
+function getYoutubeDl() {
+    const options = {};
+    if (PROXY_URL) {
+        options.proxy = PROXY_URL;
+    }
+    return (url, flags) => execYoutubeDl(url, flags, options);
+}
+
+// ======================= КОНЕЦ НОВЫХ ПЕРЕМЕННЫХ =======================
+
 
 async function isSubscribed(userId) {
     if (!CHANNEL_USERNAME) return false;
@@ -81,7 +102,7 @@ bot.use(async (ctx, next) => {
     if (user && user.active === false) {
         console.log(`[Access Denied] Заблокированный пользователь ${ctx.from.id} попытался использовать бота.`);
         ctx.reply(T('blockedMessage'), { parse_mode: 'HTML' }).catch(() => {});
-        return; // Останавливаем обработку для заблокированных
+        return; 
     }
     await resetDailyLimitIfNeeded(ctx.from.id);
     return next();
@@ -113,41 +134,37 @@ bot.command('admin', async (ctx) => {
     try {
         await ctx.reply('⏳ Собираю статистику...');
         
-        // Запускаем все запросы к базе параллельно для скорости
         const [
             users,
             cachedTracksCount,
             topFailed,
             topRecent,
-            newUsersToday, // <-- Новый запрос
-            newUsersWeek // <-- Новый запрос
+            newUsersToday, 
+            newUsersWeek
         ] = await Promise.all([
             getAllUsers(true),
             getCachedTracksCount(),
             getTopFailedSearches(5),
             getTopRecentSearches(5),
-            getNewUsersCount(1), // Получаем новых за 1 день
-            getNewUsersCount(7) // Получаем новых за 7 дней
+            getNewUsersCount(1), 
+            getNewUsersCount(7)
         ]);
         
-        // --- Формируем статистику пользователей ---
         const totalUsers = users.length;
         const activeUsers = users.filter(u => u.active).length;
         const activeToday = users.filter(u => u.last_active && new Date(u.last_active).toDateString() === new Date().toDateString()).length;
         const totalDownloads = users.reduce((sum, u) => sum + (u.total_downloads || 0), 0);
         let storageStatusText = STORAGE_CHANNEL_ID ? '✅ Доступен' : '⚠️ Не настроен';
         
-        // --- Собираем сообщение ---
         let statsMessage = `<b>📊 Статистика Бота</b>\n\n` +
             `<b>👤 Пользователи:</b>\n` +
             `   - Всего: <i>${totalUsers}</i>\n` +
             `   - Активных: <i>${activeUsers}</i>\n` +
-            `   - <b>Новых за 24ч: <i>${newUsersToday}</i></b>\n` + // <-- Новая строка
-            `   - <b>Новых за 7 дней: <i>${newUsersWeek}</i></b>\n` + // <-- Новая строка
+            `   - <b>Новых за 24ч: <i>${newUsersToday}</i></b>\n` +
+            `   - <b>Новых за 7 дней: <i>${newUsersWeek}</i></b>\n` +
             `   - Активных сегодня: <i>${activeToday}</i>\n\n` +
             `<b>📥 Загрузки:</b>\n   - Всего за все время: <i>${totalDownloads}</i>\n\n`;
         
-        // Блок неудачных запросов
         if (topFailed.length > 0) {
             statsMessage += `---\n\n<b>🔥 Топ-5 неудачных запросов (всего):</b>\n`;
             topFailed.forEach((item, index) => {
@@ -156,7 +173,6 @@ bot.command('admin', async (ctx) => {
             statsMessage += `\n`;
         }
         
-        // Блок популярных запросов
         if (topRecent.length > 0) {
             statsMessage += `<b>📈 Топ-5 запросов (за 24 часа):</b>\n`;
             topRecent.forEach((item, index) => {
@@ -165,7 +181,6 @@ bot.command('admin', async (ctx) => {
             statsMessage += `\n`;
         }
         
-        // Системный блок
         statsMessage += `---\n\n<b>⚙️ Система:</b>\n` +
             `   - Очередь: <i>${downloadQueue.size}</i> в ож. / <i>${downloadQueue.active}</i> в раб.\n` +
             `   - Канал-хранилище: <i>${storageStatusText}</i>\n   - Треков в кэше: <i>${cachedTracksCount}</i>\n\n` +
@@ -177,9 +192,8 @@ bot.command('admin', async (ctx) => {
         await ctx.reply('❌ Не удалось собрать статистику.');
     }
 });
-// ======================= ИЗМЕНЕНИЕ №1: ДОБАВЛЯЕМ КОМАНДУ /premium =======================
+
 bot.command('premium', async (ctx) => {
-    // Эта команда будет делать то же самое, что и кнопка "Расширить лимит"
     await ctx.reply(T('upgradeInfo'), { parse_mode: 'HTML', disable_web_page_preview: true });
 });
 
@@ -250,19 +264,58 @@ bot.on('inline_query', async (ctx) => {
     }
 });
 
+// ======================= НОВЫЕ ОБРАБОТЧИКИ ДЛЯ ПЛЕЙЛИСТОВ =======================
+
+// Обработчик кнопки "Скачать первые 10"
+bot.action(/pl_download_10:(.+)/, async (ctx) => {
+    const playlistId = ctx.match[1];
+    const userId = ctx.from.id;
+    const session = playlistSessions.get(userId);
+
+    if (!session || session.playlistId !== playlistId) {
+        return await ctx.answerCbQuery('❗️ Сессия выбора истекла. Пожалуйста, отправьте ссылку на плейлист заново.', { show_alert: true });
+    }
+
+    await ctx.editMessageText(`✅ Отлично! Ставлю первые 10 треков в очередь на скачивание...`);
+    
+    const tracksToDownload = session.tracks.slice(0, 10);
+    for (const track of tracksToDownload) {
+        // Вызываем существующую функцию постановки в очередь
+        enqueue(ctx, userId, track.url).catch(err => {
+            console.error(`[Playlist Enqueue Error] Ошибка для user ${userId} трек ${track.url}:`, err.message);
+        });
+    }
+
+    // Очищаем сессию после использования
+    playlistSessions.delete(userId);
+});
+
+// Обработчик кнопки "Выбрать треки вручную" (пока что заглушка)
+bot.action(/pl_select_manual:(.+)/, async (ctx) => {
+    // В следующей итерации мы реализуем здесь логику пагинации
+    await ctx.answerCbQuery('Эта функция находится в разработке.', { show_alert: true });
+});
+
+// Обработчик кнопки "Отмена"
+bot.action(/pl_cancel:(.+)/, async (ctx) => {
+    const userId = ctx.from.id;
+    playlistSessions.delete(userId);
+    await ctx.deleteMessage().catch(() => {}); // Удаляем сообщение с кнопками
+    await ctx.answerCbQuery('Действие отменено.');
+});
+
+
+// ======================= МОДИФИЦИРОВАННЫЙ ОБРАБОТЧИК ТЕКСТА =======================
 // ВАЖНО: Универсальный обработчик текста должен идти ПОСЛЕ всех команд и hears
 bot.on('text', async (ctx) => {
     const userText = ctx.message.text;
 
-    // ======================= ИЗМЕНЕНИЕ №2: ПРОПУСКАЕМ КОМАНДЫ =======================
-    // Эта проверка теперь необязательна, т.к. обработчик в конце, но оставим для надежности
     if (userText.startsWith('/')) {
-        return; // Команды уже обработаны выше
+        return; 
     }
     
-    // Проверяем, не является ли текст командой из меню
     if (Object.values(allTextsSync()).includes(userText)) {
-        return; // `hears` уже обработал
+        return; 
     }
     
     const urlMatch = userText.match(/(https?:\/\/[^\s]+)/g);
@@ -273,7 +326,11 @@ bot.on('text', async (ctx) => {
     
     const url = urlMatch[0];
     
-    if (url.includes('soundcloud.com')) {
+    // Новая логика: сначала проверяем, является ли ссылка плейлистом
+    if (SOUNDCLOUD_PLAYLIST_REGEX.test(url)) {
+        await handlePlaylistLink(ctx, url);
+    } else if (url.includes('soundcloud.com')) {
+        // Старая логика для одиночных треков
         enqueue(ctx, ctx.from.id, url).catch(err => {
             console.error(`[SC Enqueue Error] Ошибка для user ${ctx.from.id}:`, err.message);
         });
@@ -285,3 +342,68 @@ bot.on('text', async (ctx) => {
         await ctx.reply('Я пока умею скачивать только с SoundCloud и Spotify. Поддержка других платформ в разработке!');
     }
 });
+
+// ======================= НОВЫЕ ФУНКЦИИ ДЛЯ ОБРАБОТКИ ПЛЕЙЛИСТОВ =======================
+async function handlePlaylistLink(ctx, url) {
+    let loadingMessage;
+    try {
+        loadingMessage = await ctx.reply('🔍 Анализирую плейлист... Это может занять несколько секунд.');
+
+        const youtubeDl = getYoutubeDl();
+        const output = await youtubeDl(url, {
+            dumpSingleJson: true,
+            flatPlaylist: true,
+        });
+
+        const playlistData = JSON.parse(output);
+        const tracks = playlistData.entries;
+
+        if (!tracks || tracks.length === 0) {
+            await ctx.telegram.editMessageText(ctx.chat.id, loadingMessage.message_id, undefined, 'Не удалось найти треки в этом плейлисте или плейлист пуст.');
+            return;
+        }
+
+        // Удаляем сообщение "Анализирую..." перед отправкой нового
+        await ctx.telegram.deleteMessage(ctx.chat.id, loadingMessage.message_id).catch(()=>{});
+        
+        // Передаем управление для создания сессии и отправки меню
+        await startPlaylistSelection(ctx, playlistData);
+
+    } catch (error) {
+        console.error('Ошибка при обработке плейлиста:', error);
+        if (loadingMessage) {
+            await ctx.telegram.editMessageText(ctx.chat.id, loadingMessage.message_id, undefined, '❌ Не удалось обработать ссылку на плейлист. Убедитесь, что она корректна и плейлист доступен.');
+        } else {
+            await ctx.reply('❌ Не удалось обработать ссылку на плейлист. Убедитесь, что она корректна и плейлист доступен.');
+        }
+    }
+}
+
+async function startPlaylistSelection(ctx, playlistData) {
+    const userId = ctx.from.id;
+    const tracks = playlistData.entries;
+    const playlistId = playlistData.id || `pl_${Date.now()}`; // ID для callback'ов, с фолбэком
+
+    // Сохраняем данные плейлиста для этого пользователя
+    playlistSessions.set(userId, {
+        playlistId: playlistId,
+        title: playlistData.title,
+        tracks: tracks,
+        selected: new Set(), // Для будущего ручного выбора
+        currentPage: 0     // Для будущей пагинации
+    });
+
+    const message = `🎶 В плейлисте <b>"${playlistData.title}"</b> найдено <b>${tracks.length}</b> треков.\n\nЧто делаем?`;
+    await ctx.reply(message, {
+        parse_mode: 'HTML',
+        ...generateInitialPlaylistMenu(playlistId)
+    });
+}
+
+function generateInitialPlaylistMenu(playlistId) {
+    return Markup.inlineKeyboard([
+        [Markup.button.callback('📥 Скачать первые 10', `pl_download_10:${playlistId}`)],
+        [Markup.button.callback('📝 Выбрать треки вручную', `pl_select_manual:${playlistId}`)],
+        [Markup.button.callback('❌ Отмена', `pl_cancel:${playlistId}`)]
+    ]);
+}
