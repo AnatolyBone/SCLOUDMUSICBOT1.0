@@ -23,8 +23,9 @@ import {
     getActivityByWeekday, getTopTracks, getTopUsers, getHourlyActivity, getUsersAsCsv, 
     getUserActions, logUserAction,
     createBroadcastTask, getPendingBroadcastTask, completeBroadcastTask, failBroadcastTask,
-    getAllBroadcastTasks, deleteBroadcastTask, getBroadcastTaskById, updateBroadcastTask
+    getAllBroadcastTasks, deleteBroadcastTask, getBroadcastTaskById, updateBroadcastTask, findAndInterruptActiveBroadcast
 } from './db.js';
+import { setShuttingDown, setMaintenanceMode } from './services/appState.js';
 import { bot } from './bot.js';
 import redisService from './services/redisClient.js';
 import { WEBHOOK_URL, PORT, SESSION_SECRET, ADMIN_ID, ADMIN_LOGIN, ADMIN_PASSWORD, WEBHOOK_PATH, STORAGE_CHANNEL_ID, BROADCAST_STORAGE_ID } from './config.js';
@@ -51,6 +52,7 @@ const __dirname = path.dirname(__filename);
 const limit = pLimit(1); 
 
 async function startApp() {
+    setMaintenanceMode(false);
     console.log('[App] Запуск приложения...');
     try {
         await loadTexts(true);
@@ -82,7 +84,8 @@ if (process.env.NODE_ENV === 'production') {
             });
         }
 
-        app.listen(PORT, () => console.log(`✅ [App] Сервер запущен на порту ${PORT}.`));
+        const server = app.listen(PORT, () => console.log(`✅ [App] Сервер запущен на порту ${PORT}.`));
+setupGracefulShutdown(server);
         
         console.log('[App] Настройка фоновых задач...');
         setInterval(() => resetDailyStats(), 24 * 3600 * 1000);
@@ -585,6 +588,41 @@ async function runSingleBroadcast(task, users, taskId = null) {
         } catch (e) { console.error('Не удалось отправить отчет админу:', e.message); }
     }
     return report;
+}
+function setupGracefulShutdown(server) {
+    const SHUTDOWN_TIMEOUT = 25000; // 25 секунд (Render дает 30)
+    
+    const gracefulShutdown = async (signal) => {
+        setShuttingDown();
+        console.log(`[Shutdown] Получен сигнал ${signal}. Начинаю изящное завершение...`);
+        
+        server.close(() => console.log('[Shutdown] HTTP сервер закрыт.'));
+        
+        await findAndInterruptActiveBroadcast();
+        
+        if (downloadQueue.active > 0) {
+            console.log(`[Shutdown] Ожидаю завершения текущей задачи скачивания (макс. ${SHUTDOWN_TIMEOUT / 1000}с)...`);
+            const waitForQueue = new Promise(resolve => {
+                const interval = setInterval(() => {
+                    if (downloadQueue.active === 0) {
+                        clearInterval(interval);
+                        resolve('queue_empty');
+                    }
+                }, 500);
+            });
+            const timeout = new Promise(resolve => setTimeout(() => resolve('timeout'), SHUTDOWN_TIMEOUT));
+            await Promise.race([waitForQueue, timeout]);
+        }
+        
+        console.log('[Shutdown] Закрываю соединения с БД и Redis...');
+        await Promise.allSettled([pool.end(), redisService.disconnect()]);
+        
+        console.log('[Shutdown] Завершение работы.');
+        process.exit(0);
+    };
+    
+    process.on('SIGINT', gracefulShutdown);
+    process.on('SIGTERM', gracefulShutdown);
 }
 function startBroadcastWorker() {
     console.log('[Broadcast Worker] Планировщик запущен.');
