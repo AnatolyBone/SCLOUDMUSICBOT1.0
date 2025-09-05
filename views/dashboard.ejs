@@ -1,4 +1,4 @@
-<% // views/dashboard.ejs (ФИНАЛЬНАЯ ВЕРСИЯ С ГИБРИДНЫМ ВЫБОРОМ ПЕРИОДА) %>
+<% // views/dashboard.ejs %>
 
 <%- contentFor('styles') %>
 <style>
@@ -6,6 +6,7 @@
   .card-metric:hover { transform: translateY(-5px); }
   .chart-container { position: relative; width: 100%; }
   .bg-light-warning { background-color: #fff3cd !important; }
+  .bg-light-success { background-color: #d1e7dd !important; }
 </style>
 
 <%- contentFor('body') %>
@@ -28,11 +29,15 @@
 </div>
 
 <!-- Верхние метрики -->
-<div class="row g-4 mb-4">
-  <div class="col-xl-3 col-md-6"><div class="card card-metric shadow-sm text-center h-100"><div class="card-body"><h5 class="card-title text-muted">Пользователей</h5><p class="h2 mb-0"><%= stats.total_users || '0' %></p></div></div></div>
-  <div class="col-xl-3 col-md-6"><div class="card card-metric shadow-sm text-center h-100"><div class="card-body"><h5 class="card-title text-muted">Активных сегодня</h5><p class="h2 mb-0"><%= stats.active_today || '0' %></p></div></div></div>
-  <div class="col-xl-3 col-md-6"><div class="card card-metric shadow-sm text-center h-100"><div class="card-body"><h5 class="card-title text-muted">Загрузок (всего)</h5><p class="h2 mb-0"><%= stats.total_downloads || '0' %></p></div></div></div>
-  <div class="col-xl-3 col-md-6"><div class="card card-metric shadow-sm text-center h-100"><div class="card-body"><h5 class="card-title text-muted">Треков в кэше</h5><p class="h2 mb-0"><%= stats.cachedTracksCount || '0' %></p></div></div></div>
+<div class="row row-cols-1 row-cols-md-3 row-cols-lg-5 g-4 mb-4">
+  <div class="col"><div class="card card-metric shadow-sm text-center h-100"><div class="card-body"><h5 class="card-title text-muted">Всего юзеров</h5><p class="h2 mb-0"><%= stats.total_users || '0' %></p></div></div></div>
+  <div class="col"><div class="card card-metric shadow-sm text-center h-100"><div class="card-body"><h5 class="card-title text-muted">Активных сегодня</h5><p class="h2 mb-0"><%= stats.active_today || '0' %></p></div></div></div>
+  <div class="col"><div class="card card-metric shadow-sm text-center h-100"><div class="card-body"><h5 class="card-title text-muted">Загрузок (всего)</h5><p class="h2 mb-0"><%= stats.total_downloads || '0' %></p></div></div></div>
+  
+  <!-- =====> НОВАЯ КАРТОЧКА: ПРИГЛАШЕННЫЕ ПОЛЬЗОВАТЕЛИ <===== -->
+  <div class="col"><div class="card card-metric shadow-sm text-center h-100 bg-light-success"><div class="card-body"><h5 class="card-title text-muted">Пришли по ссылке</h5><p class="h2 mb-0"><%= stats.totalReferred || '0' %></p></div></div></div>
+  
+  <div class="col"><div class="card card-metric shadow-sm text-center h-100"><div class="card-body"><h5 class="card-title text-muted">Треков в кэше</h5><p class="h2 mb-0"><%= stats.cachedTracksCount || '0' %></p></div></div></div>
 </div>
 
 <!-- Информационные блоки -->
@@ -124,7 +129,7 @@
 
 <!-- Дополнительная аналитика -->
 <div class="row g-4 mb-4">
-  <div class="col-lg-6">
+  <div class="col-lg-4">
     <div class="card shadow-sm h-100">
       <div class="card-header">🎵 Топ-10 популярных треков</div>
       <div class="card-body">
@@ -145,7 +150,7 @@
       </div>
     </div>
   </div>
-  <div class="col-lg-6">
+  <div class="col-lg-4">
     <div class="card shadow-sm h-100">
       <div class="card-header">🏆 Топ-10 активных пользователей</div>
       <div class="card-body">
@@ -164,6 +169,30 @@
           </ul>
         <% } else { %>
           <p class="text-muted text-center my-4">Недостаточно данных.</p>
+        <% } %>
+      </div>
+    </div>
+  </div>
+
+  <!-- =====> НОВЫЙ БЛОК: ТОП РЕФОВОДОВ <===== -->
+  <div class="col-lg-4">
+    <div class="card shadow-sm h-100">
+      <div class="card-header">🙋‍♂️ Топ-5 рефоводов</div>
+      <div class="card-body">
+        <% if (stats.topReferrers && stats.topReferrers.length > 0) { %>
+          <ul class="list-group list-group-flush">
+            <% stats.topReferrers.forEach((user, index) => { %>
+              <li class="list-group-item d-flex justify-content-between align-items-center px-0">
+                <div class="text-truncate">
+                  <span class="text-muted"><%= index + 1 %>.</span>
+                  <a href="/user/<%= user.referrer_id %>" class="text-decoration-none"><%= user.first_name || 'ID: ' + user.referrer_id %></a>
+                </div>
+                <span class="badge bg-info rounded-pill"><%= user.referral_count %> приглашений</span>
+              </li>
+            <% }) %>
+          </ul>
+        <% } else { %>
+          <p class="text-muted text-center my-4">Пока никто никого не пригласил.</p>
         <% } %>
       </div>
     </div>
@@ -210,7 +239,7 @@
             const startDate = new Date();
             startDate.setDate(endDate.getDate() - (days - 1));
             
-            picker.setDateRange(startDate, endDate, true); // true - чтобы не вызывать событие on:selected
+            picker.setDateRange(startDate, endDate, true);
             startDateInput.value = startDate.toISOString().slice(0, 10);
             endDateInput.value = endDate.toISOString().slice(0, 10);
 
@@ -229,7 +258,6 @@
 
           if (chartData && chartData.labels && chartData.labels.length > 0 && chartData.datasets) {
               try {
-                  // Уничтожаем старый график перед отрисовкой нового, если он есть
                   if (Chart.getChart(canvas)) {
                       Chart.getChart(canvas).destroy();
                   }
