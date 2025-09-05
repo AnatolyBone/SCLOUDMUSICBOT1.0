@@ -59,24 +59,21 @@ async function startApp() {
         setupExpress();
         startBroadcastWorker();
 
-        if (process.env.NODE_ENV === 'production') {
-            const fullWebhookUrl = (WEBHOOK_URL.endsWith('/') ? WEBHOOK_URL.slice(0, -1) : WEBHOOK_URL) + WEBHOOK_PATH;
-            const allowedUpdates = ['message', 'callback_query', 'inline_query'];
-            const webhookInfo = await bot.telegram.getWebhookInfo();
-            const needsUpdate = webhookInfo.url !== fullWebhookUrl || 
-                                JSON.stringify(webhookInfo.allowed_updates?.sort()) !== JSON.stringify(allowedUpdates.sort());
+       // ЗАМЕНИТЕ НА ЭТОТ БЛОК В INDEX.JS
 
-            if (needsUpdate) {
-                console.log('[App] Устанавливаю или обновляю вебхук...');
-                await bot.telegram.setWebhook(fullWebhookUrl, {
-                    drop_pending_updates: true,
-                    allowed_updates: allowedUpdates
-                });
-                console.log('[App] Вебхук успешно настроен на получение:', allowedUpdates.join(', '));
-            } else {
-                console.log('[App] Вебхук уже корректно установлен.');
-            }
-            app.use(bot.webhookCallback(WEBHOOK_PATH));
+if (process.env.NODE_ENV === 'production') {
+    const fullWebhookUrl = (WEBHOOK_URL.endsWith('/') ? WEBHOOK_URL.slice(0, -1) : WEBHOOK_URL) + WEBHOOK_PATH;
+    const allowedUpdates = ['message', 'callback_query', 'inline_query'];
+    
+    console.log('[App] Принудительно устанавливаю вебхук и сбрасываю очередь...');
+    await bot.telegram.setWebhook(fullWebhookUrl, {
+        drop_pending_updates: true, // <-- Это теперь будет работать при каждом запуске
+        allowed_updates: allowedUpdates
+    });
+    console.log('[App] Вебхук успешно настроен.');
+    
+    app.use(bot.webhookCallback(WEBHOOK_PATH));
+
         } else {
             console.log('[App] Запуск бота в режиме long-polling...');
             await bot.telegram.deleteWebhook({ drop_pending_updates: true });
