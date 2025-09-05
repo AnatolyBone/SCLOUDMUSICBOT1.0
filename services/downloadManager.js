@@ -6,7 +6,6 @@ import fs from 'fs';
 import ytdl from 'youtube-dl-exec'; // <-- ВОЗВРАЩАЕМ ПРАВИЛЬНЫЙ ИМПОРТ
 import { fileURLToPath } from 'url';
 import crypto from 'crypto';
-import { bot } from '../bot.js';
 import { T } from '../config/texts.js';
 import { TaskQueue } from '../lib/TaskQueue.js';
 import {
