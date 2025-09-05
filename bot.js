@@ -186,7 +186,21 @@ bot.command('admin', async (ctx) => {
         await ctx.reply('❌ Не удалось собрать статистику.');
     }
 });
-
+bot.command('maintenance', (ctx) => {
+    if (ctx.from.id !== ADMIN_ID) return;
+    
+    const command = ctx.message.text.split(' ')[1]?.toLowerCase(); 
+    
+    if (command === 'on') {
+        setMaintenanceMode(true);
+        ctx.reply('✅ Режим обслуживания ВКЛЮЧЕН.');
+    } else if (command === 'off') {
+        setMaintenanceMode(false);
+        ctx.reply('☑️ Режим обслуживания ВЫКЛЮЧЕН.');
+    } else {
+        ctx.reply('ℹ️ Статус: ' + (isMaintenanceMode ? 'ВКЛЮЧЕН' : 'ВЫКЛЮЧЕН') + '\n\nИспользуйте: `/maintenance on` или `/maintenance off`');
+    }
+});
 bot.command('premium', (ctx) => ctx.reply(T('upgradeInfo'), { parse_mode: 'HTML', disable_web_page_preview: true }));
 bot.hears(T('menu'), async (ctx) => {
     const user = await getUser(ctx.from.id);
@@ -489,7 +503,16 @@ async function handleSoundCloudUrl(ctx, url) {
 }
 
 bot.on('text', (ctx) => {
-    const text = ctx.message.text;
+            if (isShuttingDown) {
+                console.log('[Shutdown] Отклонен новый запрос, так как идет завершение работы.');
+                return;
+            }
+            
+            if (isMaintenanceMode && ctx.from.id !== ADMIN_ID) {
+                return ctx.reply('⏳ Бот на плановом обслуживании. Новые запросы временно не принимаются. Пожалуйста, попробуйте через 5-10 минут.');
+            }
+            
+            const text = ctx.message.text;
     if (text.startsWith('/')) return;
     if (Object.values(allTextsSync()).includes(text)) return;
     const urlMatch = text.match(/(https?:\/\/[^\s]+)/g);
