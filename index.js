@@ -29,7 +29,7 @@ import { setShuttingDown, setMaintenanceMode } from './services/appState.js';
 import { bot } from './bot.js';
 import redisService from './services/redisClient.js';
 import { WEBHOOK_URL, PORT, SESSION_SECRET, ADMIN_ID, ADMIN_LOGIN, ADMIN_PASSWORD, WEBHOOK_PATH, STORAGE_CHANNEL_ID, BROADCAST_STORAGE_ID } from './config.js';
-import { loadTexts, allTextsSync, setText } from './config/texts.js';
+import { loadTexts, allTextsSync, setText, getEditableTexts } from './config/texts.js';
 import { downloadQueue } from './services/downloadManager.js';
 
 const app = express();
@@ -496,15 +496,24 @@ app.post(['/broadcast/new', '/broadcast/edit/:id'], requireAuth, upload.single('
     }
 });
 
-    app.get('/texts', requireAuth, async (req, res) => {
-        try {
-            const texts = allTextsSync();
-            res.render('texts', { title: 'Редактор текстов', page: 'texts', texts, success: req.query.success });
-        } catch (error) {
-            console.error("Ошибка на странице текстов:", error);
-            res.status(500).send("Ошибка сервера");
-        }
-    });
+   app.get('/texts', requireAuth, async (req, res) => {
+    try {
+        // Раньше было: const texts = allTextsSync();
+        // Теперь мы берем только те тексты, которые можно редактировать
+        const texts = getEditableTexts();
+        
+        res.render('texts', {
+            title: 'Редактор текстов',
+            page: 'texts',
+            texts, // Передаем в шаблон уже отфильтрованный список
+            success: req.query.success
+        });
+        
+    } catch (error) {
+        console.error("Ошибка на странице текстов:", error);
+        res.status(500).send("Ошибка сервера");
+    }
+});
 
     app.post('/texts/update', requireAuth, async (req, res) => {
         try {
