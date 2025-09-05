@@ -1,5 +1,3 @@
-<% // views/user-profile.ejs (С ИСТОРИЕЙ ДЕЙСТВИЙ) %>
-
 <%
 function formatDate(s) {
   if (!s) return '—';
@@ -18,7 +16,9 @@ function formatDate(s) {
 
 <%- contentFor('styles') %>
 <style>
-  /* Стили, специфичные для этой страницы */
+  .table-responsive .table {
+    min-width: 600px;
+  }
 </style>
 
 <%- contentFor('body') %>
@@ -35,7 +35,6 @@ function formatDate(s) {
 <div class="row g-4">
   <!-- Левая колонка с информацией и управлением -->
   <div class="col-lg-5">
-    <!-- ... (весь код левой колонки без изменений) ... -->
     <div class="card shadow-sm mb-4">
       <div class="card-header">Информация о пользователе</div>
       <div class="card-body">
@@ -47,6 +46,18 @@ function formatDate(s) {
           <dd class="col-sm-7">
             <% if (userProfile.active) { %><span class="badge bg-success">Активен</span><% } else { %><span class="badge bg-danger">Заблокирован</span><% } %>
           </dd>
+
+          <!-- ======================= НОВЫЙ БЛОК: ИНФО О РЕФЕРАЛЕ ======================= -->
+          <dt class="col-sm-5">Источник</dt>
+          <dd class="col-sm-7">
+            <% if (referrer) { %>
+              Приглашен <a href="/user/<%= referrer.id %>"><%= referrer.first_name || referrer.id %></a>
+            <% } else { %>
+              Пришел сам
+            <% } %>
+          </dd>
+          <!-- ============================================================================== -->
+
           <dt class="col-sm-5">Лимит/день</dt><dd class="col-sm-7"><%= userProfile.premium_limit %></dd>
           <dt class="col-sm-5">Подписка до</dt><dd class="col-sm-7"><%= formatDate(userProfile.premium_until) %></dd>
           <dt class="col-sm-5">Последняя активность</dt><dd class="col-sm-7"><%= formatDate(userProfile.last_active) %></dd>
@@ -101,19 +112,30 @@ function formatDate(s) {
 
   <!-- Правая колонка с историей -->
   <div class="col-lg-7">
-    <!-- Скачанные треки -->
-    <div class="card shadow-sm">
-      <!-- ... (блок со скачанными треками без изменений) ... -->
-    </div>
-    
-    <!-- Приглашённые пользователи (если есть) -->
-    <% if (referrals && referrals.length > 0) { %>
-    <div class="card shadow-sm mt-4">
-      <!-- ... (блок с рефералами без изменений) ... -->
+    <!-- ======================= НОВЫЙ БЛОК: ПРИГЛАШЕННЫЕ ПОЛЬЗОВАТЕЛИ ======================= -->
+    <% if (referredUsers && referredUsers.length > 0) { %>
+    <div class="card shadow-sm mb-4">
+      <div class="card-header">
+        Приглашенные пользователи (<%= referredUsers.length %>)
+      </div>
+      <div class="list-group list-group-flush">
+        <% referredUsers.forEach(refUser => { %>
+          <a href="/user/<%= refUser.id %>" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center">
+            <%= refUser.first_name || 'Без имени' %> (<%= refUser.id %>)
+            <small class="text-muted"><%= formatDate(refUser.created_at) %></small>
+          </a>
+        <% }); %>
+      </div>
     </div>
     <% } %>
+    <!-- ======================================================================================= -->
+    
+    <!-- Скачанные треки -->
+    <div class="card shadow-sm">
+      <!-- ... (блок со скачанными треками без изменений, но я его удалю, чтобы не путать) ... -->
+    </div>
 
-    <!-- ======================= НОВЫЙ БЛОК: ИСТОРИЯ ДЕЙСТВИЙ ======================= -->
+    <!-- История действий -->
     <div class="card shadow-sm mt-4">
         <div class="card-header">История действий</div>
         <div class="table-responsive">
@@ -158,7 +180,5 @@ function formatDate(s) {
             <% } %>
           </div>
     </div>
-    <!-- ============================================================================== -->
-
   </div>
 </div>
