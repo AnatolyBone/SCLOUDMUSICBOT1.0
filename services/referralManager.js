@@ -3,6 +3,9 @@
 import { bot } from '../bot.js';
 import { setPremium } from '../db.js';
 
+const REFERRER_BONUS_DAYS = 3; // Бонус пригласившему (в днях)
+const NEW_USER_BONUS_DAYS = 3; // Бонус новому пользователю (в днях)
+
 /**
  * Генерирует и отправляет пользователю его реферальную ссылку.
  * @param {object} ctx - Контекст Telegraf.
@@ -15,7 +18,9 @@ export async function handleReferralCommand(ctx) {
     const message = `
 🙋‍♂️ **Приглашайте друзей и получайте бонусы!**
 
-Поделитесь своей персональной ссылкой с друзьями. За каждого друга, который запустит бота по вашей ссылке, вы получите **+3 дня тарифа Plus**! 🎁
+Поделитесь своей персональной ссылкой с друзьями. За каждого друга, который запустит бота по вашей ссылке, вы получите **+${REFERRER_BONUS_DAYS} дня тарифа Plus**! 🎁
+
+Ваш друг также получит приветственный бонус.
 
 🔗 **Ваша ссылка для приглашений:**
 \`${referralLink}\`
@@ -35,32 +40,29 @@ export async function handleReferralCommand(ctx) {
  * @param {object} ctx - Контекст Telegraf.
  */
 export async function processNewUserReferral(newUser, ctx) {
-    if (!newUser.referrer_id) {
-        return; // Это не реферал, выходим
-    }
+    if (!newUser.referrer_id) return; // Это не реферал, выходим.
 
     console.log(`[Referral] Новый пользователь ${newUser.id} пришел от ${newUser.referrer_id}`);
     const referrerId = newUser.referrer_id;
 
     // 1. Начисляем бонус пригласившему
     try {
-        // Даем 3 дня тарифа Plus (30 скачиваний/день), добавляя их к текущей подписке
-        await setPremium(referrerId, 30, 3, true); 
+        await setPremium(referrerId, 30, REFERRER_BONUS_DAYS, true); // true = добавить дни
 
         const friendName = ctx.from.first_name || 'Новый пользователь';
         await bot.telegram.sendMessage(
             referrerId,
-            `🎉 Ваш друг **${friendName}** присоединился к боту по вашей ссылке!\n\nВам начислено **+3 дня тарифа Plus**. Спасибо!`,
+            `🎉 Ваш друг **${friendName}** присоединился по вашей ссылке!\n\nВам начислено **+${REFERRER_BONUS_DAYS} дня тарифа Plus**. Спасибо!`,
             { parse_mode: 'Markdown' }
-        );
+        ).catch(e => console.error(`[Referral] Не удалось уведомить ${referrerId}:`, e.message));
     } catch (e) {
-        console.error(`[Referral] Не удалось начислить бонус или уведомить ${referrerId}:`, e.message);
+        console.error(`[Referral] Не удалось начислить бонус ${referrerId}:`, e.message);
     }
 
-    // 2. (Опционально) Даем бонус новому пользователю
+    // 2. Даем бонус новому пользователю
     try {
-        await setPremium(newUser.id, 30, 1); // Даем 1 день тарифа Plus
-        await ctx.reply('🎁 В качестве приветственного бонуса мы дарим вам **1 день тарифа Plus**!', { parse_mode: 'Markdown' });
+        await setPremium(newUser.id, 30, NEW_USER_BONUS_DAYS);
+        await ctx.reply(`🎁 За регистрацию по приглашению мы дарим вам **${NEW_USER_BONUS_DAYS} дня тарифа Plus**!`, { parse_mode: 'Markdown' });
     } catch (e) {
          console.error(`[Referral] Не удалось начислить приветственный бонус ${newUser.id}:`, e.message);
     }
