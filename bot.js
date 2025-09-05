@@ -239,7 +239,9 @@ function generateSelectionMenu(userId) {
         const absoluteIndex = startIndex + index;
         const isSelected = selected.has(absoluteIndex);
         const icon = isSelected ? '✅' : '⬜️';
-        const trackTitle = track.title.length > 50 ? track.title.slice(0, 47) + '...' : track.title;
+        // =====> ИСПРАВЛЕНИЕ №2: Добавляем запасное название <=====
+const title = track.title || 'Трек без названия';
+const trackTitle = title.length > 50 ? title.slice(0, 47) + '...' : title;
         return [Markup.button.callback(`${icon} ${trackTitle}`, `pl_toggle:${playlistId}:${absoluteIndex}`)];
     });
 
@@ -380,20 +382,32 @@ async function handleSoundCloudUrl(ctx, url) {
         const data = await youtubeDl(url, { dumpSingleJson: true, flatPlaylist: true });
 
         // ПРОВЕРКА: ЭТО ПЛЕЙЛИСТ ИЛИ ТРЕК?
-        if (data.entries && data.entries.length > 0) {
-            // ЭТО ПЛЕЙЛИСТ
-            await ctx.deleteMessage(loadingMessage.message_id).catch(() => {});
-            
-            const playlistId = data.id || `pl_${Date.now()}`;
-            playlistSessions.set(ctx.from.id, {
-                playlistId,
-                title: data.title,
-                tracks: data.entries,
-                selected: new Set(),
-                currentPage: 0
-            });
-            const message = `🎶 В плейлисте <b>"${data.title}"</b> найдено <b>${data.entries.length}</b> треков.\n\nЧто делаем?`;
-            await ctx.reply(message, { parse_mode: 'HTML', ...generateInitialPlaylistMenu(playlistId) });
+        // ...
+if (data.entries && data.entries.length > 0) {
+    // ЭТО ПЛЕЙЛИСТ
+    
+    // =====> ИСПРАВЛЕНИЕ №1: Фильтруем "плохие" треки <=====
+    const validTracks = data.entries.filter(track => track && track.title && track.url);
+    
+    if (validTracks.length === 0) {
+        await ctx.telegram.editMessageText(ctx.chat.id, loadingMessage.message_id, undefined, '❌ В этом плейлисте не найдено доступных для скачивания треков.').catch(() => {});
+        return;
+    }
+    
+    await ctx.deleteMessage(loadingMessage.message_id).catch(() => {});
+    
+    const playlistId = data.id || `pl_${Date.now()}`;
+    playlistSessions.set(ctx.from.id, {
+        playlistId,
+        title: data.title,
+        tracks: validTracks, // Сохраняем только валидные треки
+        selected: new Set(),
+        currentPage: 0
+    });
+    
+    const message = `🎶 В плейлисте <b>"${data.title}"</b> найдено <b>${validTracks.length}</b> треков.\n\nЧто делаем?`;
+    await ctx.reply(message, { parse_mode: 'HTML', ...generateInitialPlaylistMenu(playlistId) });
+    // ...
 
         } else {
             // ЭТО ОДИНОЧНЫЙ ТРЕК
