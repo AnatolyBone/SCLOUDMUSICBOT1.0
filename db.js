@@ -530,18 +530,23 @@ export async function updateBroadcastTask(id, taskData) {
   return result.rows[0];
 }
 
-export async function getPendingBroadcastTask() {
-  const { rows } = await query(`
-    UPDATE broadcast_tasks SET status = 'processing'
-    WHERE id = (
-      SELECT id FROM broadcast_tasks
-      WHERE status = 'pending' AND scheduled_at <= NOW() AT TIME ZONE 'UTC'
-      ORDER BY scheduled_at LIMIT 1 FOR UPDATE SKIP LOCKED
-    ) RETURNING *;
-  `);
-  return rows[0] || null;
-}
+// db.js
 
+// ЗАМЕНИТЕ СТАРУЮ getPendingBroadcastTask НА ЭТУ
+export async function getAndStartPendingBroadcastTask() {
+  // Эта хранимая процедура найдет одну подходящую задачу,
+  // обновит ее статус на 'processing' и вернет ее нам.
+  // Это гарантирует, что никакой другой воркер не сможет взять эту же задачу.
+  const { data, error } = await supabase.rpc('get_and_start_next_broadcast');
+  
+  if (error) {
+    console.error('[DB] Ошибка при поиске и блокировке задачи рассылки:', error);
+    return null;
+  }
+  
+  // rpc возвращает массив, даже если результат один
+  return data && data.length > 0 ? data[0] : null;
+}
 export async function completeBroadcastTask(taskId, report) {
   await query(
     `UPDATE broadcast_tasks SET status = 'completed', report = $1, completed_at = NOW() WHERE id = $2`,
