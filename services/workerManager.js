@@ -2,6 +2,7 @@
 
 import cron from 'node-cron';
 import { ADMIN_ID } from '../config.js';
+import { bot } from '../bot.js';
 import {
     pool,
     getAllUsers,
