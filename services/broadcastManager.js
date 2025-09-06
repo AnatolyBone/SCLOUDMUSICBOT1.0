@@ -1,22 +1,22 @@
 // services/broadcastManager.js
 
-// Импортируем всё необходимое для работы этой функции
-import { bot } from '../bot.js';
 import { ADMIN_ID } from '../config.js';
 import { 
     getAlreadySentUserIds, 
     logBroadcastSent, 
     updateUserField 
 } from '../db.js';
+import { isDownloadQueueActive } from './downloadManager.js';
 
 /**
- * Выполняет отправку одной задачи рассылки, учитывая уже отправленные сообщения.
+ * Выполняет отправку одной задачи рассылки с динамической скоростью.
+ * @param {Telegraf} bot - Экземпляр Telegraf для отправки сообщений.
  * @param {object} task - Объект задачи из БД.
  * @param {Array<object>} users - Массив пользователей для рассылки.
  * @param {number|null} taskId - ID задачи.
  * @returns {Promise<object>} - Отчет о выполнении.
  */
-export async function runSingleBroadcast(task, users, taskId = null) {
+export async function runSingleBroadcast(bot, task, users, taskId = null) {
     const isPreview = !taskId;
 
     if (isPreview) {
@@ -47,6 +47,11 @@ export async function runSingleBroadcast(task, users, taskId = null) {
     const reportInterval = 50;
 
     for (const user of usersToSend) {
+        // Определяем задержку ПЕРЕД отправкой
+        const isBusy = isDownloadQueueActive();
+        const delayMs = isBusy ? 500 : 35; // 500мс если занят, 35мс если свободен
+        await new Promise(resolve => setTimeout(resolve, delayMs));
+
         try {
             const personalMessage = (task.message || '').replace(/{first_name}/g, user.first_name || 'дорогой друг');
             const options = {
@@ -84,8 +89,6 @@ export async function runSingleBroadcast(task, users, taskId = null) {
         if (!isPreview && counter % reportInterval === 0) {
             console.log(`[Broadcast Worker] Прогресс рассылки #${taskId}: отправлено ${counter} из ${usersToSend.length}...`);
         }
-        
-        await new Promise(resolve => setTimeout(resolve, 50));
     }
     
     const totalSuccess = successCount + alreadySentIds.size;
