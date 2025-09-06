@@ -660,37 +660,51 @@ async function runSingleBroadcast(task, users, taskId = null) {
 function setupGracefulShutdown(server) {
     const SHUTDOWN_TIMEOUT = 25000; // 25 секунд (Render дает 30)
     
-    const gracefulShutdown = async (signal) => {
-        setShuttingDown();
-        console.log(`[Shutdown] Получен сигнал ${signal}. Начинаю изящное завершение...`);
-        
-        server.close(() => console.log('[Shutdown] HTTP сервер закрыт.'));
-        
-        await findAndInterruptActiveBroadcast();
-        if (isBroadcasting) {
-        console.log('[Shutdown] Обнаружена активная рассылка. Помечаю как прерванную...');
+    // index.js
+
+const gracefulShutdown = async (signal) => {
+    // 1. Устанавливаем флаги и логируем начало
+    setShuttingDown();
+    console.log(`[Shutdown] Получен сигнал ${signal}. Начинаю изящное завершение...`);
+    
+    // 2. Сразу перестаем принимать новые HTTP запросы
+    server.close(() => console.log('[Shutdown] HTTP сервер закрыт.'));
+    
+    // 3. ПРОВЕРЯЕМ, идет ли рассылка, и ТОЛЬКО ТОГДА прерываем ее.
+    if (isBroadcasting) {
+        console.log('[Shutdown] Обнаружена активная рассылка. Помечаю ее как прерванную...');
         await findAndInterruptActiveBroadcast();
     }
-        if (downloadQueue.active > 0) {
-            console.log(`[Shutdown] Ожидаю завершения текущей задачи скачивания (макс. ${SHUTDOWN_TIMEOUT / 1000}с)...`);
-            const waitForQueue = new Promise(resolve => {
-                const interval = setInterval(() => {
-                    if (downloadQueue.active === 0) {
-                        clearInterval(interval);
-                        resolve('queue_empty');
-                    }
-                }, 500);
-            });
-            const timeout = new Promise(resolve => setTimeout(() => resolve('timeout'), SHUTDOWN_TIMEOUT));
-            await Promise.race([waitForQueue, timeout]);
+    
+    // 4. Ждем завершения текущей задачи скачивания (если она есть)
+    if (downloadQueue.active > 0) {
+        console.log(`[Shutdown] Ожидаю завершения текущей задачи скачивания (макс. ${SHUTDOWN_TIMEOUT / 1000}с)...`);
+        const waitForQueue = new Promise(resolve => {
+            const interval = setInterval(() => {
+                if (downloadQueue.active === 0) {
+                    clearInterval(interval);
+                    resolve('queue_empty');
+                }
+            }, 500);
+        });
+        const timeout = new Promise(resolve => setTimeout(() => resolve('timeout'), SHUTDOWN_TIMEOUT));
+        
+        const result = await Promise.race([waitForQueue, timeout]);
+        if (result === 'queue_empty') {
+            console.log('[Shutdown] Очередь скачивания успешно опустела.');
+        } else {
+            console.warn('[Shutdown] Таймаут ожидания. Задача скачивания будет прервана.');
         }
-        
-        console.log('[Shutdown] Закрываю соединения с БД и Redis...');
-        await Promise.allSettled([pool.end(), redisService.disconnect()]);
-        
-        console.log('[Shutdown] Завершение работы.');
-        process.exit(0);
-    };
+    }
+    
+    // 5. Закрываем все соединения
+    console.log('[Shutdown] Закрываю соединения с БД и Redis...');
+    await Promise.allSettled([pool.end(), redisService.disconnect()]);
+    
+    // 6. Завершаем процесс
+    console.log('[Shutdown] Завершение работы.');
+    process.exit(0);
+};
     
     process.on('SIGINT', gracefulShutdown);
     process.on('SIGTERM', gracefulShutdown);
