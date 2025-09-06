@@ -712,17 +712,21 @@ const gracefulShutdown = async (signal) => {
 function startBroadcastWorker() {
     console.log('[Broadcast Worker] Планировщик запущен.');
     cron.schedule('* * * * *', async () => {
-    const task = await getPendingBroadcastTask();
-    if (task) {
-        setBroadcasting(true); // <-- Сообщаем, что рассылка началась
-        try {
-                console.log(`[Broadcast Worker] Найдена задача #${task.id}. Начинаю выполнение.`);
+        // Используем новую, безопасную функцию
+        const task = await getAndStartPendingBroadcastTask();
+        
+        if (task) {
+            // Флаг isBroadcasting больше не нужен здесь, т.к. блокировка на уровне БД
+            try {
+                console.log(`[Broadcast Worker] Найдена и заблокирована задача #${task.id}. Начинаю выполнение.`);
                 let users = [];
                 if (task.target_audience === 'all') users = await getAllUsers(true);
                 else if (task.target_audience === 'free_users') users = await getActiveFreeUsers();
                 else if (task.target_audience === 'premium_users') users = await getActivePremiumUsers();
+                
                 const report = await runSingleBroadcast(task, users, task.id);
                 await completeBroadcastTask(task.id, report);
+                
             } catch (error) {
                 console.error(`[Broadcast Worker] Критическая ошибка при выполнении задачи #${task.id}:`, error);
                 await failBroadcastTask(task.id, error.message);
