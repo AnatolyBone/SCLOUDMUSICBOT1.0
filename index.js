@@ -699,7 +699,8 @@ function setupGracefulShutdown(server) {
         
         // 4. Закрываем все соединения
         console.log('[Shutdown] Закрываю соединения с БД и Redis...');
-        await Promise.allSettled([pool.end(), redisService.quit()]);
+       // index.js
+await Promise.allSettled([pool.end(), redisService.disconnect()]);
         
         // 5. Завершаем процесс
         console.log('[Shutdown] Завершение работы.');
