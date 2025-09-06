@@ -1,9 +1,6 @@
 // services/workerManager.js
 
 import cron from 'node-cron';
-// services/workerManager.js
-import { bot } from '../bot.js'; // <-- ДОБАВЬТЕ ЭТО
-// ...
 import { ADMIN_ID } from '../config.js';
 import {
     pool,
@@ -87,7 +84,7 @@ function startBroadcastWorker() {
                 else if (task.target_audience === 'premium_users') users = await getActivePremiumUsers();
                 else if (task.target_audience === 'preview') users = [{ id: ADMIN_ID, first_name: 'Admin' }];
                 
-                const report = await runSingleBroadcast(task, users, task.id);
+                 const report = await runSingleBroadcast(bot, task, users, task.id);
                 await completeBroadcastTask(task.id, report);
                 
             } catch (error) {
