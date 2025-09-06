@@ -13,6 +13,8 @@ export function setShuttingDown() {
     isShuttingDown = true;
   }
 }
+export let isBroadcasting = false; // <-- НОВЫЙ ФЛАГ
+export const setBroadcasting = (state) => { isBroadcasting = state; };
 
 // Функция для ручного управления режимом обслуживания.
 export function setMaintenanceMode(state) {
