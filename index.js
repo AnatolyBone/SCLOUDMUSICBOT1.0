@@ -657,89 +657,77 @@ async function runSingleBroadcast(task, users, taskId = null) {
     }
     return report;
 }
+// ======================= ФИНАЛЬНЫЙ БЛОК ДЛЯ КОНЦА INDEX.JS =======================
+
 function setupGracefulShutdown(server) {
     const SHUTDOWN_TIMEOUT = 25000; // 25 секунд (Render дает 30)
     
-    // index.js
-
-const gracefulShutdown = async (signal) => {
-    // 1. Устанавливаем флаги и логируем начало
-    setShuttingDown();
-    console.log(`[Shutdown] Получен сигнал ${signal}. Начинаю изящное завершение...`);
-    
-    // 2. Сразу перестаем принимать новые HTTP запросы
-    server.close(() => console.log('[Shutdown] HTTP сервер закрыт.'));
-    
-    // 3. ПРОВЕРЯЕМ, идет ли рассылка, и ТОЛЬКО ТОГДА прерываем ее.
-    if (isBroadcasting) {
-        console.log('[Shutdown] Обнаружена активная рассылка. Помечаю ее как прерванную...');
-        await findAndInterruptActiveBroadcast();
-    }
-    
-    // 4. Ждем завершения текущей задачи скачивания (если она есть)
-    if (downloadQueue.active > 0) {
-        console.log(`[Shutdown] Ожидаю завершения текущей задачи скачивания (макс. ${SHUTDOWN_TIMEOUT / 1000}с)...`);
-        const waitForQueue = new Promise(resolve => {
-            const interval = setInterval(() => {
-                if (downloadQueue.active === 0) {
-                    clearInterval(interval);
-                    resolve('queue_empty');
-                }
-            }, 500);
-        });
-        const timeout = new Promise(resolve => setTimeout(() => resolve('timeout'), SHUTDOWN_TIMEOUT));
-        
-        const result = await Promise.race([waitForQueue, timeout]);
-        if (result === 'queue_empty') {
-            console.log('[Shutdown] Очередь скачивания успешно опустела.');
-        } else {
-            console.warn('[Shutdown] Таймаут ожидания. Задача скачивания будет прервана.');
+    const gracefulShutdown = async (signal) => {
+        // Защита от повторного вызова
+        if (isShuttingDown) {
+            console.log('[Shutdown] Процесс завершения уже запущен, повторный вызов проигнорирован.');
+            return;
         }
-    }
+        setShuttingDown();
+        console.log(`[Shutdown] Получен сигнал ${signal}. Начинаю изящное завершение...`);
+        
+        // 1. Перестаем принимать новые HTTP запросы
+        server.close(() => {
+            console.log('[Shutdown] HTTP сервер закрыт.');
+        });
+        
+        // 2. Прерываем активную рассылку, если она есть
+        if (isBroadcasting) {
+            console.log('[Shutdown] Обнаружена активная рассылка. Помечаю ее как прерванную...');
+            await findAndInterruptActiveBroadcast();
+        }
+        
+        // 3. Ждем завершения текущей задачи скачивания
+        if (downloadQueue.active > 0) {
+            console.log(`[Shutdown] Ожидаю завершения текущей задачи скачивания (макс. ${SHUTDOWN_TIMEOUT / 1000}с)...`);
+            const waitForQueue = new Promise(resolve => {
+                const interval = setInterval(() => {
+                    if (downloadQueue.active === 0) {
+                        clearInterval(interval);
+                        resolve('queue_empty');
+                    }
+                }, 500);
+            });
+            const timeout = new Promise(resolve => setTimeout(() => resolve('timeout'), SHUTDOWN_TIMEOUT));
+            await Promise.race([waitForQueue, timeout]);
+        }
+        
+        // 4. Закрываем все соединения
+        console.log('[Shutdown] Закрываю соединения с БД и Redis...');
+        await Promise.allSettled([pool.end(), redisService.disconnect()]);
+        
+        // 5. Завершаем процесс
+        console.log('[Shutdown] Завершение работы.');
+        process.exit(0);
+    };
     
-    // 5. Закрываем все соединения
-    console.log('[Shutdown] Закрываю соединения с БД и Redis...');
-    await Promise.allSettled([pool.end(), redisService.disconnect()]);
-    
-    // 6. Завершаем процесс
-    console.log('[Shutdown] Завершение работы.');
-    process.exit(0);
-};
-    
+    // Привязываем нашу функцию к системным сигналам
     process.on('SIGINT', gracefulShutdown);
     process.on('SIGTERM', gracefulShutdown);
 }
-// index.js
-
-// index.js
 
 function startBroadcastWorker() {
     console.log('[Broadcast Worker] Планировщик запущен.');
     
-    // Возвращаем нормальный график: запускать каждую минуту
+    // Запускаем каждую минуту
     cron.schedule('* * * * *', async () => {
-        // Используем безопасную функцию для "захвата" задачи
         const task = await getAndStartPendingBroadcastTask();
         
         if (task) {
-            // Устанавливаем флаг, что рассылка началась
             setBroadcasting(true);
             try {
                 console.log(`[Broadcast Worker] Найдена и заблокирована задача #${task.id}. Начинаю выполнение.`);
                 let users = [];
                 
-                // Получаем список пользователей в зависимости от аудитории
-                if (task.target_audience === 'all') {
-                    users = await getAllUsers(true);
-                } else if (task.target_audience === 'free_users') {
-                    users = await getActiveFreeUsers();
-                } else if (task.target_audience === 'premium_users') {
-                    users = await getActivePremiumUsers();
-                } else if (task.target_audience === 'preview') {
-                    // Обработка превью осталась на случай, если вы захотите
-                    // протестировать реальную рассылку на себе перед отправкой
-                    users = [{ id: ADMIN_ID, first_name: 'Admin' }];
-                }
+                if (task.target_audience === 'all') users = await getAllUsers(true);
+                else if (task.target_audience === 'free_users') users = await getActiveFreeUsers();
+                else if (task.target_audience === 'premium_users') users = await getActivePremiumUsers();
+                else if (task.target_audience === 'preview') users = [{ id: ADMIN_ID, first_name: 'Admin' }];
                 
                 const report = await runSingleBroadcast(task, users, task.id);
                 await completeBroadcastTask(task.id, report);
@@ -748,30 +736,12 @@ function startBroadcastWorker() {
                 console.error(`[Broadcast Worker] Критическая ошибка при выполнении задачи #${task.id}:`, error);
                 await failBroadcastTask(task.id, error.message);
             } finally {
-                // В любом случае (успех или ошибка) сбрасываем флаг
                 setBroadcasting(false);
                 console.log(`[Broadcast Worker] Выполнение задачи #${task.id} завершено.`);
             }
         }
     });
 }
-async function stopBot(signal) {
-    console.log(`[App] Получен сигнал ${signal}. Начинаю корректное завершение...`);
-    try {
-        if (bot.polling?.isRunning()) bot.stop(signal);
-        const promises = [];
-        if (redisService.client?.isOpen) promises.push(redisService.client.quit());
-        promises.push(pool.end());
-        await Promise.allSettled(promises);
-        console.log('[App] Все соединения закрыты. Выход.');
-        process.exit(0);
-    } catch (e) {
-        console.error('🔴 Ошибка при завершении работы:', e);
-        process.exit(1);
-    }
-}
 
-process.once('SIGINT', () => stopBot('SIGINT'));
-process.once('SIGTERM', () => stopBot('SIGTERM'));
-
+// Запускаем все приложение
 startApp();
