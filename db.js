@@ -825,13 +825,10 @@ export async function findAndInterruptActiveBroadcast() {
  * Вызывается при старте приложения.
  */
 export async function resetStaleBroadcasts() {
-  const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
-  
   const { data, error } = await supabase
     .from('broadcast_tasks')
     .update({ status: 'pending' })
-    .eq('status', 'processing')
-    .lt('started_at', fiveMinutesAgo);
+    .eq('status', 'processing'); // <-- УБРАЛИ ПРОВЕРКУ ВРЕМЕНИ
   
   if (error) {
     console.error('[DB] Ошибка при сбросе зависших рассылок:', error);
