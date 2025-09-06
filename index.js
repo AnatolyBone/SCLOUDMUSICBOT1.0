@@ -25,7 +25,7 @@ import {
     createBroadcastTask, getPendingBroadcastTask, completeBroadcastTask, failBroadcastTask,
     getAllBroadcastTasks, deleteBroadcastTask, getBroadcastTaskById, updateBroadcastTask, findAndInterruptActiveBroadcast, getReferrerInfo, getReferredUsers, getReferralStats
 } from './db.js';
-import { setShuttingDown, setMaintenanceMode } from './services/appState.js';
+import { setShuttingDown, setMaintenanceMode, isBroadcasting, setBroadcasting} from './services/appState.js';
 import { bot } from './bot.js';
 import redisService from './services/redisClient.js';
 import { WEBHOOK_URL, PORT, SESSION_SECRET, ADMIN_ID, ADMIN_LOGIN, ADMIN_PASSWORD, WEBHOOK_PATH, STORAGE_CHANNEL_ID, BROADCAST_STORAGE_ID } from './config.js';
@@ -667,7 +667,10 @@ function setupGracefulShutdown(server) {
         server.close(() => console.log('[Shutdown] HTTP сервер закрыт.'));
         
         await findAndInterruptActiveBroadcast();
-        
+        if (isBroadcasting) {
+        console.log('[Shutdown] Обнаружена активная рассылка. Помечаю как прерванную...');
+        await findAndInterruptActiveBroadcast();
+    }
         if (downloadQueue.active > 0) {
             console.log(`[Shutdown] Ожидаю завершения текущей задачи скачивания (макс. ${SHUTDOWN_TIMEOUT / 1000}с)...`);
             const waitForQueue = new Promise(resolve => {
@@ -695,9 +698,10 @@ function setupGracefulShutdown(server) {
 function startBroadcastWorker() {
     console.log('[Broadcast Worker] Планировщик запущен.');
     cron.schedule('* * * * *', async () => {
-        const task = await getPendingBroadcastTask();
-        if (task) {
-            try {
+    const task = await getPendingBroadcastTask();
+    if (task) {
+        setBroadcasting(true); // <-- Сообщаем, что рассылка началась
+        try {
                 console.log(`[Broadcast Worker] Найдена задача #${task.id}. Начинаю выполнение.`);
                 let users = [];
                 if (task.target_audience === 'all') users = await getAllUsers(true);
