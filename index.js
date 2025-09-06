@@ -22,7 +22,7 @@ import {
     getUsersCountByTariff, getTopReferralSources, getDailyStats,
     getActivityByWeekday, getTopTracks, getTopUsers, getHourlyActivity, getUsersAsCsv, 
     getUserActions, logUserAction,
-    createBroadcastTask, getAndStartPendingBroadcastTask, completeBroadcastTask, failBroadcastTask,
+    createBroadcastTask, getPendingBroadcastTask, completeBroadcastTask, failBroadcastTask,
     getAllBroadcastTasks, deleteBroadcastTask, getBroadcastTaskById, updateBroadcastTask, findAndInterruptActiveBroadcast, getReferrerInfo, getReferredUsers, getReferralStats
 } from './db.js';
 import { setShuttingDown, setMaintenanceMode, isBroadcasting, setBroadcasting} from './services/appState.js';
@@ -709,20 +709,41 @@ const gracefulShutdown = async (signal) => {
     process.on('SIGINT', gracefulShutdown);
     process.on('SIGTERM', gracefulShutdown);
 }
+// index.js
+
 function startBroadcastWorker() {
     console.log('[Broadcast Worker] Планировщик запущен.');
-    cron.schedule('* * * * *', async () => {
-        // Используем новую, безопасную функцию
+    
+    // ВРЕМЕННО: Запускаем каждые 5 секунд для стресс-теста
+    cron.schedule('*/5 * * * * *', async () => {
+        // ЛОГ 1: Сообщаем, что cron сработал
+        console.log('[Stress Test] Cron job triggered.');
+        
+        // Используем новую, безопасную функцию для "захвата" задачи
         const task = await getAndStartPendingBroadcastTask();
         
         if (task) {
-            // Флаг isBroadcasting больше не нужен здесь, т.к. блокировка на уровне БД
+            // ЛОГ 2: Сообщаем об успешном захвате
+            console.log(`[Stress Test] SUCCESS: Worker захватил задачу #${task.id}.`);
+            
             try {
-                console.log(`[Broadcast Worker] Найдена и заблокирована задача #${task.id}. Начинаю выполнение.`);
+                console.log(`[Broadcast Worker] Начинаю выполнение задачи #${task.id}.`);
                 let users = [];
-                if (task.target_audience === 'all') users = await getAllUsers(true);
-                else if (task.target_audience === 'free_users') users = await getActiveFreeUsers();
-                else if (task.target_audience === 'premium_users') users = await getActivePremiumUsers();
+                // ВАЖНО: для теста 'preview' мы подставляем ID админа вручную
+                if (task.target_audience === 'preview') {
+                    users = [{ id: ADMIN_ID, first_name: 'Admin' }];
+                } else if (task.target_audience === 'all') {
+                    users = await getAllUsers(true);
+                } else if (task.target_audience === 'free_users') {
+                    users = await getActiveFreeUsers();
+                } else if (task.target_audience === 'premium_users') {
+                    users = await getActivePremiumUsers();
+                }
+                
+                // Добавляем текущее время в сообщение для уникальности
+                if (task.message) {
+                    task.message = task.message.replace('{current_time}', new Date().toLocaleTimeString('ru-RU'));
+                }
                 
                 const report = await runSingleBroadcast(task, users, task.id);
                 await completeBroadcastTask(task.id, report);
@@ -731,6 +752,9 @@ function startBroadcastWorker() {
                 console.error(`[Broadcast Worker] Критическая ошибка при выполнении задачи #${task.id}:`, error);
                 await failBroadcastTask(task.id, error.message);
             }
+        } else {
+            // ЛОГ 3: Сообщаем, что свободных задач нет
+            console.log('[Stress Test] INFO: Нет доступных задач для захвата.');
         }
     });
 }
