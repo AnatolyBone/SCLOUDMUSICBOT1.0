@@ -22,7 +22,7 @@ import {
     getUsersCountByTariff, getTopReferralSources, getDailyStats,
     getActivityByWeekday, getTopTracks, getTopUsers, getHourlyActivity, getUsersAsCsv, 
     getUserActions, logUserAction,
-    createBroadcastTask, getAndStartPendingBroadcastTask, completeBroadcastTask, failBroadcastTask,
+    createBroadcastTask, getPendingBroadcastTask, completeBroadcastTask, failBroadcastTask,
     getAllBroadcastTasks, deleteBroadcastTask, getBroadcastTaskById, updateBroadcastTask, findAndInterruptActiveBroadcast, getReferrerInfo, getReferredUsers, getReferralStats
 } from './db.js';
 import { setShuttingDown, setMaintenanceMode, isBroadcasting, setBroadcasting} from './services/appState.js';
@@ -711,38 +711,34 @@ const gracefulShutdown = async (signal) => {
 }
 // index.js
 
+// index.js
+
 function startBroadcastWorker() {
     console.log('[Broadcast Worker] Планировщик запущен.');
     
-    // ВРЕМЕННО: Запускаем каждые 5 секунд для стресс-теста
-    cron.schedule('*/5 * * * * *', async () => {
-        // ЛОГ 1: Сообщаем, что cron сработал
-        console.log('[Stress Test] Cron job triggered.');
-        
-        // Используем новую, безопасную функцию для "захвата" задачи
+    // Возвращаем нормальный график: запускать каждую минуту
+    cron.schedule('* * * * *', async () => {
+        // Используем безопасную функцию для "захвата" задачи
         const task = await getAndStartPendingBroadcastTask();
         
         if (task) {
-            // ЛОГ 2: Сообщаем об успешном захвате
-            console.log(`[Stress Test] SUCCESS: Worker захватил задачу #${task.id}.`);
-            
+            // Устанавливаем флаг, что рассылка началась
+            setBroadcasting(true);
             try {
-                console.log(`[Broadcast Worker] Начинаю выполнение задачи #${task.id}.`);
+                console.log(`[Broadcast Worker] Найдена и заблокирована задача #${task.id}. Начинаю выполнение.`);
                 let users = [];
-                // ВАЖНО: для теста 'preview' мы подставляем ID админа вручную
-                if (task.target_audience === 'preview') {
-                    users = [{ id: ADMIN_ID, first_name: 'Admin' }];
-                } else if (task.target_audience === 'all') {
+                
+                // Получаем список пользователей в зависимости от аудитории
+                if (task.target_audience === 'all') {
                     users = await getAllUsers(true);
                 } else if (task.target_audience === 'free_users') {
                     users = await getActiveFreeUsers();
                 } else if (task.target_audience === 'premium_users') {
                     users = await getActivePremiumUsers();
-                }
-                
-                // Добавляем текущее время в сообщение для уникальности
-                if (task.message) {
-                    task.message = task.message.replace('{current_time}', new Date().toLocaleTimeString('ru-RU'));
+                } else if (task.target_audience === 'preview') {
+                    // Обработка превью осталась на случай, если вы захотите
+                    // протестировать реальную рассылку на себе перед отправкой
+                    users = [{ id: ADMIN_ID, first_name: 'Admin' }];
                 }
                 
                 const report = await runSingleBroadcast(task, users, task.id);
@@ -751,14 +747,14 @@ function startBroadcastWorker() {
             } catch (error) {
                 console.error(`[Broadcast Worker] Критическая ошибка при выполнении задачи #${task.id}:`, error);
                 await failBroadcastTask(task.id, error.message);
+            } finally {
+                // В любом случае (успех или ошибка) сбрасываем флаг
+                setBroadcasting(false);
+                console.log(`[Broadcast Worker] Выполнение задачи #${task.id} завершено.`);
             }
-        } else {
-            // ЛОГ 3: Сообщаем, что свободных задач нет
-            console.log('[Stress Test] INFO: Нет доступных задач для захвата.');
         }
     });
 }
-
 async function stopBot(signal) {
     console.log(`[App] Получен сигнал ${signal}. Начинаю корректное завершение...`);
     try {
