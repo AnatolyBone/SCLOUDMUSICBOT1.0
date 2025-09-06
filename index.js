@@ -706,7 +706,7 @@ function setupGracefulShutdown(server) {
         process.exit(0);
     };
     
-    // Привязываем нашу функцию к системным сигналам
+    // Привязываем нашу единую функцию к системным сигналам
     process.on('SIGINT', gracefulShutdown);
     process.on('SIGTERM', gracefulShutdown);
 }
