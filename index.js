@@ -11,8 +11,7 @@ import pgSessionFactory from 'connect-pg-simple';
 import pLimit from 'p-limit';
 import fs from 'fs';
 import mime from 'mime-types';
-import cron from 'node-cron';
-import { runSingleBroadcast } from './services/broadcastManager.js';
+
 import { 
     pool, supabase, getUserById, resetDailyStats, getAllUsers, getPaginatedUsers, 
     getReferralSourcesStats, getDownloadsByDate, getRegistrationsByDate, 
@@ -25,6 +24,7 @@ import {
     createBroadcastTask, getAndStartPendingBroadcastTask, completeBroadcastTask, failBroadcastTask,
     getAllBroadcastTasks, deleteBroadcastTask, getBroadcastTaskById, updateBroadcastTask, findAndInterruptActiveBroadcast, getReferrerInfo, getReferredUsers, getReferralStats, getAlreadySentUserIds
 } from './db.js';
+import { initializeWorkers } from './services/workerManager.js';
 import { isShuttingDown, setShuttingDown, setMaintenanceMode, isBroadcasting, setBroadcasting } from './services/appState.js';
 import { bot } from './bot.js';
 import redisService from './services/redisClient.js';
@@ -59,7 +59,7 @@ async function startApp() {
         await redisService.connect();
         
         setupExpress();
-        startBroadcastWorker();
+        
 
        // ЗАМЕНИТЕ НА ЭТОТ БЛОК В INDEX.JS
 
@@ -85,7 +85,7 @@ if (process.env.NODE_ENV === 'production') {
         }
 
         const server = app.listen(PORT, () => console.log(`✅ [App] Сервер запущен на порту ${PORT}.`));
-setupGracefulShutdown(server);
+initializeWorkers(server);
         
         console.log('[App] Настройка фоновых задач...');
         setInterval(() => resetDailyStats(), 24 * 3600 * 1000);
@@ -590,101 +590,5 @@ app.post(['/broadcast/new', '/broadcast/edit/:id'], requireAuth, upload.single('
         res.redirect(req.get('Referrer') || '/users');
     });
 }
-
-function setupGracefulShutdown(server) {
-    const SHUTDOWN_TIMEOUT = 25000; // 25 секунд (Render дает 30)
-    
-    const gracefulShutdown = async (signal) => {
-        // Защита от повторного вызова
-        if (isShuttingDown) {
-            console.log('[Shutdown] Процесс завершения уже запущен, повторный вызов проигнорирован.');
-            return;
-        }
-        setShuttingDown();
-        console.log(`[Shutdown] Получен сигнал ${signal}. Начинаю изящное завершение...`);
-        
-        // 1. Перестаем принимать новые HTTP запросы
-        server.close(() => {
-            console.log('[Shutdown] HTTP сервер закрыт.');
-        });
-        
-        // 2. Прерываем активную рассылку, если она есть
-        if (isBroadcasting) {
-            console.log('[Shutdown] Обнаружена активная рассылка. Помечаю ее как прерванную...');
-            await findAndInterruptActiveBroadcast();
-        }
-        
-        // 3. Ждем завершения текущей задачи скачивания
-        if (downloadQueue.active > 0) {
-            console.log(`[Shutdown] Ожидаю завершения текущей задачи скачивания (макс. ${SHUTDOWN_TIMEOUT / 1000}с)...`);
-            const waitForQueue = new Promise(resolve => {
-                const interval = setInterval(() => {
-                    if (downloadQueue.active === 0) {
-                        clearInterval(interval);
-                        resolve('queue_empty');
-                    }
-                }, 500);
-            });
-            const timeout = new Promise(resolve => setTimeout(() => resolve('timeout'), SHUTDOWN_TIMEOUT));
-            await Promise.race([waitForQueue, timeout]);
-        }
-        
-        // 4. Закрываем все соединения
-        console.log('[Shutdown] Закрываю соединения с БД и Redis...');
-       // index.js
-await Promise.allSettled([pool.end(), redisService.disconnect()]);
-        
-        // 5. Завершаем процесс
-        console.log('[Shutdown] Завершение работы.');
-        process.exit(0);
-    };
-    
-    // Привязываем нашу единую функцию к системным сигналам
-    process.on('SIGINT', gracefulShutdown);
-    process.on('SIGTERM', gracefulShutdown);
-}
-
-// index.js
-
-function startBroadcastWorker() {
-    console.log('[Broadcast Worker] Планировщик запущен.');
-    
-    // Возвращаем нормальный график: запускать каждую минуту
-    cron.schedule('* * * * *', async () => {
-        // Используем безопасную функцию для "захвата" задачи
-        const task = await getAndStartPendingBroadcastTask();
-        
-        if (task) {
-            setBroadcasting(true);
-            try {
-                console.log(`[Broadcast Worker] Найдена и заблокирована задача #${task.id}. Начинаю выполнение.`);
-                let users = [];
-                
-                // Получаем список пользователей в зависимости от аудитории
-                if (task.target_audience === 'all') {
-                    users = await getAllUsers(true);
-                } else if (task.target_audience === 'free_users') {
-                    users = await getActiveFreeUsers();
-                } else if (task.target_audience === 'premium_users') {
-                    users = await getActivePremiumUsers();
-                } else if (task.target_audience === 'preview') {
-                    users = [{ id: ADMIN_ID, first_name: 'Admin' }];
-                }
-                
-                const report = await runSingleBroadcast(task, users, task.id);
-                await completeBroadcastTask(task.id, report);
-                
-            } catch (error) {
-                console.error(`[Broadcast Worker] Критическая ошибка при выполнении задачи #${task.id}:`, error);
-                await failBroadcastTask(task.id, error.message);
-            } finally {
-                // В любом случае (успех или ошибка) сбрасываем флаг
-                setBroadcasting(false);
-                console.log(`[Broadcast Worker] Выполнение задачи #${task.id} завершено.`);
-            }
-        }
-    });
-}
-
 // Запускаем все приложение
 startApp();
