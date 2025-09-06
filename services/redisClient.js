@@ -15,7 +15,12 @@ class RedisService {
 
     const redisUrl = process.env.REDIS_URL;
     if (!redisUrl) {
-      throw new Error('Переменная окружения REDIS_URL не найдена!');
+      // В production это должно быть критической ошибкой
+      if (process.env.NODE_ENV === 'production') {
+        throw new Error('Переменная окружения REDIS_URL не найдена!');
+      }
+      console.warn('[Redis] Переменная REDIS_URL не найдена. Redis не будет использоваться.');
+      return null;
     }
 
     console.log(`[Redis] Подключаюсь...`);
@@ -29,9 +34,19 @@ class RedisService {
 
   getClient() {
     if (!this.client || !this.client.isOpen) {
-      throw new Error('Redis клиент не инициализирован или отключен. Вызовите connect() сначала.');
+      console.warn('[Redis] Попытка получить доступ к Redis, но клиент не подключен.');
+      return null; // Возвращаем null вместо ошибки, чтобы приложение не падало
     }
     return this.client;
+  }
+
+  async disconnect() {
+    if (this.client && this.client.isOpen) {
+      console.log('[Redis] Закрываю соединение...');
+      await this.client.quit();
+      this.client = null;
+      console.log('✅ [Redis] Соединение успешно закрыто.');
+    }
   }
 }
 
