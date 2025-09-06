@@ -711,11 +711,14 @@ function setupGracefulShutdown(server) {
     process.on('SIGTERM', gracefulShutdown);
 }
 
+// index.js
+
 function startBroadcastWorker() {
     console.log('[Broadcast Worker] Планировщик запущен.');
     
-    // Запускаем каждую минуту
+    // Возвращаем нормальный график: запускать каждую минуту
     cron.schedule('* * * * *', async () => {
+        // Используем безопасную функцию для "захвата" задачи
         const task = await getAndStartPendingBroadcastTask();
         
         if (task) {
@@ -724,10 +727,16 @@ function startBroadcastWorker() {
                 console.log(`[Broadcast Worker] Найдена и заблокирована задача #${task.id}. Начинаю выполнение.`);
                 let users = [];
                 
-                if (task.target_audience === 'all') users = await getAllUsers(true);
-                else if (task.target_audience === 'free_users') users = await getActiveFreeUsers();
-                else if (task.target_audience === 'premium_users') users = await getActivePremiumUsers();
-                else if (task.target_audience === 'preview') users = [{ id: ADMIN_ID, first_name: 'Admin' }];
+                // Получаем список пользователей в зависимости от аудитории
+                if (task.target_audience === 'all') {
+                    users = await getAllUsers(true);
+                } else if (task.target_audience === 'free_users') {
+                    users = await getActiveFreeUsers();
+                } else if (task.target_audience === 'premium_users') {
+                    users = await getActivePremiumUsers();
+                } else if (task.target_audience === 'preview') {
+                    users = [{ id: ADMIN_ID, first_name: 'Admin' }];
+                }
                 
                 const report = await runSingleBroadcast(task, users, task.id);
                 await completeBroadcastTask(task.id, report);
@@ -736,6 +745,7 @@ function startBroadcastWorker() {
                 console.error(`[Broadcast Worker] Критическая ошибка при выполнении задачи #${task.id}:`, error);
                 await failBroadcastTask(task.id, error.message);
             } finally {
+                // В любом случае (успех или ошибка) сбрасываем флаг
                 setBroadcasting(false);
                 console.log(`[Broadcast Worker] Выполнение задачи #${task.id} завершено.`);
             }
