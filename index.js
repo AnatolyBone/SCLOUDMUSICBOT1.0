@@ -590,74 +590,90 @@ app.post(['/broadcast/new', '/broadcast/edit/:id'], requireAuth, upload.single('
         res.redirect(req.get('Referrer') || '/users');
     });
 }
-
 // index.js
 
-// >>>>> ЗАМЕНИТЕ СУЩЕСТВУЮЩУЮ ФУНКЦИЮ НА ЭТУ <<<<<
 async function runSingleBroadcast(task, users, taskId = null) {
-    console.log(`[Broadcast Worker] Запуск рассылки для ${users.length} пользователей.`);
-    let successCount = 0, errorCount = 0;
+    // 1. Получаем список тех, кому УЖЕ отправили
+    const alreadySentIds = await getAlreadySentUserIds(taskId);
+    if (alreadySentIds.size > 0) {
+        console.log(`[Broadcast Worker] Найдено ${alreadySentIds.size} пользователей, которые уже получили рассылку #${taskId}. Они будут пропущены.`);
+    }
     
-    for (const user of users) {
+    // 2. Фильтруем список, оставляя только тех, кому еще НЕ отправили
+    const usersToSend = users.filter(user => !alreadySentIds.has(user.id));
+    
+    if (usersToSend.length === 0 && users.length > 0) {
+        console.log(`[Broadcast Worker] Нет новых пользователей для отправки в задаче #${taskId}. Рассылка считается завершенной.`);
+        return { successCount: users.length, errorCount: 0, totalUsers: users.length };
+    }
+    
+    console.log(`[Broadcast Worker] Запуск рассылки #${taskId}. Всего в аудитории: ${users.length}. К отправке: ${usersToSend.length}.`);
+    
+    let successCount = 0;
+    let errorCount = 0;
+    let counter = 0;
+    // Отчитываемся о прогрессе каждые 50 пользователей, чтобы не спамить в логах
+    const reportInterval = 50;
+    
+    for (const user of usersToSend) {
         try {
             const personalMessage = (task.message || '').replace(/{first_name}/g, user.first_name || 'дорогой друг');
-            
-            const options = { 
-                parse_mode: 'HTML', // <--- ГЛАВНОЕ ИЗМЕНЕНИЕ
-                disable_web_page_preview: task.disable_web_page_preview, 
-                disable_notification: task.disable_notification 
+            const options = {
+                parse_mode: 'HTML',
+                disable_web_page_preview: task.disable_web_page_preview,
+                disable_notification: task.disable_notification
             };
             if (task.keyboard && task.keyboard.length > 0) {
                 options.reply_markup = { inline_keyboard: task.keyboard };
             }
-
+            
             const fileId = task.file_id;
-
             if (fileId) {
                 if (personalMessage) options.caption = personalMessage;
                 const mimeType = task.file_mime_type || '';
-
-                if (mimeType.startsWith('image/')) {
-                    await bot.telegram.sendPhoto(user.id, fileId, options);
-                } else if (mimeType.startsWith('video/')) {
-                    await bot.telegram.sendVideo(user.id, fileId, options);
-                } else if (mimeType.startsWith('audio/')) {
-                    await bot.telegram.sendAudio(user.id, fileId, options);
-                } else {
-                    await bot.telegram.sendDocument(user.id, fileId, options);
-                }
+                
+                if (mimeType.startsWith('image/')) await bot.telegram.sendPhoto(user.id, fileId, options);
+                else if (mimeType.startsWith('video/')) await bot.telegram.sendVideo(user.id, fileId, options);
+                else if (mimeType.startsWith('audio/')) await bot.telegram.sendAudio(user.id, fileId, options);
+                else await bot.telegram.sendDocument(user.id, fileId, options);
             } else if (personalMessage) {
                 await bot.telegram.sendMessage(user.id, personalMessage, options);
             }
             
+            // 3. Если отправка УСПЕШНА, логируем это в новую таблицу
+            await logBroadcastSent(taskId, user.id);
             successCount++;
         } catch (e) {
             errorCount++;
             if (e.response?.error_code === 403) await updateUserField(user.id, 'active', false);
         }
+        
+        counter++;
+        if (counter % reportInterval === 0) {
+            console.log(`[Broadcast Worker] Прогресс рассылки #${taskId}: отправлено ${counter} из ${usersToSend.length}...`);
+        }
+        // Задержка 50мс = ~20 сообщений в секунду, чтобы не превышать лимиты Telegram
         await new Promise(resolve => setTimeout(resolve, 50));
     }
     
-    const report = { successCount, errorCount, totalUsers: users.length };
-    console.log(`[Broadcast Worker] Рассылка завершена.`, report);
-
-    // Этот блок отправляет отчет админу. Мы его тоже переведем на HTML.
+    // Общее число успешных = новые + те, что уже были отправлены ранее
+    const totalSuccess = successCount + alreadySentIds.size;
+    const report = { successCount: totalSuccess, errorCount, totalUsers: users.length };
+    console.log(`[Broadcast Worker] Рассылка #${taskId} завершена.`, report);
+    
     if ((users.length > 1 || (users.length === 1 && users[0].id !== ADMIN_ID)) && taskId) {
         try {
             const audienceName = (task.target_audience || 'unknown').replace('_', ' ');
-            // <--- ИЗМЕНЕНИЕ: Текст отчета теперь тоже в HTML ---
             const reportMessage = `📢 <b>Отчет по рассылке #${taskId}</b>\n\n` +
-                                `✅ Успешно: <b>${successCount}</b>\n` +
-                                `❌ Ошибки: <b>${errorCount}</b>\n` +
-                                `👥 Аудитория: <b>${audienceName}</b> (${users.length} чел.)`;
-
-            // <--- ИЗМЕНЕНИЕ: parse_mode для отчета ---
+                `✅ Успешно: <b>${totalSuccess}</b>\n` +
+                `❌ Ошибки: <b>${errorCount}</b>\n` +
+                `👥 Аудитория: <b>${audienceName}</b> (${users.length} чел.)`;
+            
             await bot.telegram.sendMessage(ADMIN_ID, reportMessage, { parse_mode: 'HTML' });
         } catch (e) { console.error('Не удалось отправить отчет админу:', e.message); }
     }
     return report;
 }
-// ======================= ФИНАЛЬНЫЙ БЛОК ДЛЯ КОНЦА INDEX.JS =======================
 
 function setupGracefulShutdown(server) {
     const SHUTDOWN_TIMEOUT = 25000; // 25 секунд (Render дает 30)
