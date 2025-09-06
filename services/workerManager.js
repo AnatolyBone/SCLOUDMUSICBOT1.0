@@ -1,6 +1,9 @@
 // services/workerManager.js
 
 import cron from 'node-cron';
+// services/workerManager.js
+import { bot } from '../bot.js'; // <-- ДОБАВЬТЕ ЭТО
+// ...
 import { ADMIN_ID } from '../config.js';
 import {
     pool,
