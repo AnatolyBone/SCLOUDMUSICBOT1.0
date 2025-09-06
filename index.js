@@ -22,7 +22,7 @@ import {
     getUsersCountByTariff, getTopReferralSources, getDailyStats,
     getActivityByWeekday, getTopTracks, getTopUsers, getHourlyActivity, getUsersAsCsv, 
     getUserActions, logUserAction,
-    createBroadcastTask, getPendingBroadcastTask, completeBroadcastTask, failBroadcastTask,
+    createBroadcastTask, getAndStartPendingBroadcastTask, completeBroadcastTask, failBroadcastTask,
     getAllBroadcastTasks, deleteBroadcastTask, getBroadcastTaskById, updateBroadcastTask, findAndInterruptActiveBroadcast, getReferrerInfo, getReferredUsers, getReferralStats
 } from './db.js';
 import { setShuttingDown, setMaintenanceMode, isBroadcasting, setBroadcasting} from './services/appState.js';
