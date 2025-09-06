@@ -574,7 +574,10 @@ bot.on('text', (ctx) => {
             if (isMaintenanceMode && ctx.from.id !== ADMIN_ID) {
                 return ctx.reply('⏳ Бот на плановом обслуживании. Новые запросы временно не принимаются. Пожалуйста, попробуйте через 5-10 минут.');
             }
-            
+            if (ctx.chat.type !== 'private') {
+        console.log(`[Ignore] Сообщение из не-приватного чата (${ctx.chat.type}) было проигнорировано.`);
+        return;
+    }
             const text = ctx.message.text;
     if (text.startsWith('/')) return;
     if (Object.values(allTextsSync()).includes(text)) return;
