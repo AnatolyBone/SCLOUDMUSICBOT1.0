@@ -806,7 +806,7 @@ export async function findAndInterruptActiveBroadcast() {
     .from('broadcast_tasks')
     // =====> ИСПРАВЛЕНИЕ ЗДЕСЬ <=====
     .update({ status: 'interrupted', completed_at: new Date() })
-    .eq('status', 'processing')
+  .eq('status', 'processing')
     .select()
     .single();
   
