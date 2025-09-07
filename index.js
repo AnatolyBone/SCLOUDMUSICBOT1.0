@@ -89,7 +89,7 @@ initializeWorkers(server);
         
         console.log('[App] Настройка фоновых задач...');
         setInterval(() => resetDailyStats(), 24 * 3600 * 1000);
-        setInterval(() => console.log(`[Monitor] Очередь: ${downloadQueue.size} в ожидании, ${downloadQueue.active} в работе.`), 60000);
+        setInterval(() => console.log(`[Monitor] Очередь: ${downloadQueue.size} в ожидании, ${downloadQueue.pending} в работе.`), 60000);
 
     } catch (err) {
         console.error('🔴 Критическая ошибка при запуске:', err);
