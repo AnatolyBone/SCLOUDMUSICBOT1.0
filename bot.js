@@ -29,8 +29,16 @@ function getYoutubeDl() {
  * @param {object} task - Объект задачи для downloadManager.
  */
 function addTaskToQueue(task) {
-    setTimeout(() => {
-        downloadQueue.add(task);
+    setTimeout(async () => {
+        try {
+            const user = await getUser(task.userId);
+            const priority = user ? user.premium_limit : 5; // По умолчанию низкий приоритет
+            console.log(`[Queue] Добавляю задачу для ${task.userId} с приоритетом ${priority}`);
+            // Задачи с большим priority выполняются раньше
+            downloadQueue.add(() => trackDownloadProcessor(task), { priority });
+        } catch (e) {
+            console.error(`[Queue] Ошибка при добавлении задачи в очередь для ${task.userId}:`, e);
+        }
     }, 0);
 }
 
@@ -406,15 +414,44 @@ bot.action(/pl_download_all:|pl_download_10:/, async (ctx) => {
     playlistSessions.delete(userId);
 });
 
+// bot.js
+
 bot.action(/pl_select_manual:(.+)/, async (ctx) => {
-    const playlistId = ctx.match[1];
     const userId = ctx.from.id;
+    const playlistId = ctx.match[1];
     const session = playlistSessions.get(userId);
-    if (!session || session.playlistId !== playlistId) return await ctx.answerCbQuery('❗️ Сессия выбора истекла.', { show_alert: true });
+    
+    if (!session || session.playlistId !== playlistId) {
+        return await ctx.answerCbQuery('❗️ Сессия выбора истекла.', { show_alert: true });
+    }
+    
+    // Проверяем, есть ли у нас уже полные данные с названиями
+    if (!session.fullTracks) {
+        await ctx.answerCbQuery('⏳ Загружаю названия треков...');
+        try {
+            const youtubeDl = getYoutubeDl();
+            // Запускаем медленный анализ, чтобы получить полные данные
+            const fullData = await youtubeDl(session.originalUrl, { dumpSingleJson: true });
+            
+            // Обновляем треки в сессии на полные
+            session.tracks = fullData.entries.filter(track => track && track.url);
+            session.fullTracks = true; // Ставим флаг, что данные загружены
+        } catch (e) {
+            console.error('[Playlist] Ошибка при дозагрузке названий:', e);
+            await ctx.answerCbQuery('❌ Не удалось получить детали плейлиста.', { show_alert: true });
+            return;
+        }
+    }
+    
+    // Сбрасываем состояние выбора и показываем меню
     session.currentPage = 0;
     session.selected = new Set();
     const menu = generateSelectionMenu(userId);
-    if (menu) await ctx.editMessageText(menu.text, menu.options);
+    if (menu) {
+        try {
+            await ctx.editMessageText(menu.text, menu.options);
+        } catch (e) { /* Игнорируем ошибку, если сообщение не изменилось */ }
+    }
 });
 
 bot.action(/pl_page:(.+):(\d+)/, async (ctx) => {
@@ -531,37 +568,81 @@ bot.action(/pl_cancel:(.+)/, async (ctx) => {
 });
 
 // --- Главный обработчик ссылок ---
+// bot.js
+
 async function handleSoundCloudUrl(ctx, url) {
+    // 1. СНАЧАЛА проверяем кэш для ЛЮБОЙ ссылки.
+    // Это мгновенно отдаст одиночные треки, если они уже скачаны.
+    const cached = await findCachedTrack(url);
+    if (cached) {
+        console.log(`[Cache] Отправляю трек ${cached.title} из кэша для ${ctx.from.id}`);
+        try {
+            await ctx.telegram.sendAudio(ctx.from.id, cached.fileId);
+            // За отправку из кэша лимиты не списываем
+            return;
+        } catch (e) {
+            console.warn(`[Cache] Ошибка отправки из кэша (возможно, битый file_id): ${e.message}. Продолжаем скачивание...`);
+        }
+    }
+    
+    // Если в кэше нет, показываем сообщение о загрузке
     let loadingMessage;
     try {
-        loadingMessage = await ctx.reply('🔍 Анализирую ссылку... Это может занять некоторое время.');
+        loadingMessage = await ctx.reply('🔍 Анализирую ссылку...');
         const youtubeDl = getYoutubeDl();
-        const data = await youtubeDl(url, { dumpSingleJson: true });
+        
+        // 2. Делаем БЫСТРЫЙ анализ с flatPlaylist, чтобы получить структуру
+        const data = await youtubeDl(url, { dumpSingleJson: true, flatPlaylist: true });
+        
+        // 3. ПРОВЕРЯЕМ, это плейлист или одиночный трек
         if (data.entries && data.entries.length > 0) {
-            const validTracks = data.entries.filter(track => track && track.url);
-            if (validTracks.length === 0) {
-                return await ctx.telegram.editMessageText(ctx.chat.id, loadingMessage.message_id, undefined, '❌ В этом плейлисте не найдено доступных для скачивания треков.').catch(() => {});
-            }
+            // ЭТО ПЛЕЙЛИСТ
             await ctx.deleteMessage(loadingMessage.message_id).catch(() => {});
+            
             const playlistId = data.id || `pl_${Date.now()}`;
             playlistSessions.set(ctx.from.id, {
-                playlistId, title: data.title, tracks: validTracks,
-                selected: new Set(), currentPage: 0
+                playlistId,
+                title: data.title,
+                tracks: data.entries, // Сохраняем "быстрые" данные без названий
+                originalUrl: url, // Сохраняем оригинальную ссылку для "дозагрузки" названий
+                selected: new Set(),
+                currentPage: 0,
+                fullTracks: false // Флаг, что у нас еще нет полных данных
             });
-            const message = `🎶 В плейлисте <b>"${data.title}"</b> найдено <b>${validTracks.length}</b> треков.\n\nЧто делаем?`;
-            await ctx.reply(message, { parse_mode: 'HTML', ...generateInitialPlaylistMenu(playlistId, validTracks.length) });
+            const message = `🎶 В плейлисте <b>"${data.title}"</b> найдено <b>${data.entries.length}</b> треков.\n\nЧто делаем?`;
+            await ctx.reply(message, { parse_mode: 'HTML', ...generateInitialPlaylistMenu(playlistId, data.entries.length) });
+            
         } else {
-            await ctx.telegram.editMessageText(ctx.chat.id, loadingMessage.message_id, undefined, '✅ Распознал трек, ставлю в очередь...');
+            // ЭТО ОДИНОЧНЫЙ ТРЕК
+            
+            // Проверяем лимиты ПЕРЕД постановкой в очередь
+            const user = await getUser(ctx.from.id);
+            if (user.downloads_today >= user.premium_limit) {
+                // Используем editMessageText, чтобы заменить "Анализирую..." на сообщение о лимите
+                await ctx.telegram.editMessageText(ctx.chat.id, loadingMessage.message_id, undefined, T('limitReached'));
+                return;
+            }
+            
+            await ctx.telegram.editMessageText(ctx.chat.id, loadingMessage.message_id, undefined, '✅ Распознал трек, ставлю в приоритетную очередь...');
+            
+            // Ставим в очередь на скачивание
             addTaskToQueue({
-                userId: ctx.from.id, source: 'soundcloud', url: data.webpage_url || url, originalUrl: data.webpage_url || url,
-                metadata: { id: data.id, title: data.title, uploader: data.uploader, duration: data.duration, thumbnail: data.thumbnail }, ctx: ctx
+                userId: ctx.from.id,
+                source: 'soundcloud',
+                url: data.webpage_url || url,
+                originalUrl: data.webpage_url || url,
+                metadata: { id: data.id, title: data.title, uploader: data.uploader, duration: data.duration, thumbnail: data.thumbnail },
+                ctx: ctx
             });
         }
     } catch (error) {
         console.error('Ошибка при обработке SoundCloud URL:', error.stderr || error.message);
         const userMessage = '❌ Не удалось обработать ссылку. Убедитесь, что она корректна и контент доступен.';
-        if (loadingMessage) await ctx.telegram.editMessageText(ctx.chat.id, loadingMessage.message_id, undefined, userMessage).catch(() => {});
-        else await ctx.reply(userMessage);
+        if (loadingMessage) {
+            await ctx.telegram.editMessageText(ctx.chat.id, loadingMessage.message_id, undefined, userMessage).catch(() => {});
+        } else {
+            await ctx.reply(userMessage);
+        }
     }
 }
 
