@@ -202,19 +202,25 @@ app.get('/dashboard', requireAuth, async (req, res) => {
         ]);
         
         // 2. Правильный синтаксис объекта stats
-        const stats = {
-            total_users: users.length,
-            active_users: users.filter(u => u.active).length,
-            total_downloads: users.reduce((sum, u) => sum + (u.total_downloads || 0), 0),
-            active_today: users.filter(u => u.last_active && new Date(u.last_active).toDateString() === new Date().toDateString()).length,
-            queueWaiting: downloadQueue.size,
-            queueActive: downloadQueue.active,
-            cachedTracksCount: cachedTracksCount,
-            usersByTariff: usersByTariff || {},
-            topSources: topSources || [],
-            totalReferred: referralStats.totalReferred, // <-- Исправлено
-            topReferrers: referralStats.topReferrers // <-- Исправлено
-        };
+        // index.js -> app.get('/dashboard', ...)
+
+const stats = {
+    total_users: users.length,
+    active_users: users.filter(u => u.active).length,
+    total_downloads: users.reduce((sum, u) => sum + (u.total_downloads || 0), 0),
+    active_today: users.filter(u => u.last_active && new Date(u.last_active).toDateString() === new Date().toDateString()).length,
+    
+    // =====> ИСПРАВЛЕННЫЙ БЛОК <=====
+    queueWaiting: downloadQueue.size,
+    queueActive: downloadQueue.pending,
+    // ================================
+    
+    cachedTracksCount: cachedTracksCount,
+    usersByTariff: usersByTariff || {},
+    topSources: topSources || [],
+    totalReferred: referralStats.totalReferred,
+    topReferrers: referralStats.topReferrers
+};
         
         const chartDataCombined = {
             labels: (dailyStats || []).map(d => new Date(d.day).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })),
