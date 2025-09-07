@@ -6,6 +6,7 @@ import fs from 'fs';
 import ytdl from 'youtube-dl-exec';
 import { fileURLToPath } from 'url';
 import crypto from 'crypto';
+import PQueue from 'p-queue';
 import { TaskQueue } from '../lib/TaskQueue.js';
 import {
     updateUserField,
