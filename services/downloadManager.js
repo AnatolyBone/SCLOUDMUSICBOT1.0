@@ -6,8 +6,7 @@ import fs from 'fs';
 import ytdl from 'youtube-dl-exec';
 import { fileURLToPath } from 'url';
 import crypto from 'crypto';
-import PQueue from 'p-queue';
-import { TaskQueue } from '../lib/TaskQueue.js';
+import PQueue from 'p-queue'; // Используем p-queue для приоритетов
 import {
     updateUserField,
     cacheTrack,
@@ -18,19 +17,14 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(path.dirname(__filename));
 const cacheDir = path.join(__dirname, 'cache');
 
-// --- Константы ---
 const YTDL_TIMEOUT = 180;
 const MAX_FILE_SIZE_BYTES = 49 * 1024 * 1024;
 const FAKE_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36';
 
-/**
- * Безопасно отправляет сообщение пользователю через переданный контекст.
- */
 async function safeSendMessage(ctx, userId, text, extra = {}) {
     try {
-        // Если контекст невалидный, прерываем, чтобы избежать падения
-        if (!ctx || typeof ctx.telegram?.sendMessage !== 'function') {
-            console.error('[SafeSend] Невалидный или отсутствующий контекст (ctx). Невозможно отправить сообщение.');
+        if (!ctx || !ctx.telegram?.sendMessage) {
+            console.error('[SafeSend] Невалидный контекст (ctx). Невозможно отправить сообщение.');
             return null;
         }
         return await ctx.telegram.sendMessage(userId, text, extra);
@@ -47,8 +41,9 @@ async function safeSendMessage(ctx, userId, text, extra = {}) {
 
 /**
  * Главный процессор задач, который скачивает, отправляет и кэширует трек.
+ * ВАЖНО: Эта функция экспортируется, чтобы addTaskToQueue в bot.js мог ее вызывать.
  */
-async function trackDownloadProcessor(task) {
+export async function trackDownloadProcessor(task) {
     const { userId, url, originalUrl, metadata, ctx } = task;
     const { title, uploader, id: trackId, duration } = metadata;
 
@@ -91,8 +86,6 @@ async function trackDownloadProcessor(task) {
         const cacheKey = originalUrl || url;
         if (sentToUserMessage?.audio?.file_id) {
             await incrementDownloadsAndSaveTrack(userId, title, sentToUserMessage.audio.file_id, cacheKey);
-            
-            // Асинхронно кэшируем в канал, не блокируя основной процесс
             if (STORAGE_CHANNEL_ID) {
                 cacheToChannel(ctx, sentToUserMessage.audio.file_id, { ...metadata, url: cacheKey });
             }
@@ -101,17 +94,11 @@ async function trackDownloadProcessor(task) {
     } catch (err) {
         let userErrorMessage = `❌ Не удалось обработать трек: "${title}"`;
         const errorDetails = err.stderr || err.message || '';
-        if (errorDetails.includes('FILE_TOO_LARGE')) {
-            userErrorMessage += '. Он слишком большой (более 50 МБ).';
-        } else if (errorDetails.includes('timed out') || errorDetails.includes('Connection reset')) {
-            userErrorMessage += '. Проблема с сетью. Попробуйте еще раз.';
-        }
+        if (errorDetails.includes('FILE_TOO_LARGE')) userErrorMessage += '. Он слишком большой (более 50 МБ).';
+        else if (errorDetails.includes('timed out') || errorDetails.includes('Connection reset')) userErrorMessage += '. Проблема с сетью. Попробуйте еще раз.';
         console.error(`❌ Ошибка воркера при обработке "${title}":`, errorDetails);
-        if (statusMessage) {
-            await ctx.telegram.editMessageText(userId, statusMessage.message_id, undefined, userErrorMessage).catch(() => {});
-        } else {
-            await safeSendMessage(ctx, userId, userErrorMessage);
-        }
+        if (statusMessage) await ctx.telegram.editMessageText(userId, statusMessage.message_id, undefined, userErrorMessage).catch(() => {});
+        else await safeSendMessage(ctx, userId, userErrorMessage);
     } finally {
         if (tempFilePath && fs.existsSync(tempFilePath)) {
             fs.promises.unlink(tempFilePath).catch(e => console.error("Ошибка удаления временного файла:", e));
@@ -119,9 +106,6 @@ async function trackDownloadProcessor(task) {
     }
 }
 
-/**
- * Асинхронно отправляет аудио в канал-хранилище и кэширует в БД.
- */
 async function cacheToChannel(ctx, fileId, metadata) {
     const { title, uploader, duration, thumbnail, url: cacheKey } = metadata;
     try {
@@ -145,15 +129,9 @@ async function cacheToChannel(ctx, fileId, metadata) {
 
 // --- Экспорты ---
 
-export const downloadQueue = new TaskQueue({
-    maxConcurrent: 1,
-    taskProcessor: trackDownloadProcessor
-});
+export const downloadQueue = new PQueue({ concurrency: 1 });
 
-/**
- * Проверяет, активна ли в данный момент очередь скачивания.
- * @returns {boolean} - true, если есть активные или ожидающие задачи.
- */
 export function isDownloadQueueActive() {
-    return downloadQueue.active > 0 || downloadQueue.size > 0;
+    // size - задачи в очереди, pending - задачи в работе
+    return downloadQueue.size > 0 || downloadQueue.pending > 0;
 }
