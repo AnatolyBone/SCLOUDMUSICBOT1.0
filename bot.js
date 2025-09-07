@@ -28,20 +28,27 @@ function getYoutubeDl() {
  * Это позволяет боту мгновенно отвечать пользователю, а скачивание начинается в фоне.
  * @param {object} task - Объект задачи для downloadManager.
  */
+// bot.js
+
 function addTaskToQueue(task) {
     setTimeout(async () => {
         try {
+            // Получаем пользователя, чтобы узнать его лимит
             const user = await getUser(task.userId);
-            const priority = user ? user.premium_limit : 5; // По умолчанию низкий приоритет
-            console.log(`[Queue] Добавляю задачу для ${task.userId} с приоритетом ${priority}`);
             // Задачи с большим priority выполняются раньше
+            const priority = user ? user.premium_limit : 5;
+            
+            console.log(`[Queue] Добавляю задачу для ${task.userId} с приоритетом ${priority}`);
+            
+            // ПРАВИЛЬНЫЙ ВЫЗОВ ДЛЯ p-queue:
+            // Мы передаем ФУНКЦИЮ, которая будет вызвана, когда придет ее очередь
             downloadQueue.add(() => trackDownloadProcessor(task), { priority });
+            
         } catch (e) {
             console.error(`[Queue] Ошибка при добавлении задачи в очередь для ${task.userId}:`, e);
         }
     }, 0);
 }
-
 // --- Вспомогательные функции ---
 async function isSubscribed(userId) {
     if (!CHANNEL_USERNAME) return false;
