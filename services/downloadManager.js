@@ -26,11 +26,8 @@ async function safeSendMessage(ctx, userId, text, extra = {}) {
         if (!ctx || !ctx.telegram?.sendMessage) return null;
         return await ctx.telegram.sendMessage(userId, text, extra);
     } catch (e) {
-        if (e.response?.error_code === 403) {
-            await updateUserField(userId, 'active', false);
-        } else {
-            console.error(`[SafeSend] Ошибка отправки сообщения для ${userId}:`, e.message);
-        }
+        if (e.response?.error_code === 403) await updateUserField(userId, 'active', false);
+        else console.error(`[SafeSend] Ошибка отправки сообщения для ${userId}:`, e.message);
         return null;
     }
 }
@@ -70,7 +67,7 @@ export async function trackDownloadProcessor(task) {
     } catch (err) {
         let userErrorMessage = `❌ Не удалось обработать трек: "${title}"`;
         const errorDetails = err.stderr || err.message || '';
-        if (errorDetails.includes('FILE_TOO_LARGE')) userErrorMessage += '. Он слишком большой (более 50 МБ).';
+        if (errorDetails.includes('FILE_TOO_LARGE')) userErrorMessage += '. Он слишком большой.';
         else if (errorDetails.includes('timed out') || errorDetails.includes('Connection reset')) userErrorMessage += '. Проблема с сетью.';
         console.error(`❌ Ошибка воркера при обработке "${title}":`, errorDetails);
         if (statusMessage) await ctx.telegram.editMessageText(userId, statusMessage.message_id, undefined, userErrorMessage).catch(() => {});
