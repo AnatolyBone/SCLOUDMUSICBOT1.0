@@ -6,6 +6,7 @@ export async function runSingleBroadcast(bot, task, users, taskId = null) {
     const isPreview = !taskId;
     const alreadySentIds = isPreview ? new Set() : await getAlreadySentUserIds(taskId);
     const usersToSend = users.filter(user => !alreadySentIds.has(user.id));
+
     if (usersToSend.length === 0 && users.length > 0 && !isPreview) {
         console.log(`[Broadcast] Нет новых пользователей для отправки в задаче #${taskId}.`);
         return { successCount: users.length, errorCount: 0, totalUsers: users.length };
@@ -26,6 +27,7 @@ export async function runSingleBroadcast(bot, task, users, taskId = null) {
                 else if (mimeType.startsWith('audio/')) await bot.telegram.sendAudio(user.id, fileId, options);
                 else await bot.telegram.sendDocument(user.id, fileId, options);
             } else if (personalMessage) await bot.telegram.sendMessage(user.id, personalMessage, options);
+
             if (!isPreview) await logBroadcastSent(taskId, user.id);
             successCount++;
         } catch (e) {
@@ -34,16 +36,21 @@ export async function runSingleBroadcast(bot, task, users, taskId = null) {
         }
         await new Promise(resolve => setTimeout(resolve, 40)); // ~25 msg/sec
     }
+    
     const totalSuccess = successCount + alreadySentIds.size;
     const report = { successCount: totalSuccess, errorCount, totalUsers: users.length };
-    if (isPreview) console.log(`[Broadcast] Предпросмотр завершен.`, { successCount, errorCount });
-    else console.log(`[Broadcast] Рассылка #${taskId} завершена.`, report);
-    if (!isPreview && (users.length > 1 || (users.length === 1 && users[0].id !== ADMIN_ID))) {
-       try {
-            const audienceName = (task.target_audience || 'unknown').replace('_', ' ');
-            const reportMessage = `📢 <b>Отчет по рассылке #${taskId}</b>\n\n✅ Успешно: <b>${totalSuccess}</b>\n❌ Ошибки: <b>${errorCount}</b>\n👥 Аудитория: <b>${audienceName}</b> (${users.length} чел.)`;
-            await bot.telegram.sendMessage(ADMIN_ID, reportMessage, { parse_mode: 'HTML' });
-        } catch (e) { console.error('Не удалось отправить отчет админу:', e.message); }
+    
+    if (isPreview) {
+        console.log(`[Broadcast] Предпросмотр завершен.`, { successCount, errorCount });
+    } else {
+        console.log(`[Broadcast] Рассылка #${taskId} завершена.`, report);
+        if (users.length > 1 || (users.length === 1 && users[0].id !== ADMIN_ID)) {
+           try {
+                const audienceName = (task.target_audience || 'unknown').replace('_', ' ');
+                const reportMessage = `📢 <b>Отчет по рассылке #${taskId}</b>\n\n✅ Успешно: <b>${totalSuccess}</b>\n❌ Ошибки: <b>${errorCount}</b>\n👥 Аудитория: <b>${audienceName}</b> (${users.length} чел.)`;
+                await bot.telegram.sendMessage(ADMIN_ID, reportMessage, { parse_mode: 'HTML' });
+            } catch (e) { console.error('Не удалось отправить отчет админу:', e.message); }
+        }
     }
     return report;
 }
