@@ -467,7 +467,8 @@ app.post(['/broadcast/new', '/broadcast/edit/:id'], requireAuth, upload.single('
         };
 
         if (action === 'preview') {
-            await runSingleBroadcast({ ...taskData, targetAudience: 'preview' }, [{ id: ADMIN_ID, first_name: 'Admin' }]);
+            // Передаем все 4 аргумента, как и ожидает функция
+await runSingleBroadcast(bot, { ...taskData, targetAudience: 'preview' }, [{ id: ADMIN_ID, first_name: 'Admin' }], null);
             renderOptions.success = 'Предпросмотр отправлен вам в Telegram.';
             return res.render('broadcast-form', renderOptions);
         }
