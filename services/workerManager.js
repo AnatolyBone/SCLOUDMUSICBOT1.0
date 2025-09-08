@@ -19,13 +19,14 @@ function setupGracefulShutdown(server) {
         setShuttingDown();
         console.log(`[Shutdown] Получен сигнал ${signal}. Начинаю изящное завершение...`);
         server.close(() => console.log('[Shutdown] HTTP сервер закрыт.'));
-        if (isBroadcasting) {
-            await findAndInterruptActiveBroadcast();
-        }
-        if (downloadQueue.pending > 0) {
-            console.log(`[Shutdown] Ожидаю завершения скачивания (макс. ${SHUTDOWN_TIMEOUT / 1000}с)...`);
-            const timeoutPromise = new Promise(resolve => setTimeout(resolve, SHUTDOWN_TIMEOUT));
-            await Promise.race([downloadQueue.onIdle(), timeoutPromise]);
+        if (isBroadcasting) await findAndInterruptActiveBroadcast();
+        // `p-queue` имеет свой собственный, более умный механизм ожидания
+        if (downloadQueue.size > 0 || downloadQueue.pending > 0) {
+            console.log(`[Shutdown] Ожидаю завершения скачиваний (макс. ${SHUTDOWN_TIMEOUT / 1000}с)...`);
+            await Promise.race([
+                downloadQueue.onIdle(),
+                new Promise(resolve => setTimeout(resolve, SHUTDOWN_TIMEOUT))
+            ]);
         }
         console.log('[Shutdown] Закрываю соединения...');
         await Promise.allSettled([pool.end(), redisService.disconnect()]);
@@ -39,9 +40,8 @@ function setupGracefulShutdown(server) {
 function startBroadcastWorker() {
     console.log('[Broadcast Worker] Планировщик запущен.');
     cron.schedule('* * * * *', async () => {
-        // Не начинаем новую рассылку, если предыдущая еще не завершилась
         if (isBroadcasting) {
-            console.log('[Broadcast Worker] Предыдущая итерация рассылки еще активна. Пропуск.');
+            console.log('[Broadcast Worker] Предыдущая рассылка еще активна. Пропуск.');
             return;
         }
         const task = await getAndStartPendingBroadcastTask();
