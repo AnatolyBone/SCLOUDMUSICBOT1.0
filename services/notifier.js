@@ -39,7 +39,7 @@ export async function checkAndSendExpirationNotifications(bot) {
 
             const daysWord = daysLeft === 1 ? 'день' : 'дня'; // Упрощено для 1 и 3 дней
 
-            const message = `👋 Привет, ${user.first_name}!\n\n` +
+            const message = `👋 Привет, ${user.first_name || 'пользователь'}!\n\n` +
                             `Напоминаем, что ваша подписка истекает через ${daysLeft} ${daysWord}. ` +
                             `Не забудьте продлить ее, чтобы сохранить доступ ко всем возможностям!\n\n` +
                             `Нажмите /premium, чтобы посмотреть доступные тарифы.`;
@@ -54,7 +54,8 @@ export async function checkAndSendExpirationNotifications(bot) {
                     console.error(`❌ Ошибка отправки уведомления пользователю ${user.id}:`, e.message);
                 }
             }
-            await new Promise(resolve => setTimeout(resolve, 300)); // Задержка, чтобы не спамить
+            // Задержка 300мс, чтобы не превышать лимиты Telegram (~3 сообщения в секунду)
+            await new Promise(resolve => setTimeout(resolve, 300)); 
         }
         console.log('[Notifier] Ежедневная рассылка уведомлений завершена.');
     } catch (e) {
