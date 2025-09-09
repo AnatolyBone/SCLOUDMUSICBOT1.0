@@ -437,12 +437,23 @@ export async function getTopUsers(limit = 15) {
   return rows;
 }
 
-// --- Рассылки (Очищенный и правильный блок) ---
-// db.js
+// ВСТАВЬТЕ ЭТОТ БЛОК В РАЗДЕЛ "--- РАССЫЛКИ ---"
+
+export async function getAllBroadcastTasks() {
+  const { rows } = await query(`SELECT * FROM broadcast_tasks ORDER BY scheduled_at DESC`);
+  return rows;
+}
+
 export async function deleteBroadcastTask(taskId) {
   // Удалять можно только задачи, которые еще не были запущены
   await query(`DELETE FROM broadcast_tasks WHERE id = $1 AND status = 'pending'`, [taskId]);
 }
+
+export async function getBroadcastTaskById(taskId) {
+  const { rows } = await query(`SELECT * FROM broadcast_tasks WHERE id = $1`, [taskId]);
+  return rows[0] || null;
+}
+
 export async function createBroadcastTask(taskData) {
   const { message, file_id, file_mime_type, keyboard, disable_web_page_preview, targetAudience, scheduledAt, disableNotification } = taskData;
   const queryText = `
