@@ -87,12 +87,14 @@ export async function getUser(id, firstName = '', username = '', startPayload = 
     return newUserResult.rows[0];
   }
 } // <--- ВОТ НЕДОСТАЮЩАЯ СКОБКА
+// db.js
+
 const allowedFields = new Set([
   'premium_limit', 'downloads_today', 'total_downloads', 'first_name', 'username',
   'premium_until', 'subscribed_bonus_used', 'tracks_today', 'last_reset_date',
-  'active', 'referred_count', 'promo_1plus1_used', 'has_reviewed'
+  'active', 'referred_count', 'promo_1plus1_used', 'has_reviewed',
+  'notified_about_expiration' // <--- ДОБАВИТЬ ЭТУ СТРОКУ
 ]);
-
 // db.js
 
 // ЗАМЕНИТЕ ВАШУ updateUserField НА ЭТУ ВЕРСИЮ
