@@ -552,40 +552,7 @@ export async function updateBroadcastTask(id, taskData) {
   return result.rows[0];
 }
 
-// db.js
-
-// ЗАМЕНИТЕ СТАРУЮ getPendingBroadcastTask НА ЭТУ
-export async function getAndStartPendingBroadcastTask() {
-  // Эта хранимая процедура найдет одну подходящую задачу,
-  // обновит ее статус на 'processing' и вернет ее нам.
-  // Это гарантирует, что никакой другой воркер не сможет взять эту же задачу.
-  const { data, error } = await supabase.rpc('get_and_start_next_broadcast');
-  
-  if (error) {
-    console.error('[DB] Ошибка при поиске и блокировке задачи рассылки:', error);
-    return null;
-  }
-  
-  // rpc возвращает массив, даже если результат один
-  return data && data.length > 0 ? data[0] : null;
-}
-// db.js
-
-// ... (здесь ваш существующий код: import { pool }, function query(...) и т.д.) ...
-
-// --- НОВЫЕ И ОБНОВЛЕННЫЕ ФУНКЦИИ ДЛЯ ПАКЕТНОЙ РАССЫЛКИ ---
-
-/**
- * Атомарно находит следующую задачу в очереди ('pending'),
- * меняет её статус на 'processing' и возвращает её.
- * Использование 'FOR UPDATE SKIP LOCKED' гарантирует, что две копии воркера не схватят одну и ту же задачу.
- */
-// db.js
-
-// ... (здесь ваш существующий код: import { pool }, function query(...) и т.д.) ...
-
-// --- НОВЫЕ И ОБНОВЛЕННЫЕ ФУНКЦИИ ДЛЯ ПАКЕТНОЙ РАССЫЛКИ ---
-
+// ... комментарий ...
 export async function getAndStartPendingBroadcastTask() {
   const sql = `
     UPDATE broadcast_tasks
@@ -595,7 +562,7 @@ export async function getAndStartPendingBroadcastTask() {
       WHERE status = 'pending' AND scheduled_at <= NOW()
       ORDER BY scheduled_at ASC
       LIMIT 1
-      FOR UPDATE SKIP LOCKED
+      FOR UPDATE SKIP LOCKED  // <--- Вот ключевой признак
     )
     RETURNING *;
   `;
