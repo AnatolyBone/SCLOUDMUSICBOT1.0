@@ -3,6 +3,7 @@ import { ADMIN_ID } from '../config.js';
 import { logBroadcastSent, updateUserField, getBroadcastProgress } from '../db.js';
 
 // Новая функция для обработки ОДНОЙ пачки
+// services/broadcastManager.js
 export async function runBroadcastBatch(bot, task, users) {
     const sendPromises = users.map(async (user) => {
         try {
@@ -21,8 +22,14 @@ export async function runBroadcastBatch(bot, task, users) {
             } else if (personalMessage) {
                 await bot.telegram.sendMessage(user.id, personalMessage, options);
             }
-
-            await logBroadcastSent(task.id, user.id);
+            
+            // =====> ВОТ ИСПРАВЛЕНИЕ <=====
+            // Записываем в лог, ТОЛЬКО если это настоящая рассылка с номером (ID).
+            if (task.id) {
+                await logBroadcastSent(task.id, user.id);
+            }
+            // =============================
+            
             return { status: 'ok', userId: user.id };
         } catch (e) {
             if (e.response?.error_code === 403) {
@@ -31,7 +38,7 @@ export async function runBroadcastBatch(bot, task, users) {
             return { status: 'error', userId: user.id, reason: e.message };
         }
     });
-
+    
     await Promise.allSettled(sendPromises);
 }
 
