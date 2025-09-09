@@ -251,10 +251,13 @@ bot.command('admin', async (ctx) => {
     }
 });
 bot.command('referral', handleReferralCommand);
+// bot.js
+
+// ЗАМЕНИТЕ ВАШУ ВЕРСИЮ НА ЭТУ
 bot.command('maintenance', (ctx) => {
     if (ctx.from.id !== ADMIN_ID) return;
     
-    const command = ctx.message.text.split(' ')[1]?.toLowerCase(); 
+    const command = ctx.message.text.split(' ')[1]?.toLowerCase();
     
     if (command === 'on') {
         setMaintenanceMode(true);
@@ -263,7 +266,8 @@ bot.command('maintenance', (ctx) => {
         setMaintenanceMode(false);
         ctx.reply('☑️ Режим обслуживания ВЫКЛЮЧЕН.');
     } else {
-        ctx.reply('ℹ️ Статус: ' + (isMaintenanceMode ? 'ВКЛЮЧЕН' : 'ВЫКЛЮЧЕН') + '\n\nИспользуйте: `/maintenance on` или `/maintenance off`');
+        // =====> ВОТ ИСПРАВЛЕНИЕ <=====
+        ctx.reply('ℹ️ Статус: ' + (isMaintenanceMode() ? 'ВКЛЮЧЕН' : 'ВЫКЛЮЧЕН') + '\n\nИспользуйте: `/maintenance on` или `/maintenance off`');
     }
 });
 bot.command('premium', (ctx) => ctx.reply(T('upgradeInfo'), { parse_mode: 'HTML', disable_web_page_preview: true }));
@@ -396,7 +400,7 @@ bot.action(/pl_download_all:|pl_download_10:/, async (ctx) => {
         return playlistSessions.delete(userId);
     }
     
-    await ctx.editMessageText(`✅ Отлично! Проверяю кэш и формирую очередь...`);
+    await ctx.editMessageText(`✅ Отлично! Проверяю и формирую очередь...`);
 
     const tracksToTake = isAll ? session.tracks.length : 10;
     const tracksToProcess = session.tracks.slice(0, tracksToTake);
@@ -439,12 +443,12 @@ bot.action(/pl_download_all:|pl_download_10:/, async (ctx) => {
     }
 
     let reportMessage = '';
-    if (sentFromCacheCount > 0) reportMessage += `✅ ${sentFromCacheCount} трек(ов) отправлено из кэша.\n`;
+    if (sentFromCacheCount > 0) reportMessage += `✅ ${sentFromCacheCount} трек(ов) отправлено.\n`;
     if (tasksToReallyDownload.length > 0) reportMessage += `⏳ ${tasksToReallyDownload.length} трек(ов) добавлено в очередь на скачивание.`;
     
     if (!reportMessage) {
         reportMessage = tracksToProcess.length > 0
-            ? 'Все треки уже были отправлены из кэша, либо ваш дневной лимит исчерпан.'
+            ? 'Все треки уже были отправлены, либо ваш дневной лимит исчерпан.'
             : 'В плейлисте нет треков для обработки.';
     }
     
@@ -700,9 +704,7 @@ async function handleSoundCloudUrl(ctx, url) {
     }
 }
 
-// bot.js
 
-// ... импорты, включая isShuttingDown и isMaintenanceMode ...
 
 bot.on('text', async (ctx) => { // Рекомендую сделать обработчик асинхронным (async)
     // =====> ИСПРАВЛЕНИЕ №1 <=====
