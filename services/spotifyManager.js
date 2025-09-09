@@ -1,27 +1,23 @@
-// services/spotifyManager.js (ФИНАЛЬНАЯ РАБОЧАЯ ВЕРСИЯ)
+// services/spotifyManager.js (ФИНАЛЬНАЯ ИСПРАВЛЕННАЯ ВЕРСИЯ)
+
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { SPOTIPY_CLIENT_ID, SPOTIPY_CLIENT_SECRET } from '../config.js';
-import { downloadQueue } from './downloadManager.js';
-import { logEvent } from '../db.js';
+// ВАЖНО: Импортируем обе нужные части из downloadManager
+import { downloadQueue, trackDownloadProcessor } from './downloadManager.js'; 
+import { logEvent, getUser } from '../db.js'; // Добавляем getUser для получения приоритета
 
 const execAsync = promisify(exec);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(path.dirname(__filename));
 
 async function ensureDirectoryExists(dirPath) {
-    try {
-        await fs.access(dirPath);
-    } catch (error) {
-        if (error.code === 'ENOENT') {
-            console.log(`[Spotify Manager] Директория ${dirPath} не найдена, создаю...`);
-            await fs.mkdir(dirPath, { recursive: true });
-        } else {
-            throw error;
-        }
+    try { await fs.access(dirPath); } catch (error) {
+        if (error.code === 'ENOENT') await fs.mkdir(dirPath, { recursive: true });
+        else throw error;
     }
 }
 
@@ -30,26 +26,30 @@ export async function spotifyEnqueue(ctx, userId, url) {
     let tempFilePath = null;
     try {
         statusMessage = await ctx.reply('🔍 Анализирую ссылку Spotify...');
-        const uploadDir = path.join(__dirname, '..', 'uploads');
+        const uploadDir = path.join(__dirname, 'uploads');
         await ensureDirectoryExists(uploadDir);
         const tempFileName = `spotify_${userId}_${Date.now()}.spotdl`;
         tempFilePath = path.join(uploadDir, tempFileName);
+        
         const command = `spotdl save "${url}" --save-file "${tempFilePath}"`;
         console.log(`[Spotify Manager] Выполняю команду для ${userId}: ${command}`);
         await execAsync(command, {
             env: { ...process.env, SPOTIPY_CLIENT_ID, SPOTIPY_CLIENT_SECRET }
         });
+        
         const fileContent = await fs.readFile(tempFilePath, 'utf-8');
         const tracksMeta = JSON.parse(fileContent);
         if (!tracksMeta || tracksMeta.length === 0) {
-            return await ctx.reply('❌ Не удалось найти треки по этой ссылке Spotify.');
+            return await ctx.telegram.editMessageText(ctx.chat.id, statusMessage.message_id, undefined, '❌ Не удалось найти треки по этой ссылке Spotify.');
         }
+        
         await ctx.telegram.editMessageText(ctx.chat.id, statusMessage.message_id, undefined, `✅ Найдено треков: ${tracksMeta.length}. Добавляю в очередь...`);
-        if (tracksMeta.length > 1) {
-            await logEvent(userId, 'spotify_playlist_album');
-        } else {
-            await logEvent(userId, 'spotify_track');
-        }
+        
+        await logEvent(userId, tracksMeta.length > 1 ? 'spotify_playlist_album' : 'spotify_track');
+        
+        const user = await getUser(userId);
+        const priority = user ? user.premium_limit : 5;
+
         for (const track of tracksMeta) {
             const searchQuery = `${track.artists.join(' ')} - ${track.name}`;
             const task = {
@@ -63,16 +63,18 @@ export async function spotifyEnqueue(ctx, userId, url) {
                     duration: Math.round(track.duration / 1000),
                     thumbnail: track.cover_url,
                     id: track.song_id
-                }
+                },
+                ctx: ctx // <--- ПЕРЕДАЕМ КОНТЕКСТ В ЗАДАЧУ
             };
-            downloadQueue.add(task);
+            // ПРАВИЛЬНО ДОБАВЛЯЕМ В ОЧЕРЕДЬ С ПРИОРИТЕТОМ
+            downloadQueue.add(() => trackDownloadProcessor(task), { priority });
         }
     } catch (error) {
         console.error(`[Spotify Manager] Ошибка для ${userId} с URL ${url}:`, error.stderr || error);
         if (statusMessage) {
-            await ctx.telegram.editMessageText(ctx.chat.id, statusMessage.message_id, undefined, '❌ Произошла ошибка при обработке ссылки Spotify. Попробуйте еще раз.');
+            await ctx.telegram.editMessageText(ctx.chat.id, statusMessage.message_id, undefined, '❌ Произошла ошибка при обработке ссылки Spotify.');
         } else {
-             await ctx.reply('❌ Произошла ошибка при обработке ссылки Spotify. Попробуйте еще раз.');
+             await ctx.reply('❌ Произошла ошибка при обработке ссылки Spotify.');
         }
     } finally {
         if (tempFilePath) {
