@@ -2,83 +2,62 @@
 
 import { findUsersToNotify, markAsNotified, updateUserField } from '../db.js';
 
-let botInstance = null;
+let lastNotificationDate = null; 
 
 /**
- * Инициализирует модуль, передавая ему экземпляр бота.
- * @param {Telegraf} bot - Экземпляр Telegraf.
+ * Главная функция, которая проверяет, пора ли отправлять уведомления, и делает это.
+ * Вызывается из cron-задачи в workerManager.
+ * @param {Telegraf} bot - Экземпляр Telegraf для отправки сообщений.
  */
-export function initNotifier(bot) {
-    if (!bot) {
-        throw new Error("Экземпляр бота должен быть предоставлен для инициализации notifier.");
-    }
-    botInstance = bot;
-}
-
-/**
- * Запускает фоновый процесс, который раз в час проверяет,
- * не пора ли отправить уведомления об истечении подписки.
- */
-export async function startNotifier() {
-    if (!botInstance) {
-        console.error('🔴 Notifier не был инициализирован. Вызовите initNotifier(bot) перед запуском.');
+export async function checkAndSendExpirationNotifications(bot) {
+    const now = new Date();
+    // Запускаем рассылку в 10 утра по UTC
+    if (now.getUTCHours() !== 10) {
         return;
     }
-    
-    console.log('🚀 Запуск планировщика уведомлений...');
-    
-    let lastNotificationDate = null; 
 
-    const checkAndNotify = async () => {
-        const now = new Date();
-        const currentHour = now.getUTCHours();
-        const currentDate = now.toISOString().slice(0, 10);
+    const currentDate = now.toISOString().slice(0, 10);
+    // Проверяем, не отправляли ли мы уже сегодня
+    if (currentDate === lastNotificationDate) {
+        return;
+    }
 
-        // Условие для запуска: 10 утра по UTC и в эту дату мы еще не отправляли
-        if (currentHour === 10 && currentDate !== lastNotificationDate) {
-            console.log(`[Notifier] Настало время для ежедневной рассылки (${currentDate}).`);
-            lastNotificationDate = currentDate;
+    console.log(`[Notifier] Настало время для ежедневной рассылки уведомлений (${currentDate}).`);
+    lastNotificationDate = currentDate;
+
+    try {
+        const users = await findUsersToNotify(3); // Ищем тех, у кого тариф истекает через 3 дня
+        if (users.length === 0) {
+            console.log('[Notifier] Пользователей для уведомления нет.');
+            return;
+        }
+
+        console.log(`[Notifier] Найдено ${users.length} пользователей. Начинаю рассылку...`);
+        for (const user of users) {
+            const daysLeft = Math.ceil((new Date(user.premium_until) - new Date()) / (1000 * 60 * 60 * 24));
+            if (daysLeft <= 0) continue; // На всякий случай
+
+            const daysWord = daysLeft === 1 ? 'день' : 'дня'; // Упрощено для 1 и 3 дней
+
+            const message = `👋 Привет, ${user.first_name}!\n\n` +
+                            `Напоминаем, что ваша подписка истекает через ${daysLeft} ${daysWord}. ` +
+                            `Не забудьте продлить ее, чтобы сохранить доступ ко всем возможностям!\n\n` +
+                            `Нажмите /premium, чтобы посмотреть доступные тарифы.`;
 
             try {
-                const users = await findUsersToNotify(3); // Ищем тех, у кого тариф истекает через 3 дня
-
-                if (users.length === 0) {
-                    console.log('[Notifier] Пользователей для уведомления нет.');
-                    return;
-                }
-
-                console.log(`[Notifier] Найдено ${users.length} пользователей. Начинаю рассылку...`);
-                for (const user of users) {
-                    const daysLeft = Math.ceil((new Date(user.premium_until) - new Date()) / (1000 * 60 * 60 * 24));
-                    const daysWord = daysLeft === 1 ? 'день' : (daysLeft > 1 && daysLeft < 5 ? 'дня' : 'дней');
-                    
-                    const message = `👋 Привет, ${user.first_name}!\n\n` +
-                                    `Напоминаем, что ваша подписка истекает через ${daysLeft} ${daysWord}. ` +
-                                    `Не забудьте продлить ее, чтобы сохранить доступ ко всем возможностям!\n\n` +
-                                    `Нажмите /upgrade, чтобы посмотреть доступные тарифы.`;
-
-                    try {
-                        await botInstance.telegram.sendMessage(user.id, message);
-                        await markAsNotified(user.id);
-                        console.log(`✅ Уведомление отправлено пользователю ${user.id}`);
-                    } catch (e) {
-                        if (e.response?.error_code === 403) {
-                            console.warn(`[Notifier] Пользователь ${user.id} заблокировал бота. Деактивируем...`);
-                            await updateUserField(user.id, 'active', false);
-                        } else {
-                            console.error(`❌ Ошибка отправки сообщения пользователю ${user.id}:`, e.message);
-                        }
-                    }
-                    await new Promise(resolve => setTimeout(resolve, 300));
-                }
-                console.log('[Notifier] Ежедневная рассылка завершена.');
+                await bot.telegram.sendMessage(user.id, message);
+                await markAsNotified(user.id);
             } catch (e) {
-                console.error('🔴 Критическая ошибка в процессе рассылки уведомлений:', e);
+                if (e.response?.error_code === 403) {
+                    await updateUserField(user.id, 'active', false);
+                } else {
+                    console.error(`❌ Ошибка отправки уведомления пользователю ${user.id}:`, e.message);
+                }
             }
+            await new Promise(resolve => setTimeout(resolve, 300)); // Задержка, чтобы не спамить
         }
-    };
-
-    // Запускаем проверку сразу и потом каждый час
-    checkAndNotify();
-    setInterval(checkAndNotify, 60 * 60 * 1000);
+        console.log('[Notifier] Ежедневная рассылка уведомлений завершена.');
+    } catch (e) {
+        console.error('🔴 Критическая ошибка в процессе рассылки уведомлений:', e);
+    }
 }
