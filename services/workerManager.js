@@ -1,34 +1,31 @@
-// services/workerManager.js (ФИНАЛЬНАЯ ВЕРСИЯ НА ОСНОВЕ ВАШЕГО РЕЗЕРВНОГО КОДА)
+// services/workerManager.js (ИСПРАВЛЕННАЯ ВЕРСИЯ)
 
 import cron from 'node-cron';
-// import { bot } from '../bot.js'; // <-- ГЛАВНОЕ: УДАЛЕН ИМПОРТ, РАЗРЫВАЕМ ЦИКЛ
 import { pool, getAndStartPendingBroadcastTask, updateBroadcastStatus, getUsersForBroadcastBatch, findAndInterruptActiveBroadcast } from '../db.js';
 import redisService from './redisClient.js';
 import { downloadQueue } from './downloadManager.js';
 import { isShuttingDown, setShuttingDown, isBroadcasting, setBroadcasting } from './appState.js';
-// Используем новую, быструю систему рассылок
 import { runBroadcastBatch, sendAdminReport } from './broadcastManager.js'; 
 
-let botInstance; // Локальная переменная для хранения bot
+let botInstance; 
 
 function setupGracefulShutdown(server) {
     const SHUTDOWN_TIMEOUT = 25000;
 
     const gracefulShutdown = async (signal) => {
-        // ПРАВИЛЬНЫЙ ВЫЗОВ С ()
-        if (isShuttingDown()) return; 
+        // =====> ИСПРАВЛЕНИЕ №1 <=====
+        if (isShuttingDown) return; 
         setShuttingDown(true);
 
         console.log(`[Shutdown] Получен сигнал ${signal}. Начинаю изящное завершение...`);
         server.close(() => console.log('[Shutdown] HTTP сервер закрыт.'));
 
-        // ПРАВИЛЬНЫЙ ВЫЗОВ С ()
-        if (isBroadcasting()) { 
+        // =====> ИСПРАВЛЕНИЕ №2 <=====
+        if (isBroadcasting) { 
             console.log('[Shutdown] Обнаружена активная рассылка. Помечаю ее как прерванную...');
             await findAndInterruptActiveBroadcast();
         }
         
-        // Используем .pending для p-queue
         if (downloadQueue.pending > 0 || downloadQueue.size > 0) {
             console.log(`[Shutdown] Ожидаю завершения задач в очереди (макс. ${SHUTDOWN_TIMEOUT / 1000}с)...`);
             await Promise.race([
@@ -54,8 +51,8 @@ function startBroadcastWorker() {
     const BATCH_DELAY = 1000;
     
     cron.schedule('* * * * *', async () => {
-        // ПРАВИЛЬНЫЙ ВЫЗОВ С ()
-        if (isBroadcasting() || isShuttingDown()) return;
+        // =====> ИСПРАВЛЕНИЕ №3 (сразу два) <=====
+        if (isBroadcasting || isShuttingDown) return;
 
         const task = await getAndStartPendingBroadcastTask();
         if (!task) return;
@@ -66,21 +63,21 @@ function startBroadcastWorker() {
 
         try {
             let isDone = false;
-            // ПРАВИЛЬНЫЙ ВЫЗОВ С ()
-            while (!isDone && !isShuttingDown()) {
+            // =====> ИСПРАВЛЕНИЕ №4 <=====
+            while (!isDone && !isShuttingDown) {
                 const users = await getUsersForBroadcastBatch(task.id, task.target_audience, BATCH_SIZE);
                 if (users.length === 0) {
                     isDone = true;
                     continue;
                 }
                 
-                await runBroadcastBatch(botInstance, task, users); // Используем botInstance
+                await runBroadcastBatch(botInstance, task, users);
                 await new Promise(resolve => setTimeout(resolve, BATCH_DELAY));
             }
 
-            if (!isShuttingDown()) {
+            if (!isShuttingDown) { // и здесь тоже
                 await updateBroadcastStatus(task.id, 'completed');
-                await sendAdminReport(botInstance, task.id, task); // Используем botInstance
+                await sendAdminReport(botInstance, task.id, task);
             }
         } catch (error) {
             console.error(`[Broadcast Worker] Критическая ошибка при выполнении задачи #${task.id}:`, error);
@@ -94,7 +91,7 @@ function startBroadcastWorker() {
 }
 
 export function initializeWorkers(server, bot) {
-    botInstance = bot; // Сохраняем переданный bot
+    botInstance = bot;
     startBroadcastWorker();
     setupGracefulShutdown(server);
 }
