@@ -38,7 +38,7 @@ import { bot } from './bot.js';
 import redisService from './services/redisClient.js';
 import { WEBHOOK_URL, PORT, SESSION_SECRET, ADMIN_ID, ADMIN_LOGIN, ADMIN_PASSWORD, WEBHOOK_PATH, STORAGE_CHANNEL_ID, BROADCAST_STORAGE_ID } from './config.js';
 import { loadTexts, allTextsSync, setText, getEditableTexts } from './config/texts.js';
-import { downloadQueue } from './services/downloadManager.js';
+import { downloadQueue, initializeDownloadManager } from './services/downloadManager.js';
 
 const app = express();
 
@@ -65,7 +65,7 @@ async function startApp() {
     try {
         await loadTexts(true);
         await redisService.connect();
-        
+        initializeDownloadManager(bot);
         setupExpress();
         
 
