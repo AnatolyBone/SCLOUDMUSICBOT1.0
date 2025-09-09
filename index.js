@@ -475,11 +475,11 @@ app.post(['/broadcast/new', '/broadcast/edit/:id'], requireAuth, upload.single('
         };
 
         if (action === 'preview') {
-            // Передаем все 4 аргумента, как и ожидает функция
-await runSingleBroadcast(bot, { ...taskData, targetAudience: 'preview' }, [{ id: ADMIN_ID, first_name: 'Admin' }], null);
-            renderOptions.success = 'Предпросмотр отправлен вам в Telegram.';
-            return res.render('broadcast-form', renderOptions);
-        }
+    // Вызываем правильную функцию runBroadcastBatch, передавая ей bot, данные задачи и список пользователей
+    await runBroadcastBatch(bot, taskData, [{ id: ADMIN_ID, first_name: 'Admin' }]);
+    renderOptions.success = 'Предпросмотр отправлен вам в Telegram.';
+    return res.render('broadcast-form', renderOptions);
+}
 
         const scheduleTime = scheduledAt ? new Date(scheduledAt) : new Date();
         if (isEditing) {
