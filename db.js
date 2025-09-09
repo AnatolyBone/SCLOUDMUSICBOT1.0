@@ -93,13 +93,33 @@ const allowedFields = new Set([
   'active', 'referred_count', 'promo_1plus1_used', 'has_reviewed'
 ]);
 
-export async function updateUserField(id, field, value) {
-  if (!allowedFields.has(field)) {
-    throw new Error(`Недопустимое поле для обновления: ${field}`);
-  }
-  await query(`UPDATE users SET ${field} = $1 WHERE id = $2`, [value, id]);
-}
+// db.js
 
+// ЗАМЕНИТЕ ВАШУ updateUserField НА ЭТУ ВЕРСИЮ
+export async function updateUserField(id, updates) {
+  // Определяем, пришел ли объект или пара ключ-значение
+  const fieldsToUpdate = (typeof updates === 'string')
+    ? { [updates]: arguments[2] } // Собираем объект из второго аргумента, если updates - строка
+    : updates;
+
+  // Проверяем КАЖДОЕ поле из объекта на валидность
+  for (const field in fieldsToUpdate) {
+    if (!allowedFields.has(field)) {
+      throw new Error(`Недопустимое поле для обновления: ${field}`);
+    }
+  }
+
+  // Обновляем пользователя в базе данных
+  const { error } = await supabase
+    .from('users')
+    .update(fieldsToUpdate)
+    .eq('id', id);
+
+  if (error) {
+    console.error(`[DB] Ошибка при обновлении пользователя ${id}:`, error);
+    throw new Error('Не удалось обновить пользователя.');
+  }
+}
 export async function getAllUsers(includeInactive = true) {
   const sql = includeInactive ? 'SELECT * FROM users ORDER BY created_at DESC' : 'SELECT * FROM users WHERE active = TRUE ORDER BY created_at DESC';
   const { rows } = await query(sql);
