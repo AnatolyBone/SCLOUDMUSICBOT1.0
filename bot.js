@@ -700,30 +700,43 @@ async function handleSoundCloudUrl(ctx, url) {
     }
 }
 
-bot.on('text', (ctx) => {
-            if (isShuttingDown) {
-                console.log('[Shutdown] Отклонен новый запрос, так как идет завершение работы.');
-                return;
-            }
-            
-            if (isMaintenanceMode && ctx.from.id !== ADMIN_ID) {
-                return ctx.reply('⏳ Бот на плановом обслуживании. Новые запросы временно не принимаются. Пожалуйста, попробуйте через 5-10 минут.');
-            }
-            if (ctx.chat.type !== 'private') {
+// bot.js
+
+// ... импорты, включая isShuttingDown и isMaintenanceMode ...
+
+bot.on('text', async (ctx) => { // Рекомендую сделать обработчик асинхронным (async)
+    // =====> ИСПРАВЛЕНИЕ №1 <=====
+    if (isShuttingDown()) { // Добавили скобки ()
+        console.log('[Shutdown] Отклонен новый запрос, так как идет завершение работы.');
+        return;
+    }
+    
+    // =====> ИСПРАВЛЕНИЕ №2 <=====
+    if (isMaintenanceMode() && ctx.from.id !== ADMIN_ID) { // Добавили скобки ()
+        // ctx.reply() возвращает Promise, его стоит дождаться с await
+        return await ctx.reply('⏳ Бот на плановом обслуживании. Новые запросы временно не принимаются. Пожалуйста, попробуйте через 5-10 минут.');
+    }
+    
+    if (ctx.chat.type !== 'private') {
         console.log(`[Ignore] Сообщение из не-приватного чата (${ctx.chat.type}) было проигнорировано.`);
         return;
     }
-            const text = ctx.message.text;
+    
+    const text = ctx.message.text;
     if (text.startsWith('/')) return;
     if (Object.values(allTextsSync()).includes(text)) return;
+    
     const urlMatch = text.match(/(https?:\/\/[^\s]+)/g);
-    if (!urlMatch) return ctx.reply('Пожалуйста, отправьте мне ссылку.');
+    if (!urlMatch) {
+        return await ctx.reply('Пожалуйста, отправьте мне ссылку.');
+    }
+    
     const url = urlMatch[0];
     if (url.includes('soundcloud.com')) {
         handleSoundCloudUrl(ctx, url);
     } else if (url.includes('open.spotify.com')) {
         spotifyEnqueue(ctx, ctx.from.id, url);
     } else {
-        ctx.reply('Я умею скачивать только с SoundCloud и Spotify.');
+        await ctx.reply('Я умею скачивать только с SoundCloud и Spotify.');
     }
 });
