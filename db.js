@@ -856,3 +856,41 @@ export async function resetStaleBroadcasts() {
     console.log(`[DB] Сброшено ${data.length} зависших рассылок для перезапуска.`);
   }
 }
+// db.js
+
+// ... (весь ваш существующий код)
+
+/**
+ * Ищет активных пользователей, у которых подписка истекает в ближайшие N дней
+ * и которых еще не уведомили об этом.
+ * @param {number} days - За сколько дней до истечения искать (например, 3).
+ * @returns {Promise<Array<object>>} - Массив объектов пользователей.
+ */
+export async function findUsersToNotify(days = 3) {
+    const targetDate = new Date();
+    targetDate.setDate(targetDate.getDate() + days);
+
+    const { data, error } = await supabase
+        .from('users')
+        .select('*')
+        .lte('premium_until', targetDate.toISOString()) // Истекает в ближайшие 3 дня
+        .gt('premium_until', new Date().toISOString())  // Но еще не истекла
+        .is('notified_about_expiration', false)         // И еще не уведомлен
+        .eq('active', true);                            // И он активен
+
+    if (error) {
+        console.error('[DB] Ошибка поиска пользователей для уведомления:', error);
+        return [];
+    }
+    return data || [];
+}
+
+/**
+ * Помечает, что пользователя уведомили об истечении подписки.
+ * @param {number|string} userId - ID пользователя.
+ * @returns {Promise<void>}
+ */
+export async function markAsNotified(userId) {
+    // ВАЖНО: Мы также должны добавить 'notified_about_expiration' в "белый список"
+    return await updateUserField(userId, 'notified_about_expiration', true);
+}
