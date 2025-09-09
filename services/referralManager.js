@@ -1,20 +1,14 @@
-// services/referralManager.js
+// services/referralManager.js (ИСПРАВЛЕННАЯ ВЕРСИЯ)
 
-import { bot } from '../bot.js';
 import { setPremium } from '../db.js';
 
-const REFERRER_BONUS_DAYS = 3; // Бонус пригласившему (в днях)
-const NEW_USER_BONUS_DAYS = 3; // Бонус новому пользователю (в днях)
+const REFERRER_BONUS_DAYS = 3;
+const NEW_USER_BONUS_DAYS = 3;
 
-/**
- * Генерирует и отправляет пользователю его реферальную ссылку.
- * @param {object} ctx - Контекст Telegraf.
- */
 export async function handleReferralCommand(ctx) {
     const userId = ctx.from.id;
     const botUsername = ctx.botInfo.username;
     const referralLink = `https://t.me/${botUsername}?start=ref_${userId}`;
-
     const message = `
 🙋‍♂️ **Приглашайте друзей и получайте бонусы!**
 
@@ -27,39 +21,30 @@ export async function handleReferralCommand(ctx) {
 
 *(Нажмите на ссылку, чтобы скопировать её)*
     `;
-
-    await ctx.reply(message, { 
-        parse_mode: 'Markdown',
-        disable_web_page_preview: true 
-    });
+    await ctx.reply(message, { parse_mode: 'Markdown', disable_web_page_preview: true });
 }
 
-/**
- * Обрабатывает нового пользователя, проверяет реферала и начисляет бонусы.
- * @param {object} newUser - Объект нового пользователя из нашей БД.
- * @param {object} ctx - Контекст Telegraf.
- */
 export async function processNewUserReferral(newUser, ctx) {
-    if (!newUser.referrer_id) return; // Это не реферал, выходим.
+    if (!newUser.referrer_id) return;
 
     console.log(`[Referral] Новый пользователь ${newUser.id} пришел от ${newUser.referrer_id}`);
     const referrerId = newUser.referrer_id;
 
-    // 1. Начисляем бонус пригласившему
     try {
-        await setPremium(referrerId, 30, REFERRER_BONUS_DAYS, true); // true = добавить дни
-
+        await setPremium(referrerId, 30, REFERRER_BONUS_DAYS, true);
         const friendName = ctx.from.first_name || 'Новый пользователь';
-        await bot.telegram.sendMessage(
+        
+        // ИСПОЛЬЗУЕМ ctx.telegram ВМЕСТО bot.telegram
+        await ctx.telegram.sendMessage(
             referrerId,
             `🎉 Ваш друг **${friendName}** присоединился по вашей ссылке!\n\nВам начислено **+${REFERRER_BONUS_DAYS} дня тарифа Plus**. Спасибо!`,
             { parse_mode: 'Markdown' }
         ).catch(e => console.error(`[Referral] Не удалось уведомить ${referrerId}:`, e.message));
+
     } catch (e) {
         console.error(`[Referral] Не удалось начислить бонус ${referrerId}:`, e.message);
     }
 
-    // 2. Даем бонус новому пользователю
     try {
         await setPremium(newUser.id, 30, NEW_USER_BONUS_DAYS);
         await ctx.reply(`🎁 За регистрацию по приглашению мы дарим вам **${NEW_USER_BONUS_DAYS} дня тарифа Plus**!`, { parse_mode: 'Markdown' });
