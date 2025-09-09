@@ -1,7 +1,6 @@
 // services/downloadManager.js (ФИНАЛЬНАЯ ОБЪЕДИНЕННАЯ ВЕРСИЯ)
 
 import { STORAGE_CHANNEL_ID, CHANNEL_USERNAME, PROXY_URL } from '../config.js';
-import { bot } from '../bot.js';
 import { Markup } from 'telegraf';
 import path from 'path';
 import fs from 'fs';
