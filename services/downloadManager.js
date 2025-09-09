@@ -42,7 +42,10 @@ async function safeSendMessage(userId, text, extra = {}) {
         return null;
     }
 }
-
+let botInstance;
+export function initializeDownloadManager(bot) {
+    botInstance = bot;
+}
 // "СИЛОВАЯ ЧАСТЬ": качает, отправляет, кэширует.
 export async function trackDownloadProcessor(task) {
     const { userId, source, url, originalUrl, metadata } = task;
