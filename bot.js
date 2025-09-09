@@ -625,76 +625,63 @@ bot.action(/pl_cancel:(.+)/, async (ctx) => {
     }
 });
 
-// --- Главный обработчик ссылок ---
-// bot.js
+// ===================================================================
+// ВСТАВЬ ЭТОТ КОД ВМЕСТО СТАРОЙ ФУНКЦИИ handleSoundCloudUrl
+// ===================================================================
 
-async function handleSoundCloudUrl(ctx, url) {
-    // 1. СНАЧАЛА проверяем кэш для ЛЮБОЙ ссылки.
-    // Это мгновенно отдаст одиночные треки, если они уже скачаны.
-    const cached = await findCachedTrack(url);
-    if (cached) {
-        console.log(`[Cache] Отправляю трек ${cached.title} из кэша для ${ctx.from.id}`);
-        try {
-            await ctx.telegram.sendAudio(ctx.from.id, cached.fileId);
-            // За отправку из кэша лимиты не списываем
-            return;
-        } catch (e) {
-            console.warn(`[Cache] Ошибка отправки из кэша (возможно, битый file_id): ${e.message}. Продолжаем скачивание...`);
-        }
-    }
-    
-    // Если в кэше нет, показываем сообщение о загрузке
+// ЭТО НОВАЯ ФУНКЦИЯ-"ПОМОЩНИК", КОТОРАЯ БУДЕТ РАБОТАТЬ В ФОНЕ
+async function processUrlInBackground(ctx, url) {
     let loadingMessage;
     try {
+        // Отправляем сообщение о начале анализа
         loadingMessage = await ctx.reply('🔍 Анализирую ссылку...');
         const youtubeDl = getYoutubeDl();
         
-        // 2. Делаем БЫСТРЫЙ анализ с flatPlaylist, чтобы получить структуру
+        // Та самая долгая операция. Теперь она выполняется здесь, в фоне.
         const data = await youtubeDl(url, { dumpSingleJson: true, flatPlaylist: true });
         
-        // 3. ПРОВЕРЯЕМ, это плейлист или одиночный трек
+        // --- ЭТО ПЛЕЙЛИСТ ---
         if (data.entries && data.entries.length > 0) {
-            // ЭТО ПЛЕЙЛИСТ
+            // Удаляем сообщение "Анализирую..."
             await ctx.deleteMessage(loadingMessage.message_id).catch(() => {});
             
             const playlistId = data.id || `pl_${Date.now()}`;
             playlistSessions.set(ctx.from.id, {
                 playlistId,
                 title: data.title,
-                tracks: data.entries, // Сохраняем "быстрые" данные без названий
-                originalUrl: url, // Сохраняем оригинальную ссылку для "дозагрузки" названий
+                tracks: data.entries,
+                originalUrl: url,
                 selected: new Set(),
                 currentPage: 0,
-                fullTracks: false // Флаг, что у нас еще нет полных данных
+                fullTracks: false
             });
             const message = `🎶 В плейлисте <b>"${data.title}"</b> найдено <b>${data.entries.length}</b> треков.\n\nЧто делаем?`;
             await ctx.reply(message, { parse_mode: 'HTML', ...generateInitialPlaylistMenu(playlistId, data.entries.length) });
             
+            // --- ЭТО ОДИНОЧНЫЙ ТРЕК ---
         } else {
-            // ЭТО ОДИНОЧНЫЙ ТРЕК
-            
-            // Проверяем лимиты ПЕРЕД постановкой в очередь
             const user = await getUser(ctx.from.id);
             if (user.downloads_today >= user.premium_limit) {
-                // Используем editMessageText, чтобы заменить "Анализирую..." на сообщение о лимите
                 await ctx.telegram.editMessageText(ctx.chat.id, loadingMessage.message_id, undefined, T('limitReached'));
                 return;
             }
             
-            await ctx.telegram.editMessageText(ctx.chat.id, loadingMessage.message_id, undefined, '✅ Распознал трек, ставлю в приоритетную очередь...');
+            await ctx.telegram.editMessageText(ctx.chat.id, loadingMessage.message_id, undefined, '✅ Распознал трек, ставлю в очередь...');
             
-            // Ставим в очередь на скачивание
+            // Удаляем сообщение "ставлю в очередь..." через 3 секунды для чистоты чата
+            setTimeout(() => ctx.deleteMessage(loadingMessage.message_id).catch(() => {}), 3000);
+            
             addTaskToQueue({
                 userId: ctx.from.id,
                 source: 'soundcloud',
                 url: data.webpage_url || url,
                 originalUrl: data.webpage_url || url,
                 metadata: { id: data.id, title: data.title, uploader: data.uploader, duration: data.duration, thumbnail: data.thumbnail },
-                ctx: ctx
+                ctx: null // ctx больше не передаем в очередь
             });
         }
     } catch (error) {
-        console.error('Ошибка при обработке SoundCloud URL:', error.stderr || error.message);
+        console.error('Ошибка при фоновой обработке URL:', error.stderr || error.message);
         const userMessage = '❌ Не удалось обработать ссылку. Убедитесь, что она корректна и контент доступен.';
         if (loadingMessage) {
             await ctx.telegram.editMessageText(ctx.chat.id, loadingMessage.message_id, undefined, userMessage).catch(() => {});
@@ -704,8 +691,28 @@ async function handleSoundCloudUrl(ctx, url) {
     }
 }
 
-
-
+// ЭТО ОСНОВНАЯ ФУНКЦИЯ - ТЕПЕРЬ ОНА ОЧЕНЬ БЫСТРАЯ
+async function handleSoundCloudUrl(ctx, url) {
+    // 1. Сначала быстро проверяем кэш. Это мгновенная операция.
+    const cached = await findCachedTrack(url);
+    if (cached) {
+        console.log(`[Cache] Отправляю трек ${cached.title || ''} из кэша для ${ctx.from.id}`);
+        try {
+            await ctx.telegram.sendAudio(ctx.from.id, cached.fileId);
+            return; // Если нашли в кэше - выходим.
+        } catch (e) {
+            console.warn(`[Cache] Ошибка отправки из кэша: ${e.message}. Продолжаем скачивание...`);
+        }
+    }
+    
+    // 2. Если в кэше нет - запускаем тяжелую обработку В ФОНЕ.
+    // Мы НЕ используем `await` здесь. Это "выстрелил и забыл".
+    // Функция `handleSoundCloudUrl` не будет ждать завершения `processUrlInBackground`.
+    processUrlInBackground(ctx, url);
+    
+    // 3. Основная функция `handleSoundCloudUrl` на этом завершается.
+    // Telegraf получает ответ мгновенно, и таймаута не происходит.
+}
 bot.on('text', async (ctx) => {
                 // =====> ПРАВИЛЬНЫЙ ВАРИАНТ <=====
                 if (isShuttingDown) { // ПРАВИЛЬНО: скобок нет
