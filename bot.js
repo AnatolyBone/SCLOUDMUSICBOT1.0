@@ -267,8 +267,8 @@ bot.command('maintenance', (ctx) => {
         ctx.reply('☑️ Режим обслуживания ВЫКЛЮЧЕН.');
     } else {
         // =====> ВОТ ИСПРАВЛЕНИЕ <=====
-        ctx.reply('ℹ️ Статус: ' + (isMaintenanceMode() ? 'ВКЛЮЧЕН' : 'ВЫКЛЮЧЕН') + '\n\nИспользуйте: `/maintenance on` или `/maintenance off`');
-    }
+        ctx.reply('ℹ️ Статус: ' + (isMaintenanceMode ? 'ВКЛЮЧЕН' : 'ВЫКЛЮЧЕН') + '\n\nИспользуйте: `/maintenance on` или `/maintenance off`'); // ПРАВИЛЬНО
+}
 });
 bot.command('premium', (ctx) => ctx.reply(T('upgradeInfo'), { parse_mode: 'HTML', disable_web_page_preview: true }));
 // bot.js
@@ -706,19 +706,17 @@ async function handleSoundCloudUrl(ctx, url) {
 
 
 
-bot.on('text', async (ctx) => { // Рекомендую сделать обработчик асинхронным (async)
-    // =====> ИСПРАВЛЕНИЕ №1 <=====
-    if (isShuttingDown()) { // Добавили скобки ()
-        console.log('[Shutdown] Отклонен новый запрос, так как идет завершение работы.');
-        return;
-    }
-    
-    // =====> ИСПРАВЛЕНИЕ №2 <=====
-    if (isMaintenanceMode() && ctx.from.id !== ADMIN_ID) { // Добавили скобки ()
-        // ctx.reply() возвращает Promise, его стоит дождаться с await
-        return await ctx.reply('⏳ Бот на плановом обслуживании. Новые запросы временно не принимаются. Пожалуйста, попробуйте через 5-10 минут.');
-    }
-    
+bot.on('text', async (ctx) => {
+                // =====> ПРАВИЛЬНЫЙ ВАРИАНТ <=====
+                if (isShuttingDown) { // ПРАВИЛЬНО: скобок нет
+                    console.log('[Shutdown] Отклонен новый запрос, так как идет завершение работы.');
+                    return;
+                }
+                
+                // =====> ПРАВИЛЬНЫЙ ВАРИАНТ <=====
+                if (isMaintenanceMode && ctx.from.id !== ADMIN_ID) { // ПРАВИЛЬНО: и здесь тоже нет
+                    return await ctx.reply('⏳ Бот на плановом обслуживании. Новые запросы временно не принимаются. Пожалуйста, попробуйте через 5-10 минут.');
+                }
     if (ctx.chat.type !== 'private') {
         console.log(`[Ignore] Сообщение из не-приватного чата (${ctx.chat.type}) было проигнорировано.`);
         return;
