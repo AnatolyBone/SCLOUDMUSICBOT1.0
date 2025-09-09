@@ -45,7 +45,7 @@ async function safeSendMessage(userId, text, extra = {}) {
 }
 
 // "СИЛОВАЯ ЧАСТЬ": качает, отправляет, кэширует.
-async function trackDownloadProcessor(task) {
+export async function trackDownloadProcessor(task) {
     const { userId, source, url, originalUrl, metadata } = task;
     const { title, uploader, id: trackId, duration, thumbnail } = metadata;
     const roundedDuration = duration ? Math.round(duration) : undefined;
