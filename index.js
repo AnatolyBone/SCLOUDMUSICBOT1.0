@@ -21,8 +21,17 @@ import {
     getUsersCountByTariff, getTopReferralSources, getDailyStats,
     getActivityByWeekday, getTopTracks, getTopUsers, getHourlyActivity, getUsersAsCsv, 
     getUserActions, logUserAction,
-    createBroadcastTask, getAndStartPendingBroadcastTask, completeBroadcastTask, failBroadcastTask,
-    getAllBroadcastTasks, deleteBroadcastTask, getBroadcastTaskById, updateBroadcastTask, findAndInterruptActiveBroadcast, getReferrerInfo, getReferredUsers, getReferralStats, getAlreadySentUserIds
+    // Функции для админки рассылок, которые мы оставляем:
+    createBroadcastTask,
+    getAllBroadcastTasks,
+    deleteBroadcastTask,
+    getBroadcastTaskById,
+    updateBroadcastTask,
+    // Функции для реферальной системы:
+    getReferrerInfo,
+    getReferredUsers,
+    getReferralStats
+    // УДАЛЕНЫ: completeBroadcastTask, failBroadcastTask, findAndInterruptActiveBroadcast, getAlreadySentUserIds
 } from './db.js';
 import { initializeWorkers } from './services/workerManager.js';
 import { isShuttingDown, setShuttingDown, setMaintenanceMode, isBroadcasting, setBroadcasting } from './services/appState.js';
