@@ -569,31 +569,110 @@ export async function getAndStartPendingBroadcastTask() {
   // rpc возвращает массив, даже если результат один
   return data && data.length > 0 ? data[0] : null;
 }
-export async function completeBroadcastTask(taskId, report) {
-  await query(
-    `UPDATE broadcast_tasks SET status = 'completed', report = $1, completed_at = NOW() WHERE id = $2`,
-    [JSON.stringify(report), taskId]
-  );
-}
+// db.js
 
-export async function failBroadcastTask(taskId, error) {
-  await query(`UPDATE broadcast_tasks SET status = 'failed', report = $1 WHERE id = $2`, [JSON.stringify({ error }), taskId]);
-}
+// ... (здесь ваш существующий код: import { pool }, function query(...) и т.д.) ...
 
-export async function getAllBroadcastTasks() {
-  const { rows } = await query(`SELECT * FROM broadcast_tasks ORDER BY scheduled_at DESC`);
-  return rows;
-}
+// --- НОВЫЕ И ОБНОВЛЕННЫЕ ФУНКЦИИ ДЛЯ ПАКЕТНОЙ РАССЫЛКИ ---
 
-export async function deleteBroadcastTask(taskId) {
-  await query(`DELETE FROM broadcast_tasks WHERE id = $1 AND status = 'pending'`, [taskId]);
-}
+/**
+ * Атомарно находит следующую задачу в очереди ('pending'),
+ * меняет её статус на 'processing' и возвращает её.
+ * Использование 'FOR UPDATE SKIP LOCKED' гарантирует, что две копии воркера не схватят одну и ту же задачу.
+ */
+// db.js
 
-export async function getBroadcastTaskById(taskId) {
-  const { rows } = await query(`SELECT * FROM broadcast_tasks WHERE id = $1`, [taskId]);
+// ... (здесь ваш существующий код: import { pool }, function query(...) и т.д.) ...
+
+// --- НОВЫЕ И ОБНОВЛЕННЫЕ ФУНКЦИИ ДЛЯ ПАКЕТНОЙ РАССЫЛКИ ---
+
+export async function getAndStartPendingBroadcastTask() {
+  const sql = `
+    UPDATE broadcast_tasks
+    SET status = 'processing', started_at = NOW()
+    WHERE id = (
+      SELECT id FROM broadcast_tasks
+      WHERE status = 'pending' AND scheduled_at <= NOW()
+      ORDER BY scheduled_at ASC
+      LIMIT 1
+      FOR UPDATE SKIP LOCKED
+    )
+    RETURNING *;
+  `;
+  const { rows } = await query(sql);
   return rows[0] || null;
 }
 
+export async function getUsersForBroadcastBatch(broadcastId, audience, limit) {
+  let sql = `
+    SELECT id, first_name FROM users
+    WHERE active = true AND id NOT IN (
+      SELECT user_id FROM broadcast_log WHERE broadcast_id = $1
+    )
+  `;
+  if (audience === 'free_users') {
+    sql += ` AND premium_status IS NULL`;
+  } else if (audience === 'premium_users') {
+    sql += ` AND premium_status IS NOT NULL`;
+  }
+  sql += ` LIMIT $2;`;
+  const { rows } = await query(sql, [broadcastId, limit]);
+  return rows;
+}
+
+export async function logBroadcastSent(broadcastId, userId) {
+  const sql = `
+    INSERT INTO broadcast_log (broadcast_id, user_id)
+    VALUES ($1, $2)
+    ON CONFLICT (broadcast_id, user_id) DO NOTHING;
+  `;
+  await query(sql, [broadcastId, userId]);
+}
+
+export async function getBroadcastProgress(broadcastId, audience) {
+  const sentResult = await query(`SELECT COUNT(*) FROM broadcast_log WHERE broadcast_id = $1`, [broadcastId]);
+  const sent = parseInt(sentResult.rows[0].count, 10);
+  
+  let audienceFilter = 'WHERE active = true';
+  if (audience === 'free_users') {
+    audienceFilter += ' AND premium_status IS NULL';
+  } else if (audience === 'premium_users') {
+    audienceFilter += ' AND premium_status IS NOT NULL';
+  }
+  
+  const totalResult = await query(`SELECT COUNT(*) FROM users ${audienceFilter}`);
+  const total = parseInt(totalResult.rows[0].count, 10);
+  
+  return { total, sent };
+}
+
+export async function updateBroadcastStatus(taskId, status, errorMessage = null) {
+  const report = status === 'failed' ? JSON.stringify({ error: errorMessage }) : null;
+  const completedAt = status === 'completed' ? 'NOW()' : 'NULL';
+  
+  const sql = `
+    UPDATE broadcast_tasks 
+    SET 
+      status = $1, 
+      report = COALESCE($2, report), 
+      completed_at = ${completedAt}
+    WHERE id = $3
+  `;
+  await query(sql, [status, report, taskId]);
+}
+
+export async function findAndInterruptActiveBroadcast() {
+  const sql = `
+    UPDATE broadcast_tasks
+    SET status = 'pending'
+    WHERE status = 'processing'
+    RETURNING id;
+  `;
+  const { rows } = await query(sql);
+  if (rows.length > 0) {
+    console.log(`[Shutdown] Рассылка #${rows[0].id} возвращена в очередь.`);
+  }
+}
 
 export async function resetOtherTariffsToFree() {
   console.log('[DB-Admin] Начинаю сброс нестандартных тарифов...');
