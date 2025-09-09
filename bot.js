@@ -240,7 +240,7 @@ bot.command('admin', async (ctx) => {
         
         // Системный блок
         statsMessage += `---\n\n<b>⚙️ Система:</b>\n` +
-            `   - Очередь: <i>${downloadQueue.size}</i> в ож. / <i>${downloadQueue.active}</i> в раб.\n` +
+            `   - Очередь: <i>${downloadQueue.size}</i> в ож. / <i>${downloadQueue.pending}</i> в раб.\n` +
             `   - Канал-хранилище: <i>${storageStatusText}</i>\n   - Треков в кэше: <i>${cachedTracksCount}</i>\n\n` +
             `<b>🔗 Админ-панель:</b>\n<a href="${WEBHOOK_URL.replace(/\/$/, '')}/dashboard">Открыть дашборд</a>`;
         
