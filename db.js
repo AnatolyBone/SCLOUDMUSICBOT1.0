@@ -438,7 +438,11 @@ export async function getTopUsers(limit = 15) {
 }
 
 // --- Рассылки (Очищенный и правильный блок) ---
-
+// db.js
+export async function deleteBroadcastTask(taskId) {
+  // Удалять можно только задачи, которые еще не были запущены
+  await query(`DELETE FROM broadcast_tasks WHERE id = $1 AND status = 'pending'`, [taskId]);
+}
 export async function createBroadcastTask(taskData) {
   const { message, file_id, file_mime_type, keyboard, disable_web_page_preview, targetAudience, scheduledAt, disableNotification } = taskData;
   const queryText = `
