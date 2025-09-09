@@ -25,24 +25,24 @@ export async function getUserById(id) {
   return rows[0] || null;
 }
 
-export async function createUser(id, firstName = '', username = '', startPayload = null) {
-    let referrerId = null;
-    if (startPayload && startPayload.startsWith('ref_')) {
-        const parsedId = parseInt(startPayload.split('_')[1], 10);
-        if (!isNaN(parsedId) && parsedId !== id) {
-            referrerId = parsedId;
-        }
-    }
+// db.js
 
-    const sql = `
+// ЗАМЕНИТЕ ВАШУ createUser НА ЭТУ ВЕРСИЮ
+export async function createUser(id, firstName, username, referrerId = null) {
+  const sql = `
         INSERT INTO users (id, first_name, username, referrer_id, last_active, last_reset_date)
         VALUES ($1, $2, $3, $4, NOW(), CURRENT_DATE)
         ON CONFLICT (id) DO NOTHING
     `;
-    await query(sql, [id, firstName, username, referrerId]);
+  // Мы передаем referrerId (чистый ID или null) напрямую в 4-й параметр
+  await query(sql, [id, firstName, username, referrerId]);
 }
 
+// db.js
+
+// ЗАМЕНИТЕ ВАШУ getUser НА ЭТУ ВЕРСИЮ
 export async function getUser(id, firstName = '', username = '', startPayload = null) {
+  // 1. Ищем пользователя (запрос тот же, он правильный)
   const sqlSelect = `
         SELECT 
             *, 
@@ -52,28 +52,33 @@ export async function getUser(id, firstName = '', username = '', startPayload = 
   const { rows } = await query(sqlSelect, [id]);
   
   if (rows.length > 0) {
+    // 2. Пользователь найден - просто обновляем last_active и возвращаем
     const user = rows[0];
     if (user.active) {
       await query('UPDATE users SET last_active = NOW() WHERE id = $1', [id]);
     }
     return user;
   } else {
+    // 3. Пользователь не найден - создаем нового
+    
+    // ЕДИНОЖДЫ парсим startPayload, чтобы получить referrerId
     let referrerId = null;
     if (startPayload && startPayload.startsWith('ref_')) {
       const parsedId = parseInt(startPayload.split('_')[1], 10);
+      // Проверяем, что ID корректный и пользователь не пригласил сам себя
       if (!isNaN(parsedId) && parsedId !== id) {
         referrerId = parsedId;
       }
     }
     
-    // В createUser передаем referrerId в 4-й аргумент
-    await createUser(id, firstName, username, referrerId ? `ref_${referrerId}` : null);
+    // Вызываем нашу новую, простую createUser, передавая ей ЧИСТЫЙ referrerId
+    await createUser(id, firstName, username, referrerId);
     
+    // И возвращаем только что созданного пользователя
     const newUserResult = await query(sqlSelect, [id]);
     return newUserResult.rows[0];
   }
 }
-
 const allowedFields = new Set([
   'premium_limit', 'downloads_today', 'total_downloads', 'first_name', 'username',
   'premium_until', 'subscribed_bonus_used', 'tracks_today', 'last_reset_date',
