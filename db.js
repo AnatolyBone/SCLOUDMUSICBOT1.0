@@ -29,13 +29,11 @@ export async function createUser(id, firstName = '', username = '', startPayload
     let referrerId = null;
     if (startPayload && startPayload.startsWith('ref_')) {
         const parsedId = parseInt(startPayload.split('_')[1], 10);
-        // Проверка, что ID корректный и пользователь не пригласил сам себя
         if (!isNaN(parsedId) && parsedId !== id) {
             referrerId = parsedId;
         }
     }
 
-    // Обратите внимание: мы используем вычисленный referrerId здесь
     const sql = `
         INSERT INTO users (id, first_name, username, referrer_id, last_active, last_reset_date)
         VALUES ($1, $2, $3, $4, NOW(), CURRENT_DATE)
@@ -44,11 +42,7 @@ export async function createUser(id, firstName = '', username = '', startPayload
     await query(sql, [id, firstName, username, referrerId]);
 }
 
-// db.js
-
-// ЗАМЕНИТЕ ВАШУ getUser НА ЭТУ ВЕРСИЮ
 export async function getUser(id, firstName = '', username = '', startPayload = null) {
-  // 1. Ищем пользователя и сразу считаем его рефералов
   const sqlSelect = `
         SELECT 
             *, 
@@ -58,60 +52,46 @@ export async function getUser(id, firstName = '', username = '', startPayload = 
   const { rows } = await query(sqlSelect, [id]);
   
   if (rows.length > 0) {
-    // 2. ПОЛЬЗОВАТЕЛЬ НАЙДЕН
-    // Он уже существует, поэтому он НЕ МОЖЕТ стать рефералом.
     const user = rows[0];
     if (user.active) {
       await query('UPDATE users SET last_active = NOW() WHERE id = $1', [id]);
     }
     return user;
   } else {
-    // 3. ПОЛЬЗОВАТЕЛЬ НЕ НАЙДЕН - вот здесь происходит вся магия
-    
-    // СНАЧАЛА парсим startPayload, чтобы получить ID реферера
     let referrerId = null;
     if (startPayload && startPayload.startsWith('ref_')) {
-      // =====> ИСПРАВЛЕННАЯ СТРОКА <=====
       const parsedId = parseInt(startPayload.split('_')[1], 10);
       if (!isNaN(parsedId) && parsedId !== id) {
         referrerId = parsedId;
       }
     }
     
-    // Вызываем createUser, передавая 5 аргументов:
-    // referral_source (4-й) будет null, а referrerId (5-й) - наш ID.
-    await createUser(id, firstName, username, null, referrerId);
+    // В createUser передаем referrerId в 4-й аргумент
+    await createUser(id, firstName, username, referrerId ? `ref_${referrerId}` : null);
     
-    // И возвращаем только что созданного пользователя
     const newUserResult = await query(sqlSelect, [id]);
     return newUserResult.rows[0];
   }
-} // <--- ВОТ НЕДОСТАЮЩАЯ СКОБКА
-// db.js
+}
 
 const allowedFields = new Set([
   'premium_limit', 'downloads_today', 'total_downloads', 'first_name', 'username',
   'premium_until', 'subscribed_bonus_used', 'tracks_today', 'last_reset_date',
   'active', 'referred_count', 'promo_1plus1_used', 'has_reviewed',
-  'notified_about_expiration' // <--- ДОБАВИТЬ ЭТУ СТРОКУ
+  'notified_about_expiration'
 ]);
-// db.js
 
-// ЗАМЕНИТЕ ВАШУ updateUserField НА ЭТУ ВЕРСИЮ
 export async function updateUserField(id, updates) {
-  // Определяем, пришел ли объект или пара ключ-значение
   const fieldsToUpdate = (typeof updates === 'string')
-    ? { [updates]: arguments[2] } // Собираем объект из второго аргумента, если updates - строка
+    ? { [updates]: arguments[2] }
     : updates;
 
-  // Проверяем КАЖДОЕ поле из объекта на валидность
   for (const field in fieldsToUpdate) {
     if (!allowedFields.has(field)) {
       throw new Error(`Недопустимое поле для обновления: ${field}`);
     }
   }
 
-  // Обновляем пользователя в базе данных
   const { error } = await supabase
     .from('users')
     .update(fieldsToUpdate)
@@ -122,6 +102,7 @@ export async function updateUserField(id, updates) {
     throw new Error('Не удалось обновить пользователя.');
   }
 }
+
 export async function getAllUsers(includeInactive = true) {
   const sql = includeInactive ? 'SELECT * FROM users ORDER BY created_at DESC' : 'SELECT * FROM users WHERE active = TRUE ORDER BY created_at DESC';
   const { rows } = await query(sql);
@@ -194,7 +175,6 @@ export async function getUsersAsCsv(options) {
 }
 
 // --- Тарифы и лимиты ---
-// ЗАМЕНИТЕ ВАШУ ФУНКЦИЮ setPremium НА ЭТУ
 export async function setPremium(userId, limit, days, addDays = false) {
   const user = await getUser(userId);
   if (!user) return;
@@ -203,11 +183,9 @@ export async function setPremium(userId, limit, days, addDays = false) {
   const now = new Date();
   
   if (addDays && user.premium_until && new Date(user.premium_until) > now) {
-    // Если подписка активна и мы ДОБАВЛЯЕМ дни
     newPremiumUntil = new Date(user.premium_until);
     newPremiumUntil.setDate(newPremiumUntil.getDate() + days);
   } else {
-    // Если подписка неактивна или мы ЗАМЕНЯЕМ дни
     newPremiumUntil = new Date();
     newPremiumUntil.setDate(now.getDate() + days);
   }
@@ -217,6 +195,7 @@ export async function setPremium(userId, limit, days, addDays = false) {
     premium_until: newPremiumUntil.toISOString()
   });
 }
+
 export async function resetDailyLimitIfNeeded(userId) {
   const { rows } = await query('SELECT last_reset_date FROM users WHERE id = $1', [userId]);
   if (rows.length > 0) {
@@ -356,7 +335,6 @@ export async function getDownloadsByDate() {
   return rows.reduce((acc, row) => ({ ...acc, [row.date]: parseInt(row.count, 10) }), {});
 }
 
-// ВОССТАНОВЛЕННАЯ ФУНКЦИЯ
 export async function getActiveUsersByDate() {
   const { rows } = await query(`SELECT TO_CHAR(last_active, 'YYYY-MM-DD') as date, COUNT(DISTINCT id) as count FROM users WHERE last_active IS NOT NULL GROUP BY date ORDER BY date`);
   return rows.reduce((acc, row) => ({ ...acc, [row.date]: parseInt(row.count, 10) }), {});
@@ -459,112 +437,49 @@ export async function getTopUsers(limit = 15) {
   return rows;
 }
 
-// --- Рассылки ---
-// db.js
+// --- Рассылки (Очищенный и правильный блок) ---
 
-// db.js
-
-// >>>>> ЗАМЕНИТЕ СУЩЕСТВУЮЩУЮ ФУНКЦИЮ createBroadcastTask <<<<<
 export async function createBroadcastTask(taskData) {
-  const {
-    message,
-    file_id,
-    file_mime_type,
-    keyboard,
-    disable_web_page_preview,
-    targetAudience,
-    scheduledAt,
-    disableNotification
-  } = taskData;
-  
+  const { message, file_id, file_mime_type, keyboard, disable_web_page_preview, targetAudience, scheduledAt, disableNotification } = taskData;
   const queryText = `
         INSERT INTO broadcast_tasks (
-            message,                  -- $1
-            file_id,                  -- $2
-            file_mime_type,           -- $3
-            keyboard,                 -- $4
-            disable_web_page_preview, -- $5
-            target_audience,          -- $6
-            status,                   -- hardcoded
-            scheduled_at,             -- $7
-            disable_notification      -- $8
-        ) VALUES ($1, $2, $3, $4, $5, $6, 'pending', $7, $8)
-        RETURNING *;
+            message, file_id, file_mime_type, keyboard, disable_web_page_preview, 
+            target_audience, status, scheduled_at, disable_notification
+        ) VALUES ($1, $2, $3, $4, $5, $6, 'pending', $7, $8) RETURNING *;
     `;
-  
   const values = [
-    message, // $1
-    file_id, // $2
-    file_mime_type, // $3
-    keyboard ? JSON.stringify(keyboard) : null, // $4 (Явное преобразование в JSON-строку)
-    disable_web_page_preview, // $5
-    targetAudience, // $6
-    scheduledAt || new Date(), // $7
-    !!disableNotification // $8
+    message, file_id, file_mime_type, keyboard ? JSON.stringify(keyboard) : null,
+    disable_web_page_preview, targetAudience, scheduledAt || new Date(), !!disableNotification
   ];
-  
   const result = await query(queryText, values);
   return result.rows[0];
 }
 
-
-// >>>>> ЗАМЕНИТЕ СУЩЕСТВУЮЩУЮ ФУНКЦИЮ updateBroadcastTask <<<<<
 export async function updateBroadcastTask(id, taskData) {
-  const {
-    message,
-    file_id,
-    file_mime_type,
-    keyboard,
-    disable_web_page_preview,
-    targetAudience,
-    scheduledAt,
-    disableNotification
-  } = taskData;
-  
+  const { message, file_id, file_mime_type, keyboard, disable_web_page_preview, targetAudience, scheduledAt, disableNotification } = taskData;
   const queryText = `
         UPDATE broadcast_tasks SET
-            message = $1,
-            file_id = $2,
-            file_mime_type = $3,
-            keyboard = $4,
-            disable_web_page_preview = $5,
-            target_audience = $6,
-            scheduled_at = $7,
-            disable_notification = $8,
-            status = 'pending'
-        WHERE id = $9
-        RETURNING *;
+            message = $1, file_id = $2, file_mime_type = $3, keyboard = $4, 
+            disable_web_page_preview = $5, target_audience = $6, scheduled_at = $7, 
+            disable_notification = $8, status = 'pending'
+        WHERE id = $9 RETURNING *;
     `;
-  
   const values = [
-    message,
-    file_id,
-    file_mime_type,
-    keyboard ? JSON.stringify(keyboard) : null,
-    disable_web_page_preview,
-    targetAudience,
-    scheduledAt || new Date(),
-    !!disableNotification,
-    id
+    message, file_id, file_mime_type, keyboard ? JSON.stringify(keyboard) : null,
+    disable_web_page_preview, targetAudience, scheduledAt || new Date(), !!disableNotification, id
   ];
-  
   const result = await query(queryText, values);
   return result.rows[0];
 }
 
-// ... комментарий ...
 export async function getAndStartPendingBroadcastTask() {
   const sql = `
-    UPDATE broadcast_tasks
-    SET status = 'processing', started_at = NOW()
+    UPDATE broadcast_tasks SET status = 'processing', started_at = NOW()
     WHERE id = (
       SELECT id FROM broadcast_tasks
       WHERE status = 'pending' AND scheduled_at <= NOW()
-      ORDER BY scheduled_at ASC
-      LIMIT 1
-      FOR UPDATE SKIP LOCKED  // <--- Вот ключевой признак
-    )
-    RETURNING *;
+      ORDER BY scheduled_at ASC LIMIT 1 FOR UPDATE SKIP LOCKED
+    ) RETURNING *;
   `;
   const { rows } = await query(sql);
   return rows[0] || null;
@@ -599,30 +514,22 @@ export async function logBroadcastSent(broadcastId, userId) {
 export async function getBroadcastProgress(broadcastId, audience) {
   const sentResult = await query(`SELECT COUNT(*) FROM broadcast_log WHERE broadcast_id = $1`, [broadcastId]);
   const sent = parseInt(sentResult.rows[0].count, 10);
-  
   let audienceFilter = 'WHERE active = true';
   if (audience === 'free_users') {
     audienceFilter += ' AND premium_status IS NULL';
   } else if (audience === 'premium_users') {
     audienceFilter += ' AND premium_status IS NOT NULL';
   }
-  
   const totalResult = await query(`SELECT COUNT(*) FROM users ${audienceFilter}`);
   const total = parseInt(totalResult.rows[0].count, 10);
-  
   return { total, sent };
 }
 
 export async function updateBroadcastStatus(taskId, status, errorMessage = null) {
   const report = status === 'failed' ? JSON.stringify({ error: errorMessage }) : null;
   const completedAt = status === 'completed' ? 'NOW()' : 'NULL';
-  
   const sql = `
-    UPDATE broadcast_tasks 
-    SET 
-      status = $1, 
-      report = COALESCE($2, report), 
-      completed_at = ${completedAt}
+    UPDATE broadcast_tasks SET status = $1, report = COALESCE($2, report), completed_at = ${completedAt}
     WHERE id = $3
   `;
   await query(sql, [status, report, taskId]);
@@ -630,16 +537,27 @@ export async function updateBroadcastStatus(taskId, status, errorMessage = null)
 
 export async function findAndInterruptActiveBroadcast() {
   const sql = `
-    UPDATE broadcast_tasks
-    SET status = 'pending'
-    WHERE status = 'processing'
-    RETURNING id;
+    UPDATE broadcast_tasks SET status = 'pending' WHERE status = 'processing' RETURNING id;
   `;
   const { rows } = await query(sql);
   if (rows.length > 0) {
     console.log(`[Shutdown] Рассылка #${rows[0].id} возвращена в очередь.`);
   }
 }
+
+export async function resetStaleBroadcasts() {
+  const { data, error } = await supabase
+    .from('broadcast_tasks')
+    .update({ status: 'pending' })
+    .eq('status', 'processing');
+  if (error) {
+    console.error('[DB] Ошибка при сбросе зависших рассылок:', error);
+  } else if (data && data.length > 0) {
+    console.log(`[DB] Сброшено ${data.length} зависших рассылок для перезапуска.`);
+  }
+}
+
+// --- Прочее ---
 
 export async function resetOtherTariffsToFree() {
   console.log('[DB-Admin] Начинаю сброс нестандартных тарифов...');
@@ -664,115 +582,39 @@ export async function getLatestReviews(limit = 10) {
   const { data } = await supabase.from('reviews').select('*').order('time', { ascending: false }).limit(limit);
   return data || [];
 }
-// ... (весь ваш существующий код в db.js) ...
 
-/**
- * Логирует каждый поисковый запрос в базу данных.
- * @param {object} logData - Данные для логирования.
- * @param {string} logData.query - Поисковый запрос.
- * @param {number} logData.userId - ID пользователя.
- * @param {number} logData.resultsCount - Количество найденных результатов.
- * @param {boolean} logData.foundInCache - Найдены ли результаты в кэше.
- */
-export async function logSearchQuery({ query, userId, resultsCount, foundInCache }) {
-    if (!query || !userId) return;
-
-    const { error } = await supabase
-        .from('search_queries')
-        .insert({
-            query: query,
-            user_id: userId,
-            results_count: resultsCount,
-            found_in_cache: foundInCache
-        });
-
-    if (error) {
-        console.error('[DB] Ошибка логирования поискового запроса:', error.message);
-    }
+export async function logSearchQuery({ query: searchQuery, userId, resultsCount, foundInCache }) {
+    if (!searchQuery || !userId) return;
+    const { error } = await supabase.from('search_queries').insert({ query: searchQuery, user_id: userId, results_count: resultsCount, found_in_cache: foundInCache });
+    if (error) console.error('[DB] Ошибка логирования поискового запроса:', error.message);
 }
 
-/**
- * Логирует неудачный поисковый запрос или инкрементирует счетчик, если он уже есть.
- * @param {object} logData - Данные для логирования.
- * @param {string} logData.query - Поисковый запрос.
- * @param {string} logData.searchType - Тип поиска ('inline', 'direct_message').
- */
-export async function logFailedSearch({ query, searchType }) {
-    if (!query) return;
-
-    // Используем `upsert` (update or insert).
-    // Если запись с таким `query` и `searchType` уже существует, она обновится.
-    // Если нет - создастся новая.
-    // `search_count: 1` здесь неверно, нужно инкрементировать. Сделаем это через RPC.
-    
-    // Для этого лучше создать функцию в Supabase
-    const { error } = await supabase.rpc('increment_failed_search', {
-        p_query: query,
-        p_search_type: searchType
-    });
-    
-    if (error) {
-        console.error('[DB] Ошибка логирования неудачного поиска:', error.message);
-    }
+export async function logFailedSearch({ query: searchQuery, searchType }) {
+    if (!searchQuery) return;
+    const { error } = await supabase.rpc('increment_failed_search', { p_query: searchQuery, p_search_type: searchType });
+    if (error) console.error('[DB] Ошибка логирования неудачного поиска:', error.message);
 }
-// ... (весь ваш существующий код в db.js) ...
 
-/**
- * Получает топ-N самых частых неудачных поисковых запросов.
- * @param {number} limit - Количество запросов для получения.
- * @returns {Promise<Array<{query: string, search_count: number}>>}
- */
 export async function getTopFailedSearches(limit = 5) {
-    const { data, error } = await supabase
-        .from('failed_searches')
-        .select('query, search_count')
-        .order('search_count', { ascending: false })
-        .limit(limit);
-
-    if (error) {
-        console.error('[DB] Ошибка получения топа неудачных запросов:', error.message);
-        return [];
-    }
+    const { data, error } = await supabase.from('failed_searches').select('query, search_count').order('search_count', { ascending: false }).limit(limit);
+    if (error) { console.error('[DB] Ошибка получения топа неудачных запросов:', error.message); return []; }
     return data;
 }
 
-/**
- * Получает топ-N самых популярных поисковых запросов за последние 24 часа.
- * @param {number} limit - Количество запросов для получения.
- * @returns {Promise<Array<{query: string, total: number}>>}
- */
 export async function getTopRecentSearches(limit = 5) {
-    // RPC (Remote Procedure Call) - это вызов функции, которую мы создадим в базе данных
     const { data, error } = await supabase.rpc('get_top_recent_searches', { limit_count: limit });
-
-    if (error) {
-        console.error('[DB] Ошибка получения топа недавних запросов:', error.message);
-        return [];
-    }
+    if (error) { console.error('[DB] Ошибка получения топа недавних запросов:', error.message); return []; }
     return data;
 }
-// ... (весь ваш существующий код в db.js) ...
 
-/**
- * Считает количество новых пользователей за указанный период.
- * @param {number} days - Количество дней (например, 1 для суток, 7 для недели).
- * @returns {Promise<number>}
- */
 export async function getNewUsersCount(days = 1) {
     const date = new Date();
     date.setDate(date.getDate() - days);
-
-    const { count, error } = await supabase
-        .from('users')
-        .select('*', { count: 'exact', head: true })
-        .gte('created_at', date.toISOString());
-
-    if (error) {
-        console.error(`[DB] Ошибка получения количества новых пользователей за ${days} дней:`, error.message);
-        return 0;
-    }
+    const { count, error } = await supabase.from('users').select('*', { count: 'exact', head: true }).gte('created_at', date.toISOString());
+    if (error) { console.error(`[DB] Ошибка получения количества новых пользователей за ${days} дней:`, error.message); return 0; }
     return count;
 }
+
 export async function getUserActivityByDayHour(days = 30) {
     const { rows } = await query(`
         SELECT TO_CHAR(last_active, 'YYYY-MM-DD') AS day, EXTRACT(HOUR FROM last_active) AS hour, COUNT(*) AS count
@@ -786,159 +628,35 @@ export async function getUserActivityByDayHour(days = 30) {
     });
     return activity;
 }
-// ДОБАВЬТЕ ЭТИ ФУНКЦИИ В КОНЕЦ DB.JS
 
-// Получает информацию о том, кто пригласил данного пользователя
 export async function getReferrerInfo(userId) {
-    const { data, error } = await supabase
-        .from('users')
-        .select('referrer_id, referrers:referrer_id (id, first_name)')
-        .eq('id', userId)
-        .single();
+    const { data, error } = await supabase.from('users').select('referrer_id, referrers:referrer_id (id, first_name)').eq('id', userId).single();
     return error ? null : data.referrers;
 }
 
-// Получает список пользователей, приглашенных данным пользователем
 export async function getReferredUsers(referrerId) {
-    const { data, error } = await supabase
-        .from('users')
-        .select('id, first_name, created_at')
-        .eq('referrer_id', referrerId)
-        .order('created_at', { ascending: false });
+    const { data, error } = await supabase.from('users').select('id, first_name, created_at').eq('referrer_id', referrerId).order('created_at', { ascending: false });
     return error ? [] : data;
 }
 
-// Статистика для дашборда
 export async function getReferralStats() {
-    // Топ-5 рефоводов
     const { data: topReferrers, error: topError } = await supabase.rpc('get_top_referrers', { limit_count: 5 });
-    // Общее число рефералов
-    const { count: totalReferred, error: countError } = await supabase
-        .from('users')
-        .select('*', { count: 'exact', head: true })
-        .not('referrer_id', 'is', null);
-        
-    return {
-        topReferrers: topError ? [] : topReferrers,
-        totalReferred: countError ? 0 : totalReferred
-    };
-}
-// db.js
-
-// db.js
-
-// ... (код ваших предыдущих функций, например, getReferralStats)
-
-/**
- * Получает список ID пользователей, которые уже получили данную рассылку.
- * @param {number} taskId - ID задачи рассылки.
- * @returns {Promise<Set<number>>} - Set с ID пользователей.
- */
-export async function getAlreadySentUserIds(taskId) {
-  const { data, error } = await supabase
-    .from('broadcast_log')
-    .select('user_id')
-    .eq('task_id', taskId);
-  
-  if (error) {
-    console.error(`[DB] Ошибка получения списка отправленных для задачи #${taskId}:`, error);
-    return new Set();
-  }
-  return new Set(data.map(item => item.user_id));
+    const { count: totalReferred, error: countError } = await supabase.from('users').select('*', { count: 'exact', head: true }).not('referrer_id', 'is', null);
+    return { topReferrers: topError ? [] : topReferrers, totalReferred: countError ? 0 : totalReferred };
 }
 
-/**
- * Записывает в лог факт успешной отправки сообщения пользователю.
- * @param {number} taskId - ID задачи рассылки.
- * @param {number} userId - ID пользователя.
- */
-export async function logBroadcastSent(taskId, userId) {
-  const { error } = await supabase
-    .from('broadcast_log')
-    .insert({ task_id: taskId, user_id: userId });
-  
-  if (error) {
-    // Игнорируем ошибку дубликата (unique_violation), остальные логируем
-    if (error.code !== '23505') {
-      console.error(`[DB] Ошибка записи в лог рассылки для user #${userId}:`, error);
-    }
-  }
-}
-
-/**
- * Находит активную рассылку (в процессе) и помечает ее как прерванную.
- * @returns {Promise<object|null>} Возвращает прерванную задачу или null.
- */
-export async function findAndInterruptActiveBroadcast() {
-  const { data, error } = await supabase
-    .from('broadcast_tasks')
-    // =====> ИСПРАВЛЕНИЕ ЗДЕСЬ <=====
-    .update({ status: 'interrupted', completed_at: new Date() })
-  .eq('status', 'processing')
-    .select()
-    .single();
-  
-  if (error && error.code !== 'PGRST116') { // PGRST116 - это "not found", не ошибка
-    console.error('[DB] Ошибка при прерывании рассылки:', error);
-    return null;
-  }
-  if (data) {
-    console.log(`[DB] Рассылка #${data.id} помечена как прерванная.`);
-  }
-  return data;
-}
-
-/**
- * Сбрасывает статус "зависших" рассылок обратно в 'pending'.
- * Вызывается при старте приложения.
- */
-export async function resetStaleBroadcasts() {
-  const { data, error } = await supabase
-    .from('broadcast_tasks')
-    .update({ status: 'pending' })
-    .eq('status', 'processing'); // <-- УБРАЛИ ПРОВЕРКУ ВРЕМЕНИ
-  
-  if (error) {
-    console.error('[DB] Ошибка при сбросе зависших рассылок:', error);
-  } else if (data && data.length > 0) {
-    console.log(`[DB] Сброшено ${data.length} зависших рассылок для перезапуска.`);
-  }
-}
-// db.js
-
-// ... (весь ваш существующий код)
-
-/**
- * Ищет активных пользователей, у которых подписка истекает в ближайшие N дней
- * и которых еще не уведомили об этом.
- * @param {number} days - За сколько дней до истечения искать (например, 3).
- * @returns {Promise<Array<object>>} - Массив объектов пользователей.
- */
 export async function findUsersToNotify(days = 3) {
     const targetDate = new Date();
     targetDate.setDate(targetDate.getDate() + days);
-
-    const { data, error } = await supabase
-        .from('users')
-        .select('*')
-        .lte('premium_until', targetDate.toISOString()) // Истекает в ближайшие 3 дня
-        .gt('premium_until', new Date().toISOString())  // Но еще не истекла
-        .is('notified_about_expiration', false)         // И еще не уведомлен
-        .eq('active', true);                            // И он активен
-
-    if (error) {
-        console.error('[DB] Ошибка поиска пользователей для уведомления:', error);
-        return [];
-    }
+    const { data, error } = await supabase.from('users').select('*')
+        .lte('premium_until', targetDate.toISOString())
+        .gt('premium_until', new Date().toISOString())
+        .is('notified_about_expiration', false)
+        .eq('active', true);
+    if (error) { console.error('[DB] Ошибка поиска пользователей для уведомления:', error); return []; }
     return data || [];
 }
 
-/**
- * Помечает, что пользователя уведомили об истечении подписки.
- * @param {number|string} userId - ID пользователя.
- * @returns {Promise<void>}
- */
 export async function markAsNotified(userId) {
-    // ВАЖНО: Мы также должны добавить 'notified_about_expiration' в "белый список"
     return await updateUserField(userId, 'notified_about_expiration', true);
 }
