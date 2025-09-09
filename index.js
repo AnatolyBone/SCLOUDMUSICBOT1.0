@@ -33,6 +33,7 @@ import {
     // УДАЛЕНЫ: completeBroadcastTask, failBroadcastTask, findAndInterruptActiveBroadcast, getAlreadySentUserIds
 } from './db.js';
 import { initializeWorkers } from './services/workerManager.js';
+import { runBroadcastBatch } from './services/broadcastManager.js';
 import { isShuttingDown, setShuttingDown, setMaintenanceMode, isBroadcasting, setBroadcasting } from './services/appState.js';
 import { bot } from './bot.js';
 import redisService from './services/redisClient.js';
