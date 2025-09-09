@@ -93,7 +93,7 @@ if (process.env.NODE_ENV === 'production') {
         }
 
         const server = app.listen(PORT, () => console.log(`✅ [App] Сервер запущен на порту ${PORT}.`));
-initializeWorkers(server);
+initializeWorkers(server, bot);
         
         console.log('[App] Настройка фоновых задач...');
         setInterval(() => resetDailyStats(), 24 * 3600 * 1000);
