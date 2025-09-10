@@ -645,7 +645,7 @@ async function processUrlInBackground(ctx, url) {
             // Удаляем сообщение "Анализирую..."
             await ctx.deleteMessage(loadingMessage.message_id).catch(() => {});
             
-            const playlistId = data.id || `pl_${Date.now()}`;
+            const playlistId = `pl_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
             playlistSessions.set(ctx.from.id, {
                 playlistId,
                 title: data.title,
