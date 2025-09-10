@@ -4,9 +4,7 @@
   "description": "Telegram bot for downloading SoundCloud tracks via yt-dlp",
   "main": "index.js",
   "type": "module",
-  "scripts": {
-    "start": "node index.js"
-  },
+  "scripts": { "start": "node index.js" },
   "dependencies": {
     "@supabase/supabase-js": "^2.39.6",
     "axios": "^1.6.8",
@@ -14,11 +12,8 @@
     "connect-pg-simple": "^8.0.0",
     "dotenv": "^16.4.5",
     "ejs": "^3.1.9",
-"p-timeout": "^6.1.2",
     "express": "^4.19.2",
     "express-ejs-layouts": "^2.5.1",
-"yt-dlp-exec": "^3.0.2",
-"ffmpeg-static": "^5.2.0" 
     "express-session": "^1.17.3",
     "file-type": "^19.0.0",
     "https-proxy-agent": "^7.0.4",
@@ -28,13 +23,13 @@
     "node-cron": "^3.0.3",
     "p-limit": "^5.0.0",
     "p-queue": "^8.0.1",
+    "p-timeout": "^6.1.2",
     "redis": "^4.6.7",
     "telegraf": "^4.16.3",
-    "youtube-dl-exec": "^2.0.1"
+    "ffmpeg-static": "^5.2.0",
+    "yt-dlp-exec": "^3.0.2"
   },
-  "engines": {
-    "node": ">=16"
-  },
+  "engines": { "node": ">=18" },
   "author": "Anatoly Bone",
   "license": "MIT"
 }
