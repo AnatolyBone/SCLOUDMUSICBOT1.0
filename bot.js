@@ -743,11 +743,13 @@ bot.on('text', async (ctx) => {
     }
     
     const url = urlMatch[0];
-    if (url.includes('soundcloud.com')) {
-        handleSoundCloudUrl(ctx, url);
-    } else if (url.includes('open.spotify.com')) {
-        spotifyEnqueue(ctx, ctx.from.id, url);
-    } else {
-        await ctx.reply('Я умею скачивать только с SoundCloud и Spotify.');
-    }
+   if (url.includes('soundcloud.com')) {
+    handleSoundCloudUrl(ctx, url);
+} else if (url.includes('open.spotify.com')) {
+    // Просто отвечаем пользователю, что функция временно недоступна
+    await ctx.reply('🛠 К сожалению, скачивание из Spotify временно на техническом обслуживании. Мы работаем над этим!');
+} else {
+    // Обновляем текст, чтобы не упоминать Spotify
+    await ctx.reply('Я умею скачивать треки из SoundCloud. Поддержка других платформ в разработке!');
+}
 });
