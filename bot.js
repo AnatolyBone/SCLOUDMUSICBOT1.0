@@ -402,103 +402,83 @@ bot.action('pl_nop', (ctx) => ctx.answerCbQuery());
 
 // bot.js
 
+// bot.js (ФИНАЛЬНАЯ ВЕРСИЯ ОБРАБОТЧИКА КНОПОК ПЛЕЙЛИСТА С КОРРЕКТНЫМИ ЛИМИТАМИ)
+
 bot.action(/pl_download_all:|pl_download_10:/, async (ctx) => {
     const isAll = ctx.callbackQuery.data.includes('pl_download_all');
     const playlistId = ctx.callbackQuery.data.split(':')[1];
     const userId = ctx.from.id;
     const session = playlistSessions.get(userId);
-    if (!session) return await ctx.answerCbQuery('❗️ Сессия выбора истекла.', { show_alert: true });
-
-    // =====> ГЛАВНОЕ ИСПРАВЛЕНИЕ: БЛОК "ДОЗАГРУЗКИ" ДАННЫХ <=====
-    // Проверяем, есть ли у нас полные данные. Если нет - дозагружаем.
+    
+    if (!session) {
+        return await ctx.answerCbQuery('❗️ Сессия выбора истекла.', { show_alert: true });
+    }
+    
+    // --- 1. Дозагрузка данных (остается без изменений) ---
     if (!session.fullTracks) {
-        // Уведомляем пользователя, что процесс может занять время
         await ctx.answerCbQuery('⏳ Получаю полные данные плейлиста...');
         await ctx.editMessageText('⏳ Получаю полные данные плейлиста... Это может занять несколько секунд.');
         
         try {
             const youtubeDl = getYoutubeDl();
-            // Запускаем медленный анализ, чтобы получить полные данные с названиями
             const fullData = await youtubeDl(session.originalUrl, { dumpSingleJson: true });
-            
-            // Обновляем треки в сессии на полные
             session.tracks = fullData.entries.filter(track => track && track.url);
-            session.fullTracks = true; // Ставим флаг, что данные теперь полные
+            session.fullTracks = true;
         } catch (e) {
             console.error('[Playlist] Ошибка при дозагрузке названий:', e);
             await ctx.editMessageText('❌ Не удалось получить детали плейлиста.');
-            await ctx.answerCbQuery('Ошибка!', { show_alert: true });
-            return;
+            return await ctx.answerCbQuery('Ошибка!', { show_alert: true });
         }
     }
-    // =================================================================
-
+    
+    // --- 2. Получаем актуальные лимиты пользователя ---
     const user = await getUser(userId);
-    let remainingLimit = user.premium_limit - (user.downloads_today || 0);
+    const remainingLimit = user.premium_limit - (user.downloads_today || 0);
+    
     if (remainingLimit <= 0) {
         await ctx.editMessageText(T('limitReached'));
         return playlistSessions.delete(userId);
     }
     
-    await ctx.editMessageText(`✅ Отлично! Проверяю и формирую очередь...`);
-
-    const tracksToTake = isAll ? session.tracks.length : 10;
-    const tracksToProcess = session.tracks.slice(0, tracksToTake);
-
-    let sentFromCacheCount = 0;
-    const tasksToDownload = [];
-
-    for (const track of tracksToProcess) {
-        if (remainingLimit <= 0) break;
-
-        const url = track.webpage_url || track.url;
-        const cached = await findCachedTrack(url);
-
-        if (cached) {
-            try {
-                // ВАЖНО: берем название из кэша, т.к. оно там точно есть
-                await ctx.telegram.sendAudio(userId, cached.fileId, { title: cached.title, performer: cached.artist });
-                await incrementDownloadsAndSaveTrack(userId, cached.title, cached.fileId, url);
-                sentFromCacheCount++;
-                remainingLimit--;
-            } catch (e) {
-                if (e.description?.includes('FILE_REFERENCE_EXPIRED')) {
-                    tasksToDownload.push(track);
-                } else {
-                    console.error(`Ошибка отправки из кэша для ${userId}:`, e.message);
-                }
-            }
-        } else {
-            tasksToDownload.push(track);
-        }
-    }
+    await ctx.editMessageText(`✅ Отлично! Добавляю треки в очередь...`);
     
-    const tasksToReallyDownload = tasksToDownload.slice(0, remainingLimit);
-    for (const track of tasksToReallyDownload) {
+    // --- 3. Определяем, сколько треков нужно обработать, С УЧЕТОМ ЛИМИТА ---
+    const tracksToTake = isAll ? session.tracks.length : 10;
+    
+    // Берем минимальное из: (желаемое кол-во треков) и (оставшийся лимит)
+    const numberOfTracksToQueue = Math.min(tracksToTake, remainingLimit);
+    
+    const tracksToProcess = session.tracks.slice(0, numberOfTracksToQueue);
+    
+    // --- 4. Просто ставим задачи в очередь (без проверки кэша) ---
+    for (const track of tracksToProcess) {
         addTaskToQueue({
-            userId, source: 'soundcloud', url: track.webpage_url || track.url, originalUrl: track.webpage_url || track.url,
-            metadata: { id: track.id, title: track.title, uploader: track.uploader, duration: track.duration, thumbnail: track.thumbnail }, 
-            ctx: ctx
+            userId,
+            source: 'soundcloud',
+            url: track.webpage_url || track.url,
+            originalUrl: track.webpage_url || track.url,
+            metadata: {
+                id: track.id,
+                title: track.title,
+                uploader: track.uploader,
+                duration: track.duration,
+                thumbnail: track.thumbnail
+            },
         });
     }
-
-    let reportMessage = '';
-    if (sentFromCacheCount > 0) reportMessage += `✅ ${sentFromCacheCount} трек(ов) отправлено.\n`;
-    if (tasksToReallyDownload.length > 0) reportMessage += `⏳ ${tasksToReallyDownload.length} трек(ов) добавлено в очередь на скачивание.`;
     
-    if (!reportMessage) {
-        reportMessage = tracksToProcess.length > 0
-            ? 'Все треки уже были отправлены, либо ваш дневной лимит исчерпан.'
-            : 'В плейлисте нет треков для обработки.';
+    // --- 5. Отправляем корректный отчет пользователю ---
+    let reportMessage = `⏳ ${tracksToProcess.length} трек(ов) добавлено в очередь.`;
+    
+    if (numberOfTracksToQueue < tracksToTake) {
+        reportMessage += `\n\nℹ️ Ваш дневной лимит будет исчерпан. Остальные треки из плейлиста не были добавлены.`;
     }
     
-    // Отправляем финальный отчет отдельным сообщением, чтобы не затирать меню
     await ctx.reply(reportMessage);
     playlistSessions.delete(userId);
 });
-// bot.js
 
-// ЗАМЕНИ СТАРУЮ ВЕРСИЮ ЭТОГО ОБРАБОТЧИКА НА НОВУЮ В bot.js
+// bot.js (ТВОЙ КОД, КОТОРЫЙ УЖЕ ПРАВИЛЬНЫЙ)
 
 bot.action(/pl_select_manual:(.+)/, async (ctx) => {
     const userId = ctx.from.id;
@@ -512,17 +492,17 @@ bot.action(/pl_select_manual:(.+)/, async (ctx) => {
     // Проверяем, есть ли у нас уже полные данные с названиями
     if (!session.fullTracks) {
         // ==========================================================
-        //         ВОТ ГЛАВНОЕ УЛУЧШЕНИЕ UX
+        //         ЭТО ИДЕАЛЬНОЕ РЕШЕНИЕ ДЛЯ UX
         // ==========================================================
         
-        // 1. Мгновенно отвечаем на нажатие, чтобы пользователь увидел "загрузку"
+        // 1. Мгновенно отвечаем на нажатие
         await ctx.answerCbQuery('⏳ Загружаю названия треков...');
         
-        // 2. Меняем сообщение, чтобы было понятно, что идет фоновый процесс
+        // 2. Меняем сообщение, чтобы было понятно, что идет работа
         await ctx.editMessageText('⏳ Получаю полные данные плейлиста... Это может занять несколько секунд.');
         
         try {
-            // 3. И только теперь запускаем долгую операцию
+            // 3. Запускаем долгую операцию
             const youtubeDl = getYoutubeDl();
             const fullData = await youtubeDl(session.originalUrl, { dumpSingleJson: true });
             
@@ -531,21 +511,19 @@ bot.action(/pl_select_manual:(.+)/, async (ctx) => {
             
         } catch (e) {
             console.error('[Playlist] Ошибка при дозагрузке названий:', e);
-            // Если что-то пошло не так, сообщаем об этом пользователю
             await ctx.editMessageText('❌ Не удалось получить детали плейлиста. Попробуйте снова или выберите другой вариант.');
             return await ctx.answerCbQuery('Ошибка!', { show_alert: true });
         }
     }
     
-    // 4. Когда все готово, показываем меню выбора
+    // 4. Когда все готово, показываем меню выбора с названиями
     session.currentPage = 0;
     session.selected = new Set();
     const menu = generateSelectionMenu(userId);
     if (menu) {
         try {
-            // Заменяем сообщение "Загружаю..." на финальное меню
             await ctx.editMessageText(menu.text, menu.options);
-        } catch (e) { /* Игнорируем ошибку, если сообщение не изменилось */ }
+        } catch (e) { /* Игнорируем */ }
     }
 });
 bot.action(/pl_page:(.+):(\d+)/, async (ctx) => {
@@ -574,80 +552,66 @@ bot.action(/pl_toggle:(.+):(\d+)/, async (ctx) => {
 
 // bot.js
 
+// bot.js (ФИНАЛЬНАЯ ВЕРСИЯ ОБРАБОТЧИКА КНОПКИ "ГОТОВО")
+
 bot.action(/pl_finish:(.+)/, async (ctx) => {
     const playlistId = ctx.match[1];
     const userId = ctx.from.id;
     const session = playlistSessions.get(userId);
-    if (!session) return await ctx.answerCbQuery('❗️ Сессия выбора истекла.', { show_alert: true });
     
-    // Проверяем, были ли выбраны треки
+    // --- Стандартные проверки ---
+    if (!session) {
+        return await ctx.answerCbQuery('❗️ Сессия выбора истекла.', { show_alert: true });
+    }
     if (session.selected.size === 0) {
         return await ctx.answerCbQuery('Вы не выбрали ни одного трека.', { show_alert: true });
     }
-
-    // Проверяем, что у нас есть полные данные (защита от ошибок)
+    // Так как названия важны, оставляем проверку, что они были загружены
     if (!session.fullTracks) {
         return await ctx.answerCbQuery('❌ Произошла ошибка: данные плейлиста не были загружены. Попробуйте заново.', { show_alert: true });
     }
     
-    // Сразу меняем сообщение, чтобы пользователь видел, что процесс пошел
-    await ctx.editMessageText(`✅ Готово! Обрабатываю ${session.selected.size} выбранных треков...`);
-    
+    // --- 1. Проверка лимитов пользователя ---
     const user = await getUser(userId);
-    let remainingLimit = user.premium_limit - (user.downloads_today || 0);
+    const remainingLimit = user.premium_limit - (user.downloads_today || 0);
+    
     if (remainingLimit <= 0) {
-        // Отправляем отдельное сообщение, так как editMessageText уже был использован
-        await ctx.reply(T('limitReached'));
+        await ctx.editMessageText(T('limitReached'));
         return playlistSessions.delete(userId);
     }
     
-    const selectedTracks = Array.from(session.selected).map(index => session.tracks[index]);
-
-    const tasksToDownload = [];
-    let sentCount = 0; // Общий счетчик отправленных треков
-
-    for (const track of selectedTracks) {
-        if (remainingLimit <= 0) break;
-
-        const url = track.webpage_url || track.url;
-        const cached = await findCachedTrack(url);
-
-        if (cached) {
-            try {
-                await ctx.telegram.sendAudio(userId, cached.fileId, { title: cached.title, performer: cached.artist });
-                await incrementDownloadsAndSaveTrack(userId, cached.title, cached.fileId, url);
-                sentCount++;
-                remainingLimit--;
-            } catch (e) {
-                if (e.description?.includes('FILE_REFERENCE_EXPIRED')) {
-                    tasksToDownload.push(track);
-                } else {
-                    console.error(`Ошибка отправки из кэша для ${userId}:`, e.message);
-                }
-            }
-        } else {
-            tasksToDownload.push(track);
-        }
-    }
+    await ctx.editMessageText(`✅ Готово! Добавляю ${session.selected.size} выбранных треков в очередь...`);
     
-    const tasksToReallyDownload = tasksToDownload.slice(0, remainingLimit);
-    for (const track of tasksToReallyDownload) {
+    // --- 2. Формирование очереди С УЧЕТОМ ЛИМИТА ---
+    const selectedIndexes = Array.from(session.selected);
+    const numberOfTracksToQueue = Math.min(selectedIndexes.length, remainingLimit);
+    
+    const tracksToProcess = selectedIndexes.slice(0, numberOfTracksToQueue).map(index => session.tracks[index]);
+    
+    // --- 3. Простая постановка задач в очередь (БЕЗ ПРОВЕРКИ КЭША) ---
+    for (const track of tracksToProcess) {
         addTaskToQueue({
-            userId, source: 'soundcloud', url: track.webpage_url || track.url, originalUrl: track.webpage_url || track.url,
-            metadata: { id: track.id, title: track.title, uploader: track.uploader, duration: track.duration, thumbnail: track.thumbnail }, 
-            ctx: ctx
+            userId,
+            source: 'soundcloud',
+            url: track.webpage_url || track.url,
+            originalUrl: track.webpage_url || track.url,
+            metadata: {
+                id: track.id,
+                title: track.title,
+                uploader: track.uploader,
+                duration: track.duration,
+                thumbnail: track.thumbnail
+            },
         });
     }
     
-    const totalTasks = sentCount + tasksToReallyDownload.length;
-    
-    // Отправляем единое, простое сообщение в конце
-    if (totalTasks > 0) {
-        await ctx.reply(`Отлично! ${totalTasks} трек(ов) уже отправлено или поставлено в очередь на скачивание.`);
-    } else {
-        await ctx.reply('Не удалось обработать выбранные треки. Возможно, ваш дневной лимит исчерпан.');
+    // --- 4. Корректный отчет пользователю ---
+    let reportMessage = `⏳ ${tracksToProcess.length} трек(ов) добавлено в очередь.`;
+    if (numberOfTracksToQueue < selectedIndexes.length) {
+        reportMessage += `\n\nℹ️ Ваш дневной лимит будет исчерпан. Остальные выбранные треки не были добавлены.`;
     }
     
+    await ctx.reply(reportMessage);
     playlistSessions.delete(userId);
 });
 bot.action(/pl_cancel:(.+)/, async (ctx) => {
