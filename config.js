@@ -19,6 +19,8 @@ export const REDIS_URL = process.env.REDIS_URL || '';            // делаем
 export const SUPABASE_URL = process.env.SUPABASE_URL || '';
 export const SUPABASE_KEY = process.env.SUPABASE_KEY || '';
 export const PROXY_URL = process.env.PROXY_URL || null;
+export const SPOTIPY_CLIENT_ID = process.env.SPOTIPY_CLIENT_ID || '';
+export const SPOTIPY_CLIENT_SECRET = process.env.SPOTIPY_CLIENT_SECRET || '';
 
 // CHANNEL_URL может быть @username или полная t.me/ссылка
 let rawChannelIdentifier = process.env.CHANNEL_URL || '';
