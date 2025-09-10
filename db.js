@@ -441,7 +441,23 @@ export async function getTopUsers(limit = 15) {
   );
   return rows;
 }
+// Лёгкая агрегирующая статистика для дашборда
+export async function getUsersTotalsSnapshot() {
+  const { rows } = await query(`
+    SELECT
+      COUNT(*)::int AS total_users,
+      COUNT(*) FILTER (WHERE active = TRUE)::int AS active_users,
+      COALESCE(SUM(total_downloads), 0)::bigint AS total_downloads,
+      COUNT(*) FILTER (WHERE last_active::date = CURRENT_DATE)::int AS active_today
+    FROM users
+  `);
+  return rows[0];
+}
 
+// Опционально: алиас, если где-то используешь другое имя
+export async function getDashboardCounters() {
+  return getUsersTotalsSnapshot();
+}
 // ВСТАВЬТЕ ЭТОТ БЛОК В РАЗДЕЛ "--- РАССЫЛКИ ---"
 
 export async function getAllBroadcastTasks() {
