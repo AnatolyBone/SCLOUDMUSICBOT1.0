@@ -86,7 +86,7 @@ async function getUserUsage(userId) {
   return await db.getUser(userId);
 }
 
-async function trackDownloadProcessor(task) {
+export async function trackDownloadProcessor(task) {
   try {
     const { userId, source, url, metadata, cacheKey } = task;
     const { title, uploader, id: trackId, duration, thumbnail, ext, acodec, filesize } = metadata;
