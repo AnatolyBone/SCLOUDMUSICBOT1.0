@@ -132,10 +132,43 @@ if (PROXY_URL) {
 export const bot = new Telegraf(BOT_TOKEN, telegrafOptions);
 
 // --- Middleware ---
+// ЗАМЕНИ СТАРЫЙ БЛОК bot.catch НА ЭТОТ В ФАЙЛЕ bot.js
+
 bot.catch(async (err, ctx) => {
+    // Шаг 1: Логируем ошибку в консоль, как и раньше.
     console.error(`🔴 [Telegraf Catch] Глобальная ошибка для update ${ctx.update.update_id}:`, err);
+    
+    // Шаг 2: Формируем подробное сообщение для админа.
+    const updateInfo = ctx.update ? JSON.stringify(ctx.update, null, 2) : 'N/A';
+    const errorMessage = `
+🔴 <b>Критическая ошибка в боте!</b>
+
+<b>Тип ошибки:</b>
+<code>${err.name || 'UnknownError'}</code>
+
+<b>Сообщение:</b>
+<code>${err.message || 'No message'}</code>
+
+<b>Где произошла:</b>
+<code>${err.stack ? err.stack.split('\n')[1].trim() : 'Stack trace unavailable'}</code>
+
+<b>Update, вызвавший ошибку:</b>
+<pre><code class="language-json">${updateInfo.slice(0, 3500)}</code></pre>
+    `;
+    
+    // Шаг 3: Пытаемся отправить сообщение админу.
+    try {
+        // Убедись, что ADMIN_ID импортирован из config.js
+        await bot.telegram.sendMessage(ADMIN_ID, errorMessage, { parse_mode: 'HTML' });
+    } catch (sendError) {
+        console.error('🔥🔥🔥 КРИТИЧЕСКАЯ ОШИБКА: Не удалось даже отправить уведомление админу!', sendError);
+    }
+    
+    // Шаг 4: Обрабатываем частный случай блокировки бота (как и раньше).
     if (err instanceof TelegramError && err.response?.error_code === 403) {
-        if (ctx.from?.id) await updateUserField(ctx.from.id, 'active', false);
+        if (ctx.from?.id) {
+            await updateUserField(ctx.from.id, 'active', false);
+        }
     }
 });
 bot.use(async (ctx, next) => {
