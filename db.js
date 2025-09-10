@@ -680,3 +680,63 @@ export async function findUsersToNotify(days = 3) {
 export async function markAsNotified(userId) {
     return await updateUserField(userId, 'notified_about_expiration', true);
 }
+// Лёгкая выборка пользователя (для горячего пути)
+export async function getUserUsage(userId) {
+  const { rows } = await query(
+    'SELECT id, active, premium_limit, downloads_today, subscribed_bonus_used FROM users WHERE id = $1',
+    [userId]
+  );
+  return rows[0] || null;
+}
+
+// Батч-поиск кэша по нескольким ключам
+export async function findCachedTracks(urls) {
+  if (!urls?.length) return new Map();
+  const uniq = Array.from(new Set(urls));
+  const { rows } = await query(
+    'SELECT url, file_id, title FROM track_cache WHERE url = ANY($1)',
+    [uniq]
+  );
+  const map = new Map();
+  rows.forEach(r => map.set(r.url, { fileId: r.file_id, trackName: r.title }));
+  return map;
+}
+
+// Транзакция: инкремент + лог в один проход (быстро и атомарно)
+export async function incrementDownloadsAndLogPg(userId, trackTitle, fileId, url) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const newTrack = { title: trackTitle, fileId, url };
+
+    const upd = await client.query(
+      `UPDATE users
+       SET downloads_today = downloads_today + 1,
+           total_downloads  = total_downloads + 1,
+           tracks_today     = COALESCE(tracks_today, '[]'::jsonb) || $1::jsonb
+       WHERE id = $2 AND downloads_today < premium_limit
+       RETURNING id`,
+      [newTrack, userId]
+    );
+
+    if (upd.rowCount === 0) {
+      await client.query('ROLLBACK');
+      return null;
+    }
+
+    await client.query(
+      `INSERT INTO downloads_log (user_id, track_title, url)
+       VALUES ($1, $2, $3)`,
+      [userId, trackTitle, url]
+    );
+
+    await client.query('COMMIT');
+    return true;
+  } catch (e) {
+    await client.query('ROLLBACK');
+    console.error('[DB] incrementDownloadsAndLogPg error:', e.message);
+    return null;
+  } finally {
+    client.release();
+  }
+}
