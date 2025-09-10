@@ -60,17 +60,25 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const limit = pLimit(1); 
 
-async function startApp() {
-    setMaintenanceMode(false);
-    console.log('[App] Запуск приложения...');
-    try {
-        await loadTexts(true);
-        await redisService.connect();
-        initializeDownloadManager(bot);
-        setupExpress();
-        
+// index.js -> startApp()
 
-       // ЗАМЕНИТЕ НА ЭТОТ БЛОК В INDEX.JS
+async function startApp() {
+        setMaintenanceMode(false);
+        console.log('[App] Запуск приложения...');
+        try {
+            await loadTexts(true);
+            await redisService.connect();
+            initializeDownloadManager(bot);
+            
+            // =======================================================
+            //           ВОТ ФИНАЛЬНОЕ ИСПРАВЛЕНИЕ
+            // =======================================================
+            downloadQueue.start();
+            console.log('[App] Очередь скачивания принудительно запущена.');
+            // =======================================================
+            
+            setupExpress();
+            // ... остальной код
 
 if (process.env.NODE_ENV === 'production') {
     const fullWebhookUrl = (WEBHOOK_URL.endsWith('/') ? WEBHOOK_URL.slice(0, -1) : WEBHOOK_URL) + WEBHOOK_PATH;
