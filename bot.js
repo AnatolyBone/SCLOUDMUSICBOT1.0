@@ -491,6 +491,8 @@ bot.action(/pl_download_all:|pl_download_10:/, async (ctx) => {
 });
 // bot.js
 
+// ЗАМЕНИ СТАРУЮ ВЕРСИЮ ЭТОГО ОБРАБОТЧИКА НА НОВУЮ В bot.js
+
 bot.action(/pl_select_manual:(.+)/, async (ctx) => {
     const userId = ctx.from.id;
     const playlistId = ctx.match[1];
@@ -502,33 +504,43 @@ bot.action(/pl_select_manual:(.+)/, async (ctx) => {
     
     // Проверяем, есть ли у нас уже полные данные с названиями
     if (!session.fullTracks) {
+        // ==========================================================
+        //         ВОТ ГЛАВНОЕ УЛУЧШЕНИЕ UX
+        // ==========================================================
+        
+        // 1. Мгновенно отвечаем на нажатие, чтобы пользователь увидел "загрузку"
         await ctx.answerCbQuery('⏳ Загружаю названия треков...');
+        
+        // 2. Меняем сообщение, чтобы было понятно, что идет фоновый процесс
+        await ctx.editMessageText('⏳ Получаю полные данные плейлиста... Это может занять несколько секунд.');
+        
         try {
+            // 3. И только теперь запускаем долгую операцию
             const youtubeDl = getYoutubeDl();
-            // Запускаем медленный анализ, чтобы получить полные данные
             const fullData = await youtubeDl(session.originalUrl, { dumpSingleJson: true });
             
-            // Обновляем треки в сессии на полные
             session.tracks = fullData.entries.filter(track => track && track.url);
             session.fullTracks = true; // Ставим флаг, что данные загружены
+            
         } catch (e) {
             console.error('[Playlist] Ошибка при дозагрузке названий:', e);
-            await ctx.answerCbQuery('❌ Не удалось получить детали плейлиста.', { show_alert: true });
-            return;
+            // Если что-то пошло не так, сообщаем об этом пользователю
+            await ctx.editMessageText('❌ Не удалось получить детали плейлиста. Попробуйте снова или выберите другой вариант.');
+            return await ctx.answerCbQuery('Ошибка!', { show_alert: true });
         }
     }
     
-    // Сбрасываем состояние выбора и показываем меню
+    // 4. Когда все готово, показываем меню выбора
     session.currentPage = 0;
     session.selected = new Set();
     const menu = generateSelectionMenu(userId);
     if (menu) {
         try {
+            // Заменяем сообщение "Загружаю..." на финальное меню
             await ctx.editMessageText(menu.text, menu.options);
         } catch (e) { /* Игнорируем ошибку, если сообщение не изменилось */ }
     }
 });
-
 bot.action(/pl_page:(.+):(\d+)/, async (ctx) => {
     const [playlistId, pageStr] = ctx.match.slice(1);
     const userId = ctx.from.id;
