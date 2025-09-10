@@ -1,4 +1,4 @@
-// services/downloadManager.js (ФИНАЛЬНАЯ ИСПРАВЛЕННАЯ ВЕРСИЯ)
+// services/downloadManager.js (ФИНАЛЬНАЯ ВЕРСИЯ - СТАРАЯ ЛОГИКА С ИСПРАВЛЕНИЯМИ)
 
 import { STORAGE_CHANNEL_ID, CHANNEL_USERNAME, PROXY_URL } from '../config.js';
 import { Markup } from 'telegraf';
@@ -7,9 +7,9 @@ import fs from 'fs';
 import ytdl from 'youtube-dl-exec';
 import { fileURLToPath } from 'url';
 import crypto from 'crypto';
-import { bot } from '../bot.js'; // Возвращаем импорт, т.к. bot.js не импортирует этот файл
+import { bot } from '../bot.js';
 import { T } from '../config/texts.js';
-import { TaskQueue } from '../lib/TaskQueue.js'; // Убедись, что этот файл на месте
+import { TaskQueue } from '../lib/TaskQueue.js'; // Убедись, что этот файл на месте!
 import {
     getUser, resetDailyLimitIfNeeded, logEvent, updateUserField,
     findCachedTrack, cacheTrack, incrementDownloadsAndSaveTrack
@@ -32,63 +32,46 @@ function sanitizeFilename(name) {
 
 async function safeSendMessage(userId, text, extra = {}) {
     try {
-        if (!bot) throw new Error("Bot is not initialized");
         return await bot.telegram.sendMessage(userId, text, extra);
     } catch (e) {
-        if (e.response?.error_code === 403) {
-            await updateUserField(userId, 'active', false);
-        } else {
-            console.error(`[SafeSend] Ошибка отправки сообщения для ${userId}:`, e.message);
-        }
+        if (e.response?.error_code === 403) await updateUserField(userId, 'active', false);
         return null;
     }
 }
 
-// "Пуленепробиваемый" воркер, который никогда не остановит очередь
 async function trackDownloadProcessor(task) {
     try {
         const { userId, source, url, originalUrl, metadata } = task;
         const { title, uploader, id: trackId, duration, thumbnail } = metadata;
         const roundedDuration = duration ? Math.round(duration) : undefined;
-        
         let tempFilePath = null;
         let statusMessage = null;
-        
         try {
             statusMessage = await safeSendMessage(userId, `⏳ Начинаю скачивание трека: "${title}"`);
-            console.log(`[Worker] Получена задача для "${title}" (источник: ${source}). URL: ${url}`);
-            
+            console.log(`[Worker] Получена задача для "${title}" (источник: ${source}).`);
             const tempFileName = `${trackId || 'track'}-${crypto.randomUUID()}.mp3`;
             tempFilePath = path.join(cacheDir, tempFileName);
-
             await ytdl(url, {
                 output: tempFilePath, extractAudio: true, audioFormat: 'mp3',
                 embedThumbnail: true, retries: 3, "socket-timeout": YTDL_TIMEOUT,
                 'user-agent': FAKE_USER_AGENT, proxy: PROXY_URL || undefined,
             });
-            
             if (!fs.existsSync(tempFilePath)) throw new Error(`Файл не был создан.`);
             const stats = await fs.promises.stat(tempFilePath);
             if (stats.size > MAX_FILE_SIZE_BYTES) throw new Error(`FILE_TOO_LARGE`);
-            
             if (statusMessage) await bot.telegram.editMessageText(userId, statusMessage.message_id, undefined, `✅ Скачал. Отправляю...`).catch(() => {});
-            
             const sentToUserMessage = await bot.telegram.sendAudio(userId, { source: fs.createReadStream(tempFilePath) }, {
-                title: title, performer: uploader || 'Unknown Artist', duration: roundedDuration
+                title, performer: uploader || 'Unknown Artist', duration: roundedDuration
             });
-            
             if (statusMessage) await bot.telegram.deleteMessage(userId, statusMessage.message_id).catch(() => {});
-            
             const cacheKey = originalUrl || url;
             if (sentToUserMessage?.audio?.file_id) {
                 await incrementDownloadsAndSaveTrack(userId, title, sentToUserMessage.audio.file_id, cacheKey);
                 if (STORAGE_CHANNEL_ID) {
                     try {
-                        const sentToStorageMessage = await bot.telegram.sendAudio(STORAGE_CHANNEL_ID, sentToUserMessage.audio.file_id);
-                        if (sentToStorageMessage?.audio?.file_id) {
-                            await cacheTrack({ url: cacheKey, fileId: sentToStorageMessage.audio.file_id, title, artist: uploader, duration: roundedDuration, thumbnail });
-                            console.log(`✅ [Cache] Трек "${title}" успешно закэширован.`);
-                        }
+                        const sentToStorage = await bot.telegram.sendAudio(STORAGE_CHANNEL_ID, sentToUserMessage.audio.file_id);
+                        await cacheTrack({ url: cacheKey, fileId: sentToStorage.audio.file_id, title, artist: uploader, duration: roundedDuration, thumbnail });
+                        console.log(`✅ [Cache] Трек "${title}" успешно закэширован.`);
                     } catch (e) { console.error(`❌ [Cache] Ошибка при кэшировании трека "${title}":`, e.message); }
                 }
             }
@@ -97,7 +80,6 @@ async function trackDownloadProcessor(task) {
             let userErrorMessage = `❌ Не удалось обработать трек: "${title}"`;
             if (errorDetails.includes('FILE_TOO_LARGE')) userErrorMessage += '. Он слишком большой.';
             else if (errorDetails.includes('timed out')) userErrorMessage += '. Ошибка сети.';
-            else if (errorDetails.includes('geo restriction')) userErrorMessage += '. Трек недоступен в вашем регионе.';
             console.error(`❌ Ошибка воркера при обработке "${title}":`, errorDetails);
             if (statusMessage) await bot.telegram.editMessageText(userId, statusMessage.message_id, undefined, userErrorMessage).catch(() => {});
             else await safeSendMessage(userId, userErrorMessage);
@@ -116,12 +98,6 @@ export const downloadQueue = new TaskQueue({
     taskProcessor: trackDownloadProcessor
 });
 
-export const downloadQueue = new TaskQueue({
-    maxConcurrent: 1,
-    taskProcessor: trackDownloadProcessor
-});
-
-// ИСПРАВЛЕННАЯ, НЕБЛОКИРУЮЩАЯ enqueue
 export function enqueue(ctx, userId, url) {
     (async () => {
         let statusMessage = null;
@@ -129,10 +105,8 @@ export function enqueue(ctx, userId, url) {
             if (url.includes('spotify.com')) {
                 return spotifyEnqueue(ctx, userId, url);
             }
-
             await resetDailyLimitIfNeeded(userId);
             let user = await getUser(userId);
-
             if (user.downloads_today >= user.premium_limit) {
                 let message = T('limitReached');
                 let bonusMessageText = '';
@@ -149,34 +123,25 @@ export function enqueue(ctx, userId, url) {
                 await safeSendMessage(userId, message, extra);
                 return;
             }
-
             statusMessage = await safeSendMessage(userId, '🔍 Получаю информацию о треке...');
-            
             const info = await ytdl(url, {
                 dumpSingleJson: true, retries: 2, "socket-timeout": YTDL_TIMEOUT,
                 'user-agent': FAKE_USER_AGENT, proxy: PROXY_URL || undefined,
             });
-            
             if (!info) throw new Error('Не удалось получить метаданные');
-            
             const isPlaylist = Array.isArray(info.entries); 
             const entries = isPlaylist ? info.entries : [info];
-
             let tracksToProcess = entries.filter(e => e && (e.webpage_url || e.url)).map(e => ({
-                url: e.webpage_url || e.url,
-                originalUrl: e.webpage_url || e.url, 
-                source: 'soundcloud',
-                metadata: {
+                url: e.webpage_url || e.url, originalUrl: e.webpage_url || e.url, 
+                source: 'soundcloud', metadata: {
                     id: e.id, title: sanitizeFilename(e.title || 'Unknown Title'),
                     uploader: e.uploader || 'Unknown Artist', duration: e.duration, thumbnail: e.thumbnail,
                 }
             }));
-            
             if (tracksToProcess.length === 0) {
                 await safeSendMessage(userId, 'Не удалось найти треки для загрузки.');
                 return;
             }
-
             if (isPlaylist) {
                 const originalCount = tracksToProcess.length;
                 let playlistLimit = UNLIMITED_PLAYLIST_LIMIT;
@@ -188,12 +153,9 @@ export function enqueue(ctx, userId, url) {
                 }
                 tracksToProcess = tracksToProcess.slice(0, limitToProcess);
             }
-            
             if (statusMessage) await bot.telegram.editMessageText(userId, statusMessage.message_id, undefined, '🔄 Проверяю кэш...').catch(() => {});
-
             const tasksToDownload = [];
             let sentFromCacheCount = 0;
-
             for (const track of tracksToProcess) {
                 const cached = await findCachedTrack(track.url);
                 if (cached) {
@@ -211,10 +173,8 @@ export function enqueue(ctx, userId, url) {
                     tasksToDownload.push(track);
                 }
             }
-            
-           let finalMessage = '';
+            let finalMessage = '';
             if (sentFromCacheCount > 0) finalMessage += `✅ ${sentFromCacheCount} трек(ов) отправлено из кэша.\n`;
-            
             if (tasksToDownload.length > 0) {
                 user = await getUser(userId);
                 const remainingLimit = user.premium_limit - user.downloads_today;
@@ -224,14 +184,10 @@ export function enqueue(ctx, userId, url) {
                     for (const task of tasksToReallyDownload) {
                         downloadQueue.add({ userId, ...task, priority: user.premium_limit });
                     }
-                } else if (sentFromCacheCount === 0) {
-                    finalMessage += `🚫 Ваш дневной лимит исчерпан.`;
-                }
+                } else if (sentFromCacheCount === 0) { finalMessage += `🚫 Ваш дневной лимит исчерпан.`; }
             }
-            
             if (statusMessage) await bot.telegram.editMessageText(userId, statusMessage.message_id, undefined, finalMessage || "Все треки отправлены.").catch(() => {});
             else if (finalMessage) await safeSendMessage(userId, finalMessage);
-
         } catch (err) {
             const errorMessage = err.stderr || err.message || '';
             let userMessage = `❌ Произошла ошибка при обработке ссылки.`;
