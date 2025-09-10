@@ -706,32 +706,11 @@ async function processUrlInBackground(ctx, url) {
         }
     }
 }
-
-// bot.js
-
-// Упрощенная, быстрая функция
 async function handleSoundCloudUrl(ctx, url) {
     // Просто запускаем обработку в фоне и ничего больше не делаем.
     // Проверкой кэша теперь займется воркер.
     processUrlInBackground(ctx, url);
 }
-    const cached = await findCachedTrack(url);
-    if (cached) {
-        console.log(`[Cache] Отправляю трек ${cached.title || ''} из кэша для ${ctx.from.id}`);
-        try {
-            await ctx.telegram.sendAudio(ctx.from.id, cached.fileId);
-            return; // Если нашли в кэше - выходим.
-        } catch (e) {
-            console.warn(`[Cache] Ошибка отправки из кэша: ${e.message}. Продолжаем скачивание...`);
-        }
-    }
-    
-    // 2. Если в кэше нет - запускаем тяжелую обработку В ФОНЕ.
-    // Мы НЕ используем `await` здесь. Это "выстрелил и забыл".
-    // Функция `handleSoundCloudUrl` не будет ждать завершения `processUrlInBackground`.
-    
-    // 3. Основная функция `handleSoundCloudUrl` на этом завершается.
-    // Telegraf получает ответ мгновенно, и таймаута не происходит.
 bot.on('text', async (ctx) => {
                 // =====> ПРАВИЛЬНЫЙ ВАРИАНТ <=====
                 if (isShuttingDown) { // ПРАВИЛЬНО: скобок нет
