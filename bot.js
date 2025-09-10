@@ -175,13 +175,20 @@ bot.use(async (ctx, next) => {
     if (!ctx.from) return next();
     const user = await getUser(ctx.from.id, ctx.from.first_name, ctx.from.username);
     ctx.state.user = user;
+    
     if (user && user.active === false) return;
+    
+    // =====> ВОТ НОВАЯ ЛОГИКА <=====
+    // Если пользователь снова проявил активность, а мы его помечали как "недоступного",
+    // возвращаем ему возможность получать рассылки.
+    if (user && user.can_receive_broadcasts === false) {
+        await updateUserField(user.id, { can_receive_broadcasts: true });
+    }
+    // ==============================
+    
     await resetDailyLimitIfNeeded(ctx.from.id);
     return next();
 });
-
-// --- Обработчики команд и кнопок ---
-// bot.js
 
 bot.start(async (ctx) => {
     console.log(`[DEBUG] Checkpoint 1 (bot.start): startPayload = ${ctx.startPayload}`);
