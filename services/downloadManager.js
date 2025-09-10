@@ -3,6 +3,7 @@
 import { STORAGE_CHANNEL_ID, CHANNEL_USERNAME, PROXY_URL } from '../config.js';
 import { Markup } from 'telegraf';
 import path from 'path';
+import ffmpegPath from 'ffmpeg-static';
 import fs from 'fs';
 import os from 'os';
 import { fileURLToPath } from 'url';
@@ -27,9 +28,9 @@ const FAKE_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/5
 
 // ffmpeg может отсутствовать (например, FFMPEG_STATIC_SKIP_DOWNLOAD=1)
 const FFMPEG_AVAILABLE =
-  !!ffmpegPath &&
-  process.env.FFMPEG_AVAILABLE !== '0' &&
-  process.env.FFMPEG_STATIC_SKIP_DOWNLOAD !== '1';
+    (!!ffmpegPath && fs.existsSync(ffmpegPath)) &&
+    process.env.FFMPEG_AVAILABLE !== '0' &&
+    process.env.FFMPEG_STATIC_SKIP_DOWNLOAD !== '1';
 
 const YTDL_COMMON = {
   'ffmpeg-location': ffmpegPath || undefined,
