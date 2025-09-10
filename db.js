@@ -680,7 +680,7 @@ export async function findUsersToNotify(days = 3) {
 export async function markAsNotified(userId) {
     return await updateUserField(userId, 'notified_about_expiration', true);
 }
-// Лёгкая выборка пользователя (для горячего пути)
+// Быстрая выборка лимитов/активности пользователя
 export async function getUserUsage(userId) {
   const { rows } = await query(
     'SELECT id, active, premium_limit, downloads_today, subscribed_bonus_used FROM users WHERE id = $1',
@@ -689,7 +689,7 @@ export async function getUserUsage(userId) {
   return rows[0] || null;
 }
 
-// Батч-поиск кэша по нескольким ключам
+// Батч-поиск кэша по ключам (url)
 export async function findCachedTracks(urls) {
   if (!urls?.length) return new Map();
   const uniq = Array.from(new Set(urls));
@@ -702,7 +702,7 @@ export async function findCachedTracks(urls) {
   return map;
 }
 
-// Транзакция: инкремент + лог в один проход (быстро и атомарно)
+// Транзакция: инкремент + лог одним запросом (быстрее и атомарно)
 export async function incrementDownloadsAndLogPg(userId, trackTitle, fileId, url) {
   const client = await pool.connect();
   try {
@@ -725,8 +725,7 @@ export async function incrementDownloadsAndLogPg(userId, trackTitle, fileId, url
     }
 
     await client.query(
-      `INSERT INTO downloads_log (user_id, track_title, url)
-       VALUES ($1, $2, $3)`,
+      `INSERT INTO downloads_log (user_id, track_title, url) VALUES ($1, $2, $3)`,
       [userId, trackTitle, url]
     );
 
@@ -739,4 +738,17 @@ export async function incrementDownloadsAndLogPg(userId, trackTitle, fileId, url
   } finally {
     client.release();
   }
+}
+
+// (Опционально для лёгкого дашборда — если решишь разгрузить /dashboard)
+export async function getDashboardCounters() {
+  const { rows } = await query(`
+    SELECT
+      COUNT(*)::int AS total_users,
+      COUNT(*) FILTER (WHERE active)::int AS active_users,
+      COALESCE(SUM(total_downloads), 0)::bigint AS total_downloads,
+      COUNT(*) FILTER (WHERE last_active::date = CURRENT_DATE)::int AS active_today
+    FROM users
+  `);
+  return rows[0];
 }
