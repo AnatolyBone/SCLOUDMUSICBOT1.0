@@ -507,11 +507,11 @@ export async function getAndStartPendingBroadcastTask() {
 
 export async function getUsersForBroadcastBatch(broadcastId, audience, limit) {
   let sql = `
-    SELECT id, first_name FROM users
-    WHERE active = true AND id NOT IN (
-      SELECT user_id FROM broadcast_log WHERE broadcast_id = $1
-    )
-  `;
+  SELECT id, first_name FROM users
+  WHERE active = true AND can_receive_broadcasts = TRUE AND id NOT IN (
+    SELECT user_id FROM broadcast_log WHERE broadcast_id = $1
+  )
+`;
   if (audience === 'free_users') {
     sql += ` AND premium_status IS NULL`;
   } else if (audience === 'premium_users') {
