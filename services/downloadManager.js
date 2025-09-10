@@ -116,8 +116,12 @@ export const downloadQueue = new TaskQueue({
     taskProcessor: trackDownloadProcessor
 });
 
+export const downloadQueue = new TaskQueue({
+    maxConcurrent: 1,
+    taskProcessor: trackDownloadProcessor
+});
 
-// Неблокирующая функция, которая запускает всю работу в фоне
+// ИСПРАВЛЕННАЯ, НЕБЛОКИРУЮЩАЯ enqueue
 export function enqueue(ctx, userId, url) {
     (async () => {
         let statusMessage = null;
