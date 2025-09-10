@@ -1,4 +1,4 @@
-// services/downloadManager.js (ФИНАЛЬНАЯ ВЕРСИЯ - СТАРАЯ ЛОГИКА С ИСПРАВЛЕНИЯМИ)
+// services/downloadManager.js (ФИНАЛЬНАЯ ВЕРСИЯ - СТАРАЯ ЛОГИКА С ИСПРАВЛЕНИЯМИ, SPOTIFY ОТКЛЮЧЕН)
 
 import { STORAGE_CHANNEL_ID, CHANNEL_USERNAME, PROXY_URL } from '../config.js';
 import { Markup } from 'telegraf';
@@ -9,12 +9,12 @@ import { fileURLToPath } from 'url';
 import crypto from 'crypto';
 import { bot } from '../bot.js';
 import { T } from '../config/texts.js';
-import { TaskQueue } from '../lib/TaskQueue.js'; // Убедись, что этот файл на месте!
+import { TaskQueue } from '../lib/TaskQueue.js';
 import {
     getUser, resetDailyLimitIfNeeded, logEvent, updateUserField,
     findCachedTrack, cacheTrack, incrementDownloadsAndSaveTrack
 } from '../db.js';
-// import { spotifyEnqueue } from './spotifyManager.js';
+// import { spotifyEnqueue } from './spotifyManager.js'; // <-- Spotify импорт удален
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(path.dirname(__filename));
@@ -102,9 +102,15 @@ export function enqueue(ctx, userId, url) {
     (async () => {
         let statusMessage = null;
         try {
+            // ==========================================================
+            //         ИЗМЕНЕНИЕ: Убираем вызов Spotify
+            // ==========================================================
+            // Мы предполагаем, что эта проверка уже сделана в bot.js,
+            // но на всякий случай ставим здесь заглушку.
             if (url.includes('spotify.com')) {
-                return spotifyEnqueue(ctx, userId, url);
+                return; 
             }
+            
             await resetDailyLimitIfNeeded(userId);
             let user = await getUser(userId);
             if (user.downloads_today >= user.premium_limit) {
@@ -162,8 +168,9 @@ export function enqueue(ctx, userId, url) {
                     user = await getUser(userId);
                     if (user.downloads_today >= user.premium_limit) break;
                     try {
-                        await bot.telegram.sendAudio(userId, cached.fileId, { title: cached.metadata.title, performer: cached.metadata.uploader });
-                        await incrementDownloadsAndSaveTrack(userId, cached.metadata.title, cached.fileId, track.url);
+                        // Исправлена ошибка: в старом коде cached не имел metadata
+                        await bot.telegram.sendAudio(userId, cached.fileId, { title: cached.trackName, performer: track.metadata.uploader });
+                        await incrementDownloadsAndSaveTrack(userId, cached.trackName, cached.fileId, track.url);
                         sentFromCacheCount++;
                     } catch (err) {
                         if (err.description?.includes('FILE_REFERENCE_EXPIRED')) tasksToDownload.push(track);
