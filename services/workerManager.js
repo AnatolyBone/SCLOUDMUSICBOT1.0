@@ -5,23 +5,23 @@ import { pool, getAndStartPendingBroadcastTask, updateBroadcastStatus, getUsersF
 import redisService from './redisClient.js';
 import { downloadQueue } from './downloadManager.js';
 import { isShuttingDown, setShuttingDown, isBroadcasting, setBroadcasting } from './appState.js';
-import { runBroadcastBatch, sendAdminReport } from './broadcastManager.js'; 
+import { runBroadcastBatch, sendAdminReport } from './broadcastManager.js';
 
-let botInstance; 
+let botInstance;
 
 function setupGracefulShutdown(server) {
     const SHUTDOWN_TIMEOUT = 25000;
-
+    
     const gracefulShutdown = async (signal) => {
         // =====> ИСПРАВЛЕНИЕ №1 <=====
-        if (isShuttingDown) return; 
+        if (isShuttingDown) return;
         setShuttingDown(true);
-
+        
         console.log(`[Shutdown] Получен сигнал ${signal}. Начинаю изящное завершение...`);
         server.close(() => console.log('[Shutdown] HTTP сервер закрыт.'));
-
+        
         // =====> ИСПРАВЛЕНИЕ №2 <=====
-        if (isBroadcasting) { 
+        if (isBroadcasting) {
             console.log('[Shutdown] Обнаружена активная рассылка. Помечаю ее как прерванную...');
             await findAndInterruptActiveBroadcast();
         }
@@ -40,10 +40,12 @@ function setupGracefulShutdown(server) {
         console.log('[Shutdown] Завершение работы.');
         process.exit(0);
     };
-
+    
     process.on('SIGINT', () => gracefulShutdown('SIGINT'));
     process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 }
+
+// ЗАМЕНИ СТАРУЮ ФУНКЦИЮ startBroadcastWorker НА ЭТУ В workerManager.js
 
 function startBroadcastWorker() {
     console.log('[Broadcast Worker] Планировщик запущен.');
@@ -51,19 +53,19 @@ function startBroadcastWorker() {
     const BATCH_DELAY = 1000;
     
     cron.schedule('* * * * *', async () => {
-        // =====> ИСПРАВЛЕНИЕ №3 (сразу два) <=====
         if (isBroadcasting || isShuttingDown) return;
-
-        const task = await getAndStartPendingBroadcastTask();
-        if (!task) return;
         
-        console.log(`[Broadcast] Начинаю рассылку #${task.id}. Приостанавливаю очередь скачивания.`);
-        setBroadcasting(true);
-        downloadQueue.pause();
-
+        let task; // Объявляем переменную task здесь
+        
         try {
+            task = await getAndStartPendingBroadcastTask();
+            if (!task) return;
+            
+            console.log(`[Broadcast] Начинаю рассылку #${task.id}. Приостанавливаю очередь скачивания.`);
+            setBroadcasting(true);
+            downloadQueue.pause();
+            
             let isDone = false;
-            // =====> ИСПРАВЛЕНИЕ №4 <=====
             while (!isDone && !isShuttingDown) {
                 const users = await getUsersForBroadcastBatch(task.id, task.target_audience, BATCH_SIZE);
                 if (users.length === 0) {
@@ -74,18 +76,23 @@ function startBroadcastWorker() {
                 await runBroadcastBatch(botInstance, task, users);
                 await new Promise(resolve => setTimeout(resolve, BATCH_DELAY));
             }
-
-            if (!isShuttingDown) { // и здесь тоже
+            
+            if (!isShuttingDown) {
                 await updateBroadcastStatus(task.id, 'completed');
                 await sendAdminReport(botInstance, task.id, task);
             }
         } catch (error) {
-            console.error(`[Broadcast Worker] Критическая ошибка при выполнении задачи #${task.id}:`, error);
-            await updateBroadcastStatus(task.id, 'failed', error.message);
+            console.error(`[Broadcast Worker] Критическая ошибка при выполнении задачи #${task ? task.id : 'UNKNOWN'}:`, error);
+            if (task) {
+                await updateBroadcastStatus(task.id, 'failed', error.message);
+            }
         } finally {
-            setBroadcasting(false);
-            downloadQueue.start();
-            console.log(`[Broadcast] Очередь скачивания возобновлена.`);
+            // Этот блок теперь выполнится, даже если бот упадет в try
+            if (isBroadcasting) {
+                setBroadcasting(false);
+                downloadQueue.start();
+                console.log(`[Broadcast] Очередь скачивания возобновлена после завершения/ошибки.`);
+            }
         }
     });
 }
