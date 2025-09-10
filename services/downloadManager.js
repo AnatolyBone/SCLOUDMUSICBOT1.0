@@ -1,4 +1,4 @@
-// services/downloadManager.js (ФИНАЛЬНАЯ ВЕРСИЯ С ЕДИНОЙ ТОЧКОЙ ОБРАБОТКИ)
+// services/downloadManager.js (ФИНАЛЬНАЯ ВЕРСИЯ С ДОЗАГРУЗКОЙ МЕТАДАННЫХ)
 
 import { STORAGE_CHANNEL_ID, PROXY_URL } from '../config.js';
 import path from 'path';
@@ -24,7 +24,7 @@ export function initializeDownloadManager(bot) {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(path.dirname(__filename));
 const cacheDir = path.join(__dirname, 'cache');
-if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir); // Убедимся, что папка для кэша существует
+if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir);
 
 const YTDL_TIMEOUT = 180;
 const MAX_FILE_SIZE_BYTES = 49 * 1024 * 1024;
@@ -33,14 +33,35 @@ const FAKE_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/5
 // --- Главный воркер очереди ---
 
 export async function trackDownloadProcessor(task) {
-    // Внешний try...catch для защиты от "замерзания" очереди
     try {
-        // --- 1. Извлекаем ВСЕ нужные данные из задачи в самом начале ---
-        const { userId, source, url, originalUrl, metadata } = task;
+        let { userId, source, url, originalUrl, metadata } = task; // <-- сделали let
+
+        // ==========================================================
+        //         КЛЮЧЕВОЙ БЛОК: Дозагрузка метаданных
+        // ==========================================================
+        if (!metadata.title) {
+            console.log(`[Worker] Метаданные для ${url} неполные. Дозагружаю...`);
+            try {
+                const fullData = await ytdl(url, { dumpSingleJson: true });
+                // Обновляем метаданные в нашей задаче
+                metadata = {
+                    id: fullData.id,
+                    title: fullData.title,
+                    uploader: fullData.uploader,
+                    duration: fullData.duration,
+                    thumbnail: fullData.thumbnail
+                };
+            } catch (e) {
+                console.error(`[Worker] Не удалось дозагрузить метаданные для ${url}:`, e.message);
+                await botInstance.telegram.sendMessage(userId, `❌ Не удалось получить информацию о треке по ссылке. Возможно, он удален.`);
+                return; // Прерываем выполнение, если не можем получить данные
+            }
+        }
+        
+        // --- Теперь мы можем безопасно извлекать данные, зная, что они полные ---
         const { title, uploader, id: trackId, duration, thumbnail } = metadata;
         const roundedDuration = duration ? Math.round(duration) : undefined;
         
-        // --- 2. Проверяем кэш ---
         const cacheKey = originalUrl || url;
         const cached = await findCachedTrack(cacheKey);
         
@@ -54,10 +75,10 @@ export async function trackDownloadProcessor(task) {
                 } else {
                     await botInstance.telegram.sendMessage(userId, `Трек "${cached.title}" найден в кэше, но ваш дневной лимит исчерпан.`);
                 }
-                return; // Успешно выходим, если отправили из кэша
+                return;
             } catch (e) {
                 if (e.response?.error_code === 403) await updateUserField(userId, 'active', false);
-                console.warn(`[Worker/Cache] Ошибка отправки из кэша для "${title}" (возможно, FILE_REFERENCE_EXPIRED), продолжаем скачивание...`);
+                console.warn(`[Worker/Cache] Ошибка отправки из кэша для "${title}", продолжаем скачивание...`);
             }
         }
         
