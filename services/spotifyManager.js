@@ -1,4 +1,4 @@
-// services/spotifyManager.js (ФИНАЛЬНАЯ ИСПРАВЛЕННАЯ ВЕРСИЯ)
+// services/spotifyManager.js (ИСПРАВЛЕННАЯ ВЕРСИЯ)
 
 import { exec } from 'child_process';
 import { promisify } from 'util';
@@ -6,9 +6,8 @@ import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { SPOTIPY_CLIENT_ID, SPOTIPY_CLIENT_SECRET } from '../config.js';
-// ВАЖНО: Импортируем обе нужные части из downloadManager
-import { downloadQueue, trackDownloadProcessor } from './downloadManager.js'; 
-import { logEvent, getUser } from '../db.js'; // Добавляем getUser для получения приоритета
+import { downloadQueue } from './downloadManager.js'; // <-- ИСПРАВЛЕННЫЙ ИМПОРТ
+import { logEvent, getUser } from '../db.js';
 
 const execAsync = promisify(exec);
 const __filename = fileURLToPath(import.meta.url);
@@ -64,10 +63,10 @@ export async function spotifyEnqueue(ctx, userId, url) {
                     thumbnail: track.cover_url,
                     id: track.song_id
                 },
-                ctx: ctx // <--- ПЕРЕДАЕМ КОНТЕКСТ В ЗАДАЧУ
+                priority: priority // <-- Добавляем приоритет в сам объект задачи
             };
-            // ПРАВИЛЬНО ДОБАВЛЯЕМ В ОЧЕРЕДЬ С ПРИОРИТЕТОМ
-            downloadQueue.add(() => trackDownloadProcessor(task), { priority });
+            // ИСПРАВЛЕННЫЙ ВЫЗОВ: просто передаем объект задачи
+            downloadQueue.add(task);
         }
     } catch (error) {
         console.error(`[Spotify Manager] Ошибка для ${userId} с URL ${url}:`, error.stderr || error);
