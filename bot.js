@@ -13,6 +13,8 @@ import execYoutubeDl from 'youtube-dl-exec';
 import { handleReferralCommand, processNewUserReferral } from './services/referralManager.js';
 import { isShuttingDown, isMaintenanceMode, setMaintenanceMode } from './services/appState.js';
 
+
+
 // --- Глобальные переменные и хелперы ---
 const playlistSessions = new Map();
 const TRACKS_PER_PAGE = 5;
@@ -50,6 +52,10 @@ async function addTaskToQueue(task) {
     }
 }
 // --- Вспомогательные функции ---
+function escapeHtml(text) {
+    if (typeof text !== 'string') return '';
+    return text.replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/&/g, '&amp;');
+}
 async function isSubscribed(userId) {
     if (!CHANNEL_USERNAME) return false;
     try {
@@ -94,7 +100,7 @@ function formatMenuMessage(user, botUsername) {
     ].join('\n');
     
     // 3. Берем шаблоны из T() и заменяем плейсхолдеры
-    const header = T('menu_header').replace('{first_name}', user.first_name || 'пользователь');
+    const header = T('menu_header').replace('{first_name}', escapeHtml(user.first_name) || 'пользователь');
     
     const referralBlock = T('menu_referral_block')
         .replace('{referral_count}', referralCount)
