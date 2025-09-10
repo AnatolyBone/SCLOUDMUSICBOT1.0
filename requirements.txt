@@ -1,6 +1,0 @@
-spotdl
-yt-dlp
-ytmusicapi
-fastapi
-uvicorn
-# ... возможно, что-то еще, но ТОЧНО НЕ telegraf
