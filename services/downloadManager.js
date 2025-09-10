@@ -14,7 +14,7 @@ import {
     getUser, resetDailyLimitIfNeeded, logEvent, updateUserField,
     findCachedTrack, cacheTrack, incrementDownloadsAndSaveTrack
 } from '../db.js';
-import { spotifyEnqueue } from './spotifyManager.js';
+// import { spotifyEnqueue } from './spotifyManager.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(path.dirname(__filename));
