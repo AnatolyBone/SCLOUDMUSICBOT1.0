@@ -4,7 +4,7 @@ import { STORAGE_CHANNEL_ID, CHANNEL_USERNAME, PROXY_URL } from '../config.js';
 import { Markup } from 'telegraf';
 import path from 'path';
 import fs from 'fs';
-import ytdl from 'yt-dl-exec';
+import ytdl from 'youtube-dl-exec';
 import { fileURLToPath } from 'url';
 import crypto from 'crypto';
 import { bot } from '../bot.js'; // Возвращаем импорт, т.к. bot.js не импортирует этот файл
