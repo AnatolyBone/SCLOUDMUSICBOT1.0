@@ -317,27 +317,27 @@ export function enqueue(ctx, userId, url) {
 
       // ЗАМЕНИ СТАРЫЙ БЛОК ПРОВЕРКИ ЛИМИТА НА ЭТОТ
 
+// ЗАМЕНИ БЛОК ПРОВЕРКИ ЛИМИТА В downloadManager.js -> enqueue
+
 if ((user.downloads_today || 0) >= (user.premium_limit || 0)) {
-    // Используем fullUser, чтобы гарантированно иметь поле subscribed_bonus_used
     const fullUser = (user.subscribed_bonus_used === undefined) ? await db.getUser(userId) : user;
     
-    // 1. Берем основное сообщение о лимите
-    let message = T('limitReached');
-    
-    // 2. Формируем и ДОБАВЛЯЕМ бонусный блок, если нужно
+    // 1. Формируем текст для бонуса. Если бонуса нет, строка будет ПУСТОЙ.
+    let bonusMessageText = '';
     if (!fullUser.subscribed_bonus_used && CHANNEL_USERNAME) {
         const cleanUsername = CHANNEL_USERNAME.replace('@', '');
-        // ВАЖНО: Используем HTML-ссылку, т.к. в других местах у тебя HTML
-        const channelLink = `<a href="https://t.me/${cleanUsername}">${CHANNEL_USERNAME}</a>`; 
-        const bonusMessageText = `\n\n🎁 <b>Бонус!</b> Подпишись на ${channelLink} и получи <b>7 дней тарифа Plus</b>!`;
-        
-        // Просто прибавляем бонусный текст к основному
-        message += bonusMessageText;
+        // Используем Markdown-ссылку, т.к. parse_mode будет Markdown
+        const channelLink = `[${cleanUsername}](https://t.me/${cleanUsername})`;
+        bonusMessageText = `\n🎁 У тебя есть доступный бонус! Подпишись на ${channelLink} и получи *7 дней тарифа Plus*.\n`;
     }
 
+    // 2. Берем шаблон и ЗАМЕНЯЕМ в нем плейсхолдер.
+    // Если bonusMessageText пустой, {bonus_message} просто заменится на пустоту.
+    let message = T('limitReached').replace('{bonus_message}', bonusMessageText);
+    
     // 3. Формируем опции и кнопку
     const extra = { 
-        parse_mode: 'HTML', // Используем HTML, т.к. ссылка в bonusMessageText - HTML
+        parse_mode: 'Markdown', // Возвращаем Markdown для совместимости с текстами
         disable_web_page_preview: true
     };
     if (!fullUser.subscribed_bonus_used && CHANNEL_USERNAME) {
