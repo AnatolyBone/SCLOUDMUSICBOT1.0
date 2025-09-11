@@ -8,7 +8,7 @@ import { updateUserField, getUser, createUser, setPremium, getAllUsers, resetDai
 import { T, allTextsSync } from './config/texts.js';
 import { performInlineSearch } from './services/searchManager.js';
 import { spotifyEnqueue } from './services/spotifyManager.js';
-import { downloadQueue, trackDownloadProcessor } from './services/downloadManager.js';
+import { downloadQueue } from './services/downloadManager.js';
 import execYoutubeDl from 'youtube-dl-exec';
 import { handleReferralCommand, processNewUserReferral } from './services/referralManager.js';
 import { isShuttingDown, isMaintenanceMode, setMaintenanceMode } from './services/appState.js';
