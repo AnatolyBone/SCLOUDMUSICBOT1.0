@@ -95,17 +95,52 @@ async function getUserUsage(userId) {
   if (typeof db.getUserLite === 'function') return await db.getUserLite(userId);
   return await db.getUser(userId);
 }
+function extractMetadataFromInfo(info) {
+  const e = Array.isArray(info?.entries) ? info.entries[0] : info;
+  if (!e) return null;
 
+  const ext = e.ext || e.requested_downloads?.[0]?.ext || null;
+  const acodec = e.acodec || e.requested_downloads?.[0]?.acodec || null;
+  const filesize = e.filesize || e.filesize_approx || e.requested_downloads?.[0]?.filesize || null;
+
+  return {
+    id: e.id,
+    title: sanitizeFilename(e.title || 'Unknown Title'),
+    uploader: e.uploader || 'Unknown Artist',
+    duration: e.duration,
+    thumbnail: e.thumbnail,
+    ext, acodec, filesize
+  };
+}
+
+async function ensureTaskMetadata(task) {
+  let { metadata, cacheKey } = task;
+  const url = task.url;
+  if (!metadata) {
+    console.warn('[Worker] metadata отсутствует, тяну метаданные через youtube-dl-exec для URL:', url);
+    const info = await ytdl(url, { 'dump-single-json': true, ...YTDL_COMMON });
+    const md = extractMetadataFromInfo(info);
+    if (!md) throw new Error('META_MISSING');
+    metadata = md;
+    cacheKey = cacheKey || getCacheKey(md, task.originalUrl || url);
+  }
+  return { metadata, cacheKey, source: task.source || 'soundcloud' };
+}
 export async function trackDownloadProcessor(task) {
   try {
-    const { userId, source, url, metadata, cacheKey } = task;
-    const { title, uploader, id: trackId, duration, thumbnail, ext, acodec, filesize } = metadata;
-    const roundedDuration = duration ? Math.round(duration) : undefined;
+    const { userId, url } = task;
 
     let tempFilePath = null;
     let statusMessage = null;
 
     try {
+      // Гарантируем, что есть metadata и cacheKey
+      const ensured = await ensureTaskMetadata(task);
+      const { metadata, cacheKey, source } = ensured;
+
+      const { title, uploader, id: trackId, duration, thumbnail, ext, acodec, filesize } = metadata;
+      const roundedDuration = duration ? Math.round(duration) : undefined;
+
       statusMessage = await safeSendMessage(userId, `⏳ Начинаю скачивание трека: "${title}"`);
       console.log(`[Worker] Получена задача для "${title}" (источник: ${source}).`);
 
@@ -114,12 +149,10 @@ export async function trackDownloadProcessor(task) {
       // Формируем выходной путь и аргументы в зависимости от наличия ffmpeg
       let ytdlArgs;
       if (FFMPEG_AVAILABLE) {
-        // Будем получать mp3 с обложкой/метаданными
         const tempFileName = `${trackId || 'track'}-${crypto.randomUUID()}.mp3`;
         tempFilePath = path.join(cacheDir, tempFileName);
 
         if (canCopyMp3(ext, acodec)) {
-          // уже mp3 — вшиваем обложку без перекодирования
           ytdlArgs = {
             output: tempFilePath,
             'embed-thumbnail': true,
@@ -127,7 +160,6 @@ export async function trackDownloadProcessor(task) {
             ...YTDL_COMMON
           };
         } else {
-          // не mp3 — перекодируем
           ytdlArgs = {
             output: tempFilePath,
             'extract-audio': true,
@@ -140,14 +172,11 @@ export async function trackDownloadProcessor(task) {
 
         await ytdl(url, ytdlArgs);
       } else {
-        // ffmpeg нет — скачиваем как есть, без перекодирования и без вшивки
-        // Чтобы не навредить расширению, используем шаблон .%(ext)s, а затем найдём реальный файл
         const baseName = `${trackId || 'track'}-${crypto.randomUUID()}`;
         const outputTemplate = path.join(cacheDir, `${baseName}.%(ext)s`);
         ytdlArgs = { output: outputTemplate, ...YTDL_COMMON };
         await ytdl(url, ytdlArgs);
 
-        // Находим файл, который создал youtube-dl
         const files = await fs.promises.readdir(cacheDir);
         const found = files.find(f => f.startsWith(`${baseName}.`));
         if (!found) throw new Error('Файл не был создан.');
@@ -166,7 +195,7 @@ export async function trackDownloadProcessor(task) {
         userId,
         { source: fs.createReadStream(tempFilePath) },
         {
-          title,
+          title: metadata.title,
           performer: uploader || 'Unknown Artist',
           duration: roundedDuration
         }
@@ -177,7 +206,7 @@ export async function trackDownloadProcessor(task) {
       }
 
       if (sentToUserMessage?.audio?.file_id) {
-        await incrementDownload(userId, title, sentToUserMessage.audio.file_id, cacheKey);
+        await incrementDownload(userId, metadata.title, sentToUserMessage.audio.file_id, cacheKey);
 
         if (STORAGE_CHANNEL_ID) {
           try {
@@ -185,35 +214,41 @@ export async function trackDownloadProcessor(task) {
             await db.cacheTrack({
               url: cacheKey,
               fileId: sentToStorage.audio.file_id,
-              title,
+              title: metadata.title,
               artist: uploader,
               duration: roundedDuration,
               thumbnail
             });
-            console.log(`✅ [Cache] Трек "${title}" успешно закэширован.`);
+            console.log(`✅ [Cache] Трек "${metadata.title}" успешно закэширован.`);
           } catch (e) {
-            console.error(`❌ [Cache] Ошибка при кэшировании трека "${title}":`, e.message);
+            console.error(`❌ [Cache] Ошибка при кэшировании трека "${metadata.title}":`, e.message);
           }
         }
       }
     } catch (err) {
       const errorDetails = err?.stderr || err?.message || String(err);
-      let userErrorMessage = `❌ Не удалось обработать трек: "${title}"`;
-      if (errorDetails.includes('FILE_TOO_LARGE')) userErrorMessage += '. Он слишком большой.';
-      else if (errorDetails.includes('timed out')) userErrorMessage += '. Ошибка сети.';
-      console.error(`❌ Ошибка воркера при обработке "${title}":`, errorDetails);
+      let userErrorMessage = `❌ Не удалось обработать трек.`;
+
+      if (errorDetails.includes('META_MISSING')) {
+        userErrorMessage = '❌ Не удалось получить информацию о треке.';
+      } else if (errorDetails.includes('FILE_TOO_LARGE')) {
+        userErrorMessage = '❌ Не удалось обработать трек: файл слишком большой.';
+      } else if (errorDetails.includes('timed out')) {
+        userErrorMessage = '❌ Ошибка сети при обработке трека.';
+      }
+
+      console.error(`❌ Ошибка воркера:`, errorDetails);
       if (statusMessage) await bot.telegram.editMessageText(userId, statusMessage.message_id, undefined, userErrorMessage).catch(() => {});
       else await safeSendMessage(userId, userErrorMessage);
     } finally {
       if (tempFilePath && fs.existsSync(tempFilePath)) {
-        fs.promises.unlink(tempFilePath).catch(e => console.error("Ошибка удаления временного файла:", e));
+        fs.promises.unlink(tempFilePath).catch(e => console.error('Ошибка удаления временного файла:', e));
       }
     }
   } catch (e) {
     console.error('🔴 КРИТИЧЕСКАЯ НЕПЕРЕХВАЧЕННАЯ ОШИБКА В ВОРКЕРЕ!', e);
   }
 }
-
 export const downloadQueue = new TaskQueue({
   maxConcurrent: 1,
   taskProcessor: trackDownloadProcessor
