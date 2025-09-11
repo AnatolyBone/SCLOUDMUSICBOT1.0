@@ -145,9 +145,35 @@ export async function trackDownloadProcessor(task) {
       const ensured = await ensureTaskMetadata(task);
       const { metadata, cacheKey, source, url: ensuredUrl } = ensured;
 
+      // Сначала получаем поля и округляем длительность
       const { title, uploader, id: trackId, duration, thumbnail, ext, acodec, filesize } = metadata;
       const roundedDuration = duration ? Math.round(duration) : undefined;
 
+      // РАННИЙ ЧЕК КЭША: если нашли — сразу отправляем и выходим
+      try {
+        const primary = cacheKey;                           // новый ключ sc:<id>
+        const legacy = task.originalUrl || ensuredUrl;      // старый ключ по URL (для старого кэша)
+        let cached = await db.findCachedTrack(primary);
+        if (!cached && legacy) cached = await db.findCachedTrack(legacy);
+
+        if (cached?.fileId) {
+          await bot.telegram.sendAudio(
+            userId,
+            cached.fileId,
+            {
+              title: cached.trackName || title,
+              performer: uploader || 'Unknown Artist',
+              duration: roundedDuration
+            }
+          );
+          await incrementDownload(userId, cached.trackName || title, cached.fileId, primary);
+          return; // нашли в кэше — не качаем
+        }
+      } catch (e) {
+        console.error('[Worker] Ошибка раннего чека кэша:', e.message);
+      }
+
+      // Если в кэше нет — показываем статус и качаем
       statusMessage = await safeSendMessage(userId, `⏳ Начинаю скачивание трека: "${title}"`);
       console.log(`[Worker] Получена задача для "${title}" (источник: ${source}).`);
 
