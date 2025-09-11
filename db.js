@@ -42,50 +42,61 @@ export async function createUser(id, firstName, username, referrerId = null) {
 
 // ЗАМЕНИТЕ ВАШУ getUser НА ЭТУ ВЕРСИЮ
 export async function getUser(id, firstName = '', username = '', startPayload = null) {
-  // 1. Ищем пользователя (запрос тот же, он правильный)
   const sqlSelect = `
-        SELECT 
-            *, 
-            (SELECT COUNT(*) FROM users AS referrals WHERE referrals.referrer_id = u.id) as referral_count 
-        FROM users u WHERE u.id = $1
-    `;
+    SELECT 
+      *, 
+      (SELECT COUNT(*) FROM users AS referrals WHERE referrals.referrer_id = u.id) AS referral_count 
+    FROM users u WHERE u.id = $1
+  `;
   const { rows } = await query(sqlSelect, [id]);
   
   if (rows.length > 0) {
-    // 2. Пользователь найден - просто обновляем last_active и возвращаем
     const user = rows[0];
+    
+    // Если пришёл /start с payload и у пользователя ещё пустой referrer_id — дописываем его
+    if (startPayload && startPayload.startsWith('ref_') && !user.referrer_id) {
+      const parsedId = parseInt(startPayload.split('_')[1], 10);
+      if (!isNaN(parsedId) && parsedId !== id) {
+        try {
+          await query(
+            'UPDATE users SET referrer_id = $1 WHERE id = $2 AND referrer_id IS NULL',
+            [parsedId, id]
+          );
+          user.referrer_id = parsedId; // вернуть уже обновлённый объект
+          console.log(`[Referral] Установлен referrer_id=${parsedId} для пользователя ${id}`);
+        } catch (e) {
+          console.error('[Referral] Ошибка обновления referrer_id:', e.message);
+        }
+      }
+    }
+    
     if (user.active) {
       await query('UPDATE users SET last_active = NOW() WHERE id = $1', [id]);
     }
     return user;
   } else {
-    // 3. Пользователь не найден - создаем нового
-    
-    // ЕДИНОЖДЫ парсим startPayload, чтобы получить referrerId
+    // Новый пользователь — пробуем извлечь реферера из payload
     let referrerId = null;
     if (startPayload && startPayload.startsWith('ref_')) {
       const parsedId = parseInt(startPayload.split('_')[1], 10);
-      // Проверяем, что ID корректный и пользователь не пригласил сам себя
       if (!isNaN(parsedId) && parsedId !== id) {
         referrerId = parsedId;
       }
     }
     
-    // Вызываем нашу новую, простую createUser, передавая ей ЧИСТЫЙ referrerId
     await createUser(id, firstName, username, referrerId);
-    
-    // И возвращаем только что созданного пользователя
     const newUserResult = await query(sqlSelect, [id]);
     return newUserResult.rows[0];
   }
 }
+
+// Добавь поле 'can_receive_broadcasts' в список разрешённых для updateUserField
 const allowedFields = new Set([
   'premium_limit', 'downloads_today', 'total_downloads', 'first_name', 'username',
   'premium_until', 'subscribed_bonus_used', 'tracks_today', 'last_reset_date',
   'active', 'referred_count', 'promo_1plus1_used', 'has_reviewed',
-  'notified_about_expiration'
+  'notified_about_expiration', 'can_receive_broadcasts' // <-- добавить
 ]);
-
 export async function updateUserField(id, updates) {
   const fieldsToUpdate = (typeof updates === 'string')
     ? { [updates]: arguments[2] }
