@@ -187,23 +187,31 @@ bot.catch(async (err, ctx) => {
 });
 bot.use(async (ctx, next) => {
     if (!ctx.from) return next();
-    const user = await getUser(ctx.from.id, ctx.from.first_name, ctx.from.username);
+    
+    // Пытаемся достать payload из deep link:
+    // 1) ctx.startPayload — есть на /start
+    // 2) запасной способ — из текста '/start ref_xxx'
+    const payload =
+        (typeof ctx.startPayload === 'string' && ctx.startPayload) ||
+        (ctx.message?.text?.startsWith('/start ') ? ctx.message.text.split(' ')[1] : null) ||
+        null;
+    
+    // ВАЖНО: передаём payload в getUser — он сам проставит referrer_id при создании
+    const user = await getUser(ctx.from.id, ctx.from.first_name, ctx.from.username, payload);
     ctx.state.user = user;
     
     if (user && user.active === false) return;
     
-    // =====> ВОТ НОВАЯ ЛОГИКА <=====
-    // Если пользователь снова проявил активность, а мы его помечали как "недоступного",
-    // возвращаем ему возможность получать рассылки.
+    // По желанию: восстанавливаем флаг рассылок
     if (user && user.can_receive_broadcasts === false) {
-        await updateUserField(user.id, { can_receive_broadcasts: true });
+        try { await updateUserField(user.id, { can_receive_broadcasts: true }); } catch (e) {
+            console.error('[Broadcast flag] update error:', e.message);
+        }
     }
-    // ==============================
     
     await resetDailyLimitIfNeeded(ctx.from.id);
     return next();
 });
-
 bot.start(async (ctx) => {
     console.log(`[DEBUG] Checkpoint 1 (bot.start): startPayload = ${ctx.startPayload}`);
     // 1. Мы вызываем ТОЛЬКО getUser, передавая в него всю информацию, включая startPayload.
