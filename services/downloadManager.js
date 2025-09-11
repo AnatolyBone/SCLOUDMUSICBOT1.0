@@ -145,48 +145,34 @@ export async function trackDownloadProcessor(task) {
       const ensured = await ensureTaskMetadata(task);
       const { metadata, cacheKey, source, url: ensuredUrl } = ensured;
 
-      // Сначала получаем поля и округляем длительность
       const { title, uploader, id: trackId, duration, thumbnail, ext, acodec, filesize } = metadata;
       const roundedDuration = duration ? Math.round(duration) : undefined;
 
-      // ===================================================================
-      //              ВСТАВЛЕННЫЙ БЛОК: ранний чек кэша
-      // ===================================================================
+      // Ранний чек кэша (sc:<id> -> legacy URL -> по метаданным)
       try {
-        const primaryKey = cacheKey; // Новый ключ, sc:<id>
-        const legacyKey = task.originalUrl || ensuredUrl; // Старый ключ по URL
+        const primaryKey = cacheKey;
+        const legacyKey = task.originalUrl || ensuredUrl;
         let cached = await db.findCachedTrack(primaryKey);
         if (!cached && legacyKey) {
           cached = await db.findCachedTrack(legacyKey);
         }
-        if (!cached) {
-          // Попытка найти по метаданным для самых старых записей с CDN-URL
-          if (typeof db.findCachedTrackByMeta === 'function') {
-            cached = await db.findCachedTrackByMeta({ title, artist: uploader, duration: roundedDuration });
-          }
+        if (!cached && typeof db.findCachedTrackByMeta === 'function') {
+          cached = await db.findCachedTrackByMeta({ title, artist: uploader, duration: roundedDuration });
         }
-        
-        // Если что-то нашли любым из трех способов
+
         if (cached?.fileId) {
           console.log(`[Worker/Cache] ХИТ! Отправляю "${cached.trackName || title}" из кэша.`);
           await bot.telegram.sendAudio(
             userId,
             cached.fileId,
-            {
-              title: cached.trackName || title,
-              performer: uploader || 'Unknown Artist',
-              duration: roundedDuration
-            }
+            { title: cached.trackName || title, performer: uploader || 'Unknown Artist', duration: roundedDuration }
           );
-          // Записываем скачивание в лог и обновляем счетчики
           await incrementDownload(userId, cached.trackName || title, cached.fileId, primaryKey);
-          return; // Нашли в кэше — выходим, не скачивая
+          return;
         }
       } catch (e) {
         console.error('[Worker] Ошибка раннего чека кэша:', e.message);
-        // Не страшно, просто продолжаем и пытаемся скачать
       }
-      // ===================================================================
 
       statusMessage = await safeSendMessage(userId, `⏳ Начинаю скачивание трека: "${title}"`);
       console.log(`[Worker] Получена задача для "${title}" (источник: ${source}).`);
@@ -223,7 +209,6 @@ export async function trackDownloadProcessor(task) {
         ytdlArgs = { output: outputTemplate, ...YTDL_COMMON };
         await ytdl(ensuredUrl, ytdlArgs);
 
-        // Ищем реальный файл по baseName
         const files = await fs.promises.readdir(cacheDir);
         const found = files.find(f => f.startsWith(`${baseName}.`));
         if (!found) throw new Error('Файл не был создан.');
@@ -241,11 +226,7 @@ export async function trackDownloadProcessor(task) {
       const sentToUserMessage = await bot.telegram.sendAudio(
         userId,
         { source: fs.createReadStream(tempFilePath) },
-        {
-          title,
-          performer: uploader || 'Unknown Artist',
-          duration: roundedDuration
-        }
+        { title, performer: uploader || 'Unknown Artist', duration: roundedDuration }
       );
 
       if (statusMessage) {
@@ -306,43 +287,44 @@ export const downloadQueue = new TaskQueue({
 
 export function initializeDownloadManager() {}
 
+// Главная точка: разбираем ссылку, уважаем лимит, показываем бонус (если доступен)
 export function enqueue(ctx, userId, url) {
   (async () => {
     let statusMessage = null;
     try {
+      if (!url) return;
       if (url.includes('spotify.com')) return;
+
       await db.resetDailyLimitIfNeeded(userId);
 
-      // --- РАННИЙ ЧЕК ЛИМИТА (до любого ytdl) ---
-const fullUser = (typeof db.getUser === 'function') 
-  ? await db.getUser(userId) 
-  : await getUserUsage(userId);
+      // РАННЯЯ ПРОВЕРКА ЛИМИТА (до любого анализа ссылки)
+      const fullUser = (typeof db.getUser === 'function') ? await db.getUser(userId) : await getUserUsage(userId);
+      const downloadsToday = Number(fullUser?.downloads_today || 0);
+      const dailyLimit = Number(fullUser?.premium_limit || 0);
 
-const downloadsToday = Number(fullUser?.downloads_today || 0);
-const dailyLimit = Number(fullUser?.premium_limit || 0);
+      if (downloadsToday >= dailyLimit) {
+        const bonusAvailable = Boolean(CHANNEL_USERNAME && !fullUser?.subscribed_bonus_used);
+        const cleanUsername = CHANNEL_USERNAME?.replace('@', '');
+        const bonusText = bonusAvailable
+          ? `\n\n🎁 Доступен бонус! Подпишись на <a href="https://t.me/${cleanUsername}">@${cleanUsername}</a> и получи <b>7 дней тарифа Plus</b>.`
+          : '';
 
-if (downloadsToday >= dailyLimit) {
-  const bonusAvailable = Boolean(CHANNEL_USERNAME && !fullUser?.subscribed_bonus_used);
-  const cleanUsername = CHANNEL_USERNAME?.replace('@', '');
+        const text = `${T('limitReached')}${bonusText}`;
+        const extra = {
+          parse_mode: 'HTML',
+          disable_web_page_preview: true
+        };
+        if (bonusAvailable) {
+          extra.reply_markup = {
+            inline_keyboard: [[ Markup.button.callback('✅ Я подписался, забрать бонус', 'check_subscription') ]]
+          };
+        }
 
-  const bonusText = bonusAvailable
-    ? `\n\n🎁 Доступен бонус! Подпишись на <a href="https://t.me/${cleanUsername}">@${cleanUsername}</a> и получи <b>7 дней тарифа Plus</b>.`
-    : '';
+        await safeSendMessage(userId, text, extra);
+        return;
+      }
 
-  const text = `${T('limitReached')}${bonusText}`;
-
-  const extra = {
-    parse_mode: 'HTML',
-    disable_web_page_preview: true,
-    reply_markup: bonusAvailable
-      ? { inline_keyboard: [[ { text: '✅ Я подписался, забрать бонус', callback_data: 'check_subscription' } ]] }
-      : undefined
-  };
-
-  await safeSendMessage(userId, text, extra);
-  return; // выходим до анализа ссылки
-}
-
+      // Получаем информацию (под лимитом)
       statusMessage = await safeSendMessage(userId, '🔍 Получаю информацию о треке...');
 
       const remainingDailyLimit = Math.max(0, dailyLimit - downloadsToday);
@@ -397,14 +379,9 @@ if (downloadsToday >= dailyLimit) {
         await bot.telegram.editMessageText(userId, statusMessage.message_id, undefined, '🔄 Проверяю кэш...').catch(() => {});
       }
 
-      // Собираем пары ключей: новый sc:<id> и старый (legacy) — по URL
-      const keyPairs = tracksToProcess.map(t => ({
-        primary: t.cacheKey,
-        legacy: t.originalUrl || t.url
-      }));
-      const uniqueKeys = Array.from(new Set(
-        keyPairs.flatMap(k => [k.primary, k.legacy].filter(Boolean))
-      ));
+      // Соберем ключи для кэша: новый sc:<id> и старый по URL
+      const keyPairs = tracksToProcess.map(t => ({ primary: t.cacheKey, legacy: t.originalUrl || t.url }));
+      const uniqueKeys = Array.from(new Set(keyPairs.flatMap(k => [k.primary, k.legacy].filter(Boolean))));
 
       let cacheMap = new Map();
       if (typeof db.findCachedTracks === 'function') {
@@ -476,7 +453,7 @@ if (downloadsToday >= dailyLimit) {
       }
 
       if (statusMessage) {
-        await bot.telegram.editMessageText(userId, statusMessage.message_id, undefined, finalMessage || "Все треки отправлены.").catch(() => {});
+        await bot.telegram.editMessageText(userId, statusMessage.message_id, undefined, finalMessage || 'Все треки отправлены.').catch(() => {});
       } else if (finalMessage) {
         await safeSendMessage(userId, finalMessage);
       }
