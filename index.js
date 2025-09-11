@@ -396,51 +396,47 @@ function setupExpress() {
     }
   });
 
-  app.get('/user/:id', requireAuth, async (req, res) => {
+  // ЗАМЕНИ СТАРЫЙ ОБРАБОТЧИК app.get('/user/:id', ...) НА ЭТОТ В index.js
+
+app.get('/user/:id', requireAuth, async (req, res) => {
     try {
-      const userId = req.params.id;
-      const [
-        userProfile,
-        downloads,
-        actions,
-        referrer,
-        referredUsers
-      ] = await Promise.all([
-        getUserById(userId),
-        getDownloadsByUserId(userId),
-        getUserActions(userId),
-        getReferrerInfo(userId),
-        getReferredUsers(userId)
-      ]);
-
-      if (!userProfile) {
-        return res.status(404).render('user-profile', {
-          title: 'Пользователь не найден',
-          page: 'users',
-          userProfile: null,
-          downloads: [],
-          actions: [],
-          referrer: null,
-          referredUsers: []
+        const userId = req.params.id;
+        
+        // Теперь мы запрашиваем 5 порций данных параллельно, включая реферера
+        const [
+            userProfile,
+            downloads,
+            actions,
+            referrer, // <-- КТО пригласил ЭТОГО пользователя
+            referredUsers // <-- КОГО пригласил ЭТОТ пользователь
+        ] = await Promise.all([
+            getUserById(userId),
+            getDownloadsByUserId(userId),
+            getUserActions(userId),
+            getReferrerInfo(userId), // <-- Используем нашу новую функцию
+            getReferredUsers(userId) // <-- Эта функция у тебя уже должна быть
+        ]);
+        
+        if (!userProfile) {
+            return res.status(404).send("Пользователь не найден");
+        }
+        
+        // Передаем все данные в шаблон для отрисовки
+        res.render('user-profile', {
+            title: `Профиль: ${userProfile.first_name || userId}`,
+            page: 'users',
+            userProfile,
+            downloads,
+            actions,
+            referrer, // <-- Передаем реферера в шаблон
+            referredUsers
         });
-      }
-
-      res.render('user-profile', {
-        title: `Профиль: ${userProfile.first_name || userId}`,
-        page: 'users',
-        userProfile,
-        downloads,
-        actions,
-        referrer,
-        referredUsers
-      });
-
+        
     } catch (error) {
-      console.error(`Ошибка при получении профиля пользователя ${req.params.id}:`, error);
-      res.status(500).send('Ошибка сервера');
+        console.error(`Ошибка при получении профиля пользователя ${req.params.id}:`, error);
+        res.status(500).send("Ошибка сервера");
     }
-  });
-
+});
   app.get('/broadcasts', requireAuth, async (req, res) => {
     const tasks = await getAllBroadcastTasks();
     res.render('broadcasts', { title: 'Управление рассылками', page: 'broadcasts', tasks });
