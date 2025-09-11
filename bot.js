@@ -340,7 +340,45 @@ bot.command('maintenance', (ctx) => {
 });
 bot.command('premium', (ctx) => ctx.reply(T('upgradeInfo'), { parse_mode: 'HTML', disable_web_page_preview: true }));
 // bot.js
+// ==========================================================
+//    ДОБАВЬ ЭТОТ БЛОК ДЛЯ ОБРАБОТКИ КНОПКИ "ПОЛУЧИТЬ БОНУС"
+// ==========================================================
 
+bot.action('check_subscription', async (ctx) => {
+    try {
+        console.log(`[Bonus] User ${ctx.from.id} пытается получить бонус.`);
+
+        // Убедимся, что у нас есть актуальные данные о пользователе
+        const user = await getUser(ctx.from.id);
+        if (user.subscribed_bonus_used) {
+            console.log(`[Bonus] User ${ctx.from.id} уже использовал бонус.`);
+            return await ctx.answerCbQuery('Вы уже использовали этот бонус.', { show_alert: true });
+        }
+
+        console.log(`[Bonus] Проверяю подписку для ${ctx.from.id} на канал ${CHANNEL_USERNAME}`);
+        const subscribed = await isSubscribed(ctx.from.id);
+
+        if (subscribed) {
+            console.log(`[Bonus] User ${ctx.from.id} подписан. Начисляю бонус.`);
+            await setPremium(ctx.from.id, 30, 7); // 30 скачиваний в день на 7 дней
+            await updateUserField(ctx.from.id, 'subscribed_bonus_used', true);
+            await logUserAction(ctx.from.id, 'bonus_received');
+            
+            // Завершаем "загрузку" кнопки
+            await ctx.answerCbQuery('Бонус начислен!');
+            // Меняем сообщение, чтобы кнопка исчезла
+            await ctx.editMessageText('🎉 Поздравляем! Вам начислено 7 дней тарифа Plus. Спасибо за подписку!');
+
+        } else {
+            console.log(`[Bonus] User ${ctx.from.id} НЕ подписан.`);
+            return await ctx.answerCbQuery(`Вы еще не подписаны на канал ${CHANNEL_USERNAME}. Пожалуйста, подпишитесь и нажмите кнопку снова.`, { show_alert: true });
+        }
+    } catch (e) {
+        console.error(`🔴 КРИТИЧЕСКАЯ ОШИБКА в check_subscription для user ${ctx.from.id}:`, e);
+        // В случае любой ошибки, мы должны завершить "загрузку" кнопки
+        await ctx.answerCbQuery('Произошла ошибка. Пожалуйста, попробуйте позже.', { show_alert: true });
+    }
+});
 bot.hears(T('menu'), async (ctx) => {
     // 1. Получаем пользователя. Наша новая функция getUser теперь вернет и user.referral_count
     const user = await getUser(ctx.from.id);
