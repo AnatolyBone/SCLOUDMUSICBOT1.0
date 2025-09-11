@@ -502,9 +502,24 @@ bot.action(/pl_download_all:|pl_download_10:/, async (ctx) => {
     const remainingLimit = user.premium_limit - (user.downloads_today || 0);
     
     if (remainingLimit <= 0) {
-        await ctx.editMessageText(T('limitReached'));
-        return playlistSessions.delete(userId);
-    }
+  const bonusAvailable = Boolean(CHANNEL_USERNAME && !user.subscribed_bonus_used);
+  const cleanUsername = CHANNEL_USERNAME?.replace('@', '');
+  const bonusText = bonusAvailable
+    ? `\n\n🎁 Доступен бонус! Подпишись на <a href="https://t.me/${cleanUsername}">@${cleanUsername}</a> и получи <b>7 дней тарифа Plus</b>.`
+    : '';
+  const extra = {
+    parse_mode: 'HTML',
+    disable_web_page_preview: true
+  };
+  if (bonusAvailable) {
+    extra.reply_markup = {
+      inline_keyboard: [[ { text: '✅ Я подписался, забрать бонус', callback_data: 'check_subscription' } ]]
+    };
+  }
+  await ctx.editMessageText(`${T('limitReached')}${bonusText}`, extra);
+  playlistSessions.delete(userId);
+  return;
+}
     
     await ctx.editMessageText(`✅ Отлично! Добавляю треки в очередь...`);
     
@@ -642,9 +657,24 @@ bot.action(/pl_finish:(.+)/, async (ctx) => {
     const remainingLimit = user.premium_limit - (user.downloads_today || 0);
     
     if (remainingLimit <= 0) {
-        await ctx.editMessageText(T('limitReached'));
-        return playlistSessions.delete(userId);
-    }
+  const bonusAvailable = Boolean(CHANNEL_USERNAME && !user.subscribed_bonus_used);
+  const cleanUsername = CHANNEL_USERNAME?.replace('@', '');
+  const bonusText = bonusAvailable
+    ? `\n\n🎁 Доступен бонус! Подпишись на <a href="https://t.me/${cleanUsername}">@${cleanUsername}</a> и получи <b>7 дней тарифа Plus</b>.`
+    : '';
+  const extra = {
+    parse_mode: 'HTML',
+    disable_web_page_preview: true
+  };
+  if (bonusAvailable) {
+    extra.reply_markup = {
+      inline_keyboard: [[ { text: '✅ Я подписался, забрать бонус', callback_data: 'check_subscription' } ]]
+    };
+  }
+  await ctx.editMessageText(`${T('limitReached')}${bonusText}`, extra);
+  playlistSessions.delete(userId);
+  return;
+}
     
     await ctx.editMessageText(`✅ Готово! Добавляю ${session.selected.size} выбранных треков в очередь...`);
     
@@ -743,10 +773,30 @@ async function processUrlInBackground(ctx, url) {
             // --- ЭТО ОДИНОЧНЫЙ ТРЕК ---
         } else {
             const user = await getUser(ctx.from.id);
-            if (user.downloads_today >= user.premium_limit) {
-                await ctx.telegram.editMessageText(ctx.chat.id, loadingMessage.message_id, undefined, T('limitReached'));
-                return;
-            }
+if ((user.downloads_today || 0) >= (user.premium_limit || 0)) {
+  const bonusAvailable = Boolean(CHANNEL_USERNAME && !user.subscribed_bonus_used);
+  const cleanUsername = CHANNEL_USERNAME?.replace('@', '');
+  const bonusText = bonusAvailable
+    ? `\n\n🎁 Доступен бонус! Подпишись на <a href="https://t.me/${cleanUsername}">@${cleanUsername}</a> и получи <b>7 дней тарифа Plus</b>.`
+    : '';
+  const extra = {
+    parse_mode: 'HTML',
+    disable_web_page_preview: true
+  };
+  if (bonusAvailable) {
+    extra.reply_markup = {
+      inline_keyboard: [[ { text: '✅ Я подписался, забрать бонус', callback_data: 'check_subscription' } ]]
+    };
+  }
+  await ctx.telegram.editMessageText(
+    ctx.chat.id,
+    loadingMessage.message_id,
+    undefined,
+    `${T('limitReached')}${bonusText}`,
+    extra
+  );
+  return;
+}
             
             await ctx.telegram.editMessageText(ctx.chat.id, loadingMessage.message_id, undefined, '✅ Распознал трек, ставлю в очередь...');
             
@@ -802,14 +852,39 @@ bot.on('text', async (ctx) => {
         return await ctx.reply('Пожалуйста, отправьте мне ссылку.');
     }
     
-    const url = urlMatch[0];
-   if (url.includes('soundcloud.com')) {
-    handleSoundCloudUrl(ctx, url);
+   const url = urlMatch[0];
+
+if (url.includes('soundcloud.com')) {
+  // РАННИЙ ЧЕК ЛИМИТА: до любого анализа ссылки
+  const user = await getUser(ctx.from.id); // resetDailyLimitIfNeeded уже отработал в middleware
+  if ((user.downloads_today || 0) >= (user.premium_limit || 0)) {
+    const bonusAvailable = Boolean(CHANNEL_USERNAME && !user.subscribed_bonus_used);
+    const cleanUsername = CHANNEL_USERNAME?.replace('@', '');
+    const bonusText = bonusAvailable
+      ? `\n\n🎁 Доступен бонус! Подпишись на <a href="https://t.me/${cleanUsername}">@${cleanUsername}</a> и получи <b>7 дней тарифа Plus</b>.`
+      : '';
+
+    const extra = {
+      parse_mode: 'HTML',
+      disable_web_page_preview: true
+    };
+    if (bonusAvailable) {
+      extra.reply_markup = {
+        inline_keyboard: [[ { text: '✅ Я подписался, забрать бонус', callback_data: 'check_subscription' } ]]
+      };
+    }
+
+    await ctx.reply(`${T('limitReached')}${bonusText}`, extra);
+    return; // ВАЖНО: не запускаем анализ ссылки
+  }
+
+  // Лимит не достигнут — продолжаем обычную логику
+  handleSoundCloudUrl(ctx, url);
 } else if (url.includes('open.spotify.com')) {
-    // Просто отвечаем пользователю, что функция временно недоступна
-    await ctx.reply('🛠 К сожалению, скачивание из Spotify временно на техническом обслуживании. Мы работаем над этим!');
+  // Просто отвечаем пользователю, что функция временно недоступна
+  await ctx.reply('🛠 К сожалению, скачивание из Spotify временно на техническом обслуживании. Мы работаем над этим!');
 } else {
-    // Обновляем текст, чтобы не упоминать Spotify
-    await ctx.reply('Я умею скачивать треки из SoundCloud. Поддержка других платформ в разработке!');
+  // Обновляем текст, чтобы не упоминать Spotify
+  await ctx.reply('Я умею скачивать треки из SoundCloud. Поддержка других платформ в разработке!');
 }
 });
