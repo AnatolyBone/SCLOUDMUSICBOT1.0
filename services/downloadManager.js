@@ -314,38 +314,34 @@ export function enqueue(ctx, userId, url) {
       await db.resetDailyLimitIfNeeded(userId);
 
       // --- РАННИЙ ЧЕК ЛИМИТА (до любого ytdl) ---
-      const fullUser = (typeof db.getUser === 'function') ? await db.getUser(userId) : await getUserUsage(userId);
-      const downloadsToday = Number(fullUser?.downloads_today || 0);
-      const dailyLimit = Number(fullUser?.premium_limit || 0);
+const fullUser = (typeof db.getUser === 'function') 
+  ? await db.getUser(userId) 
+  : await getUserUsage(userId);
 
-      if (downloadsToday >= dailyLimit) {
-        const bonusAvailable = !!(CHANNEL_USERNAME && !fullUser?.subscribed_bonus_used);
-        const cleanUsername = CHANNEL_USERNAME?.replace('@', '');
+const downloadsToday = Number(fullUser?.downloads_today || 0);
+const dailyLimit = Number(fullUser?.premium_limit || 0);
 
-        const bonusPart = bonusAvailable
-          ? `🎁 У тебя есть доступный бонус! Подпишись на <a href="https://t.me/${cleanUsername}">@${cleanUsername}</a> и получи <b>7 дней тарифа Plus</b>.\n\n`
-          : '';
+if (downloadsToday >= dailyLimit) {
+  const bonusAvailable = Boolean(CHANNEL_USERNAME && !fullUser?.subscribed_bonus_used);
+  const cleanUsername = CHANNEL_USERNAME?.replace('@', '');
 
-        let message = T('limitReached') || '🚫 Дневной лимит загрузок исчерпан.\n\n{bonus_message}💡 Чтобы скачивать больше, перейди на платный тариф.';
-        if (message.includes('{bonus_message}')) {
-          message = message.replace('{bonus_message}', bonusPart);
-        } else {
-          message = bonusPart ? `${message}\n\n${bonusPart}` : message;
-        }
+  const bonusText = bonusAvailable
+    ? `\n\n🎁 Доступен бонус! Подпишись на <a href="https://t.me/${cleanUsername}">@${cleanUsername}</a> и получи <b>7 дней тарифа Plus</b>.`
+    : '';
 
-        const extra = { 
-          parse_mode: 'HTML', 
-          disable_web_page_preview: true 
-        };
-        if (bonusAvailable) {
-          extra.reply_markup = { 
-            inline_keyboard: [[ Markup.button.callback('✅ Я подписался, забрать бонус', 'check_subscription') ]] 
-          };
-        }
+  const text = `${T('limitReached')}${bonusText}`;
 
-        await safeSendMessage(userId, message, extra);
-        return; // важно — выходим до анализа ссылки
-      }
+  const extra = {
+    parse_mode: 'HTML',
+    disable_web_page_preview: true,
+    reply_markup: bonusAvailable
+      ? { inline_keyboard: [[ { text: '✅ Я подписался, забрать бонус', callback_data: 'check_subscription' } ]] }
+      : undefined
+  };
+
+  await safeSendMessage(userId, text, extra);
+  return; // выходим до анализа ссылки
+}
 
       statusMessage = await safeSendMessage(userId, '🔍 Получаю информацию о треке...');
 
