@@ -307,49 +307,39 @@ export function initializeDownloadManager() {
 }
 
 export function enqueue(ctx, userId, url) {
-  (async () => {
-    let statusMessage = null;
-    try {
-      if (url.includes('spotify.com')) return;
+    (async () => {
+        let statusMessage = null;
+        try {
+            if (url.includes('spotify.com')) {
+                // Здесь будет заглушка или вызов spotifyEnqueue
+                return;
+            }
 
-      await db.resetDailyLimitIfNeeded(userId);
-      let user = await getUserUsage(userId);
+            await db.resetDailyLimitIfNeeded(userId);
+            
+            // ====================================================================
+            //         НОВАЯ, ПРАВИЛЬНАЯ ЛОГИКА: ПРОВЕРКА ЛИМИТА В САМОМ НАЧАЛЕ
+            // ====================================================================
+            const user = await getUserUsage(userId); // Используем "легкую" функцию
 
-      // ЗАМЕНИ СТАРЫЙ БЛОК ПРОВЕРКИ ЛИМИТА НА ЭТОТ
-
-// ЗАМЕНИ БЛОК ПРОВЕРКИ ЛИМИТА В downloadManager.js -> enqueue
-
-if ((user.downloads_today || 0) >= (user.premium_limit || 0)) {
-    const fullUser = (user.subscribed_bonus_used === undefined) ? await db.getUser(userId) : user;
-    
-    // 1. Формируем текст для бонуса. Если бонуса нет, строка будет ПУСТОЙ.
-    let bonusMessageText = '';
-    if (!fullUser.subscribed_bonus_used && CHANNEL_USERNAME) {
-        const cleanUsername = CHANNEL_USERNAME.replace('@', '');
-        // Используем Markdown-ссылку, т.к. parse_mode будет Markdown
-        const channelLink = `[${cleanUsername}](https://t.me/${cleanUsername})`;
-        bonusMessageText = `\n🎁 У тебя есть доступный бонус! Подпишись на ${channelLink} и получи *7 дней тарифа Plus*.\n`;
-    }
-
-    // 2. Берем шаблон и ЗАМЕНЯЕМ в нем плейсхолдер.
-    // Если bonusMessageText пустой, {bonus_message} просто заменится на пустоту.
-    let message = T('limitReached').replace('{bonus_message}', bonusMessageText);
-    
-    // 3. Формируем опции и кнопку
-    const extra = { 
-        parse_mode: 'Markdown', // Возвращаем Markdown для совместимости с текстами
-        disable_web_page_preview: true
-    };
-    if (!fullUser.subscribed_bonus_used && CHANNEL_USERNAME) {
-        extra.reply_markup = { 
-            inline_keyboard: [[ Markup.button.callback('✅ Я подписался, забрать бонус', 'check_subscription') ]] 
-        };
-    }
-    
-    // 4. Отправляем финальное сообщение
-    await safeSendMessage(userId, message, extra);
-    return;
-}
+            if ((user.downloads_today || 0) >= (user.premium_limit || 0)) {
+                // Если лимит исчерпан, сразу отправляем сообщение и выходим.
+                // Не тратим время на анализ ссылки.
+                const fullUser = (user.subscribed_bonus_used === undefined) ? await db.getUser(userId) : user;
+                let bonusMessageText = '';
+                if (!fullUser.subscribed_bonus_used && CHANNEL_USERNAME) {
+                    const cleanUsername = CHANNEL_USERNAME.replace('@', '');
+                    const channelLink = `[${cleanUsername}](https://t.me/${cleanUsername})`;
+                    bonusMessageText = `\n🎁 У тебя есть доступный бонус! Подпишись на ${channelLink} и получи *7 дней тарифа Plus*.\n`;
+                }
+                let message = T('limitReached').replace('{bonus_message}', bonusMessageText);
+                const extra = { parse_mode: 'Markdown', disable_web_page_preview: true };
+                if (!fullUser.subscribed_bonus_used && CHANNEL_USERNAME) {
+                    extra.reply_markup = { inline_keyboard: [[ Markup.button.callback('✅ Я подписался, забрать бонус', 'check_subscription') ]] };
+                }
+                await safeSendMessage(userId, message, extra);
+                return; // <-- ВЫХОДИМ!
+            }
 
       statusMessage = await safeSendMessage(userId, '🔍 Получаю информацию о треке...');
 
