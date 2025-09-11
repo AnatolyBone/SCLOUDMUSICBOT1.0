@@ -315,23 +315,41 @@ export function enqueue(ctx, userId, url) {
       await db.resetDailyLimitIfNeeded(userId);
       let user = await getUserUsage(userId);
 
-      if ((user.downloads_today || 0) >= (user.premium_limit || 0)) {
-        const fullUser = (user.subscribed_bonus_used === undefined) ? await db.getUser(userId) : user;
-        let message = T('limitReached');
-        let bonusMessageText = '';
-        if (!fullUser.subscribed_bonus_used) {
-          const cleanUsername = CHANNEL_USERNAME.replace('@', '');
-          const channelLink = `[${CHANNEL_USERNAME}](https://t.me/${cleanUsername})`;
-          bonusMessageText = `\n\n🎁 У тебя есть доступный бонус! Подпишись на ${channelLink} и получи *7 дней тарифа Plus*.`;
-        }
-        message = message.replace('{bonus_message}', bonusMessageText);
-        const extra = { parse_mode: 'Markdown' };
-        if (!fullUser.subscribed_bonus_used) {
-          extra.reply_markup = { inline_keyboard: [[ Markup.button.callback('✅ Я подписался, забрать бонус', 'check_subscription') ]] };
-        }
-        await safeSendMessage(userId, message, extra);
-        return;
-      }
+      // ЗАМЕНИ СТАРЫЙ БЛОК ПРОВЕРКИ ЛИМИТА НА ЭТОТ
+
+if ((user.downloads_today || 0) >= (user.premium_limit || 0)) {
+    // Используем fullUser, чтобы гарантированно иметь поле subscribed_bonus_used
+    const fullUser = (user.subscribed_bonus_used === undefined) ? await db.getUser(userId) : user;
+    
+    // 1. Берем основное сообщение о лимите
+    let message = T('limitReached');
+    
+    // 2. Формируем и ДОБАВЛЯЕМ бонусный блок, если нужно
+    if (!fullUser.subscribed_bonus_used && CHANNEL_USERNAME) {
+        const cleanUsername = CHANNEL_USERNAME.replace('@', '');
+        // ВАЖНО: Используем HTML-ссылку, т.к. в других местах у тебя HTML
+        const channelLink = `<a href="https://t.me/${cleanUsername}">${CHANNEL_USERNAME}</a>`; 
+        const bonusMessageText = `\n\n🎁 <b>Бонус!</b> Подпишись на ${channelLink} и получи <b>7 дней тарифа Plus</b>!`;
+        
+        // Просто прибавляем бонусный текст к основному
+        message += bonusMessageText;
+    }
+
+    // 3. Формируем опции и кнопку
+    const extra = { 
+        parse_mode: 'HTML', // Используем HTML, т.к. ссылка в bonusMessageText - HTML
+        disable_web_page_preview: true
+    };
+    if (!fullUser.subscribed_bonus_used && CHANNEL_USERNAME) {
+        extra.reply_markup = { 
+            inline_keyboard: [[ Markup.button.callback('✅ Я подписался, забрать бонус', 'check_subscription') ]] 
+        };
+    }
+    
+    // 4. Отправляем финальное сообщение
+    await safeSendMessage(userId, message, extra);
+    return;
+}
 
       statusMessage = await safeSendMessage(userId, '🔍 Получаю информацию о треке...');
 
