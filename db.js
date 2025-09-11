@@ -706,10 +706,7 @@ export async function getUserActivityByDayHour(days = 30) {
     return activity;
 }
 
-export async function getReferrerInfo(userId) {
-    const { data, error } = await supabase.from('users').select('referrer_id, referrers:referrer_id (id, first_name)').eq('id', userId).single();
-    return error ? null : data.referrers;
-}
+
 
 export async function getReferredUsers(referrerId) {
     const { data, error } = await supabase.from('users').select('id, first_name, created_at').eq('referrer_id', referrerId).order('created_at', { ascending: false });
