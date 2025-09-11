@@ -20,6 +20,18 @@ async function query(text, params) {
 }
 
 // --- Пользователи ---
+// ДОБАВЬ ЭТУ ФУНКЦИЮ В db.js
+
+export async function getReferrerInfo(userId) {
+  const { rows } = await query(
+    `SELECT r.id, r.first_name, r.username 
+     FROM users u 
+     JOIN users r ON u.referrer_id = r.id 
+     WHERE u.id = $1`,
+    [userId]
+  );
+  return rows[0] || null;
+}
 export async function getUserById(id) {
   const { rows } = await query('SELECT * FROM users WHERE id = $1', [id]);
   return rows[0] || null;
