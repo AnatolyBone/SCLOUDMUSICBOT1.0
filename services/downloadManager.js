@@ -9,7 +9,7 @@ import os from 'os';
 import { fileURLToPath } from 'url';
 import crypto from 'crypto';
 import ytdl from 'youtube-dl-exec';
-import ffmpegPath from 'ffmpeg-static';
+
 import { bot } from '../bot.js';
 import { T } from '../config/texts.js';
 import { TaskQueue } from '../lib/TaskQueue.js';
