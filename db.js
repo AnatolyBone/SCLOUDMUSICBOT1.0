@@ -250,15 +250,16 @@ export async function cacheTrack(trackData) {
 
 export async function findCachedTrack(trackUrl) {
   try {
-    const { data, error } = await supabase.from('track_cache').select('file_id, title').eq('url', trackUrl).single();
-    if (error && error.code !== 'PGRST116') console.error('Ошибка поиска в кэше Supabase:', error);
-    return data ? { fileId: data.file_id, trackName: data.title } : null;
+    const { rows } = await query(
+      'SELECT file_id, title FROM track_cache WHERE url = $1 LIMIT 1',
+      [trackUrl]
+    );
+    return rows.length ? { fileId: rows[0].file_id, trackName: rows[0].title } : null;
   } catch (e) {
-    console.error('Критическая ошибка в findCachedTrack:', e);
+    console.error('Критическая ошибка в findCachedTrack:', e.message);
     return null;
   }
 }
-
 export async function getCachedTracksCount() {
   try {
     const { rows } = await query('SELECT COUNT(*) FROM track_cache');
@@ -454,21 +455,10 @@ export async function getUsersTotalsSnapshot() {
   `);
   return rows[0];
 }
-
+// Для обратной совместимости: старое имя функции
+export { getUsersTotalsSnapshot as getDashboardCounters };
 // Для обратной совместимости: старое имя функции
 
-// (Опционально для лёгкого дашборда — если решишь разгрузить /dashboard)
-export async function getDashboardCounters() {
-  const { rows } = await query(`
-    SELECT
-      COUNT(*)::int AS total_users,
-      COUNT(*) FILTER (WHERE active)::int AS active_users,
-      COALESCE(SUM(total_downloads), 0)::bigint AS total_downloads,
-      COUNT(*) FILTER (WHERE last_active::date = CURRENT_DATE)::int AS active_today
-    FROM users
-  `);
-  return rows[0];
-}
 export async function deleteBroadcastTask(taskId) {
   // Удалять можно только задачи, которые еще не были запущены
   await query(`DELETE FROM broadcast_tasks WHERE id = $1 AND status = 'pending'`, [taskId]);
@@ -584,7 +574,10 @@ export async function findAndInterruptActiveBroadcast() {
     console.log(`[Shutdown] Рассылка #${rows[0].id} возвращена в очередь.`);
   }
 }
-
+export async function getAllBroadcastTasks() {
+  const { rows } = await query(`SELECT * FROM broadcast_tasks ORDER BY scheduled_at DESC`);
+  return rows;
+}
 export async function resetStaleBroadcasts() {
   const { data, error } = await supabase
     .from('broadcast_tasks')
