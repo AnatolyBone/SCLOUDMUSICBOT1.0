@@ -108,3 +108,9 @@ export async function setText(key, value) {
   lastLoad = 0;
   return true;
 }
+// ДОБАВЬ ЭТУ ФУНКЦИЮ В КОНЕЦ ФАЙЛА config/texts.js
+
+export function Tf(key, params = {}) {
+  const s = T(key) || '';
+  return s.replace(/\{(\w+)\}/g, (_, k) => (params[k] ?? ''));
+}
