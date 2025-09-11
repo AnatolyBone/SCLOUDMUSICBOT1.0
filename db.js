@@ -442,6 +442,7 @@ export async function getTopUsers(limit = 15) {
   return rows;
 }
 // Лёгкая агрегирующая статистика для дашборда
+// Лёгкая агрегирующая статистика для дашборда
 export async function getUsersTotalsSnapshot() {
   const { rows } = await query(`
     SELECT
@@ -454,16 +455,9 @@ export async function getUsersTotalsSnapshot() {
   return rows[0];
 }
 
+// Для обратной совместимости: старое имя функции
+export { getUsersTotalsSnapshot as getDashboardCounters };
 // Опционально: алиас, если где-то используешь другое имя
-export async function getDashboardCounters() {
-  return getUsersTotalsSnapshot();
-}
-// ВСТАВЬТЕ ЭТОТ БЛОК В РАЗДЕЛ "--- РАССЫЛКИ ---"
-
-export async function getAllBroadcastTasks() {
-  const { rows } = await query(`SELECT * FROM broadcast_tasks ORDER BY scheduled_at DESC`);
-  return rows;
-}
 
 export async function deleteBroadcastTask(taskId) {
   // Удалять можно только задачи, которые еще не были запущены
