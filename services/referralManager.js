@@ -24,31 +24,62 @@ export async function handleReferralCommand(ctx) {
     await ctx.reply(message, { parse_mode: 'Markdown', disable_web_page_preview: true });
 }
 
+// ЗАМЕНИ СТАРУЮ ФУНКЦИЮ processNewUserReferral НА ЭТУ В referralManager.js
+
 export async function processNewUserReferral(newUser, ctx) {
-    if (!newUser.referrer_id) return;
-
-    console.log(`[Referral] Новый пользователь ${newUser.id} пришел от ${newUser.referrer_id}`);
-    const referrerId = newUser.referrer_id;
-
-    try {
-        await setPremium(referrerId, 30, REFERRER_BONUS_DAYS, true);
-        const friendName = ctx.from.first_name || 'Новый пользователь';
-        
-        // ИСПОЛЬЗУЕМ ctx.telegram ВМЕСТО bot.telegram
-        await ctx.telegram.sendMessage(
-            referrerId,
-            `🎉 Ваш друг **${friendName}** присоединился по вашей ссылке!\n\nВам начислено **+${REFERRER_BONUS_DAYS} дня тарифа Plus**. Спасибо!`,
-            { parse_mode: 'Markdown' }
-        ).catch(e => console.error(`[Referral] Не удалось уведомить ${referrerId}:`, e.message));
-
-    } catch (e) {
-        console.error(`[Referral] Не удалось начислить бонус ${referrerId}:`, e.message);
+    // Проверяем, есть ли у нового пользователя вообще реферер
+    if (!newUser.referrer_id) {
+        return;
     }
 
+    const referrerId = newUser.referrer_id;
+    console.log(`[Referral] Новый пользователь ${newUser.id} пришел от ${referrerId}. Обрабатываю бонусы...`);
+
     try {
-        await setPremium(newUser.id, 30, NEW_USER_BONUS_DAYS);
-        await ctx.reply(`🎁 За регистрацию по приглашению мы дарим вам **${NEW_USER_BONUS_DAYS} дня тарифа Plus**!`, { parse_mode: 'Markdown' });
+        // --- Бонус для нового пользователя (реферала) ---
+        // Даем ему 3 дня тарифа Plus
+        await setPremium(newUser.id, 30, 3);
+        await ctx.reply('🎉 В качестве приветственного бонуса мы начислили вам <b>3 дня тарифа Plus!</b>', { parse_mode: 'HTML' });
+        await logUserAction(newUser.id, 'referral_bonus_received', { type: 'new_user' });
+
+        // --- Бонус для того, кто пригласил (реферера) ---
+        const referrer = await getUser(referrerId);
+        if (!referrer) return;
+
+        // ====================================================================
+        //              "УМНАЯ" ЛОГИКА НАЧИСЛЕНИЯ БОНУСА
+        // ====================================================================
+        
+        // Если у реферера тариф ЛУЧШЕ, чем бонусный Plus (лимит > 30)
+        if (referrer.premium_limit > 30) {
+            // Мы НЕ меняем его тариф, а просто продлеваем текущий на 3 дня
+            await setPremium(referrer.id, referrer.premium_limit, 3); 
+            console.log(`[Referral] Реферер ${referrerId} имеет высокий тариф. Продлеваем подписку на 3 дня.`);
+            
+            // Отправляем уведомление о ПРОДЛЕНИИ
+            await bot.telegram.sendMessage(
+                referrerId,
+                `🥳 По вашей ссылке присоединился новый пользователь!\n\nВ качестве благодарности мы <b>продлили вашу текущую подписку на 3 дня</b>. Спасибо, что вы с нами!`,
+                { parse_mode: 'HTML' }
+            );
+
+        } else {
+            // Если у него тариф Free или Plus, мы даем ему/обновляем до тарифа Plus на 3 дня
+            await setPremium(referrer.id, 30, 3); 
+            console.log(`[Referral] Реферер ${referrerId} получает/обновляет тариф Plus на 3 дня.`);
+
+            // Отправляем уведомление о ПОЛУЧЕНИИ ТАРИФА
+            await bot.telegram.sendMessage(
+                referrerId,
+                `🥳 По вашей ссылке присоединился новый пользователь!\n\nВ качестве благодарности мы начислили вам <b>3 дня тарифа Plus</b>. Спасибо, что вы с нами!`,
+                { parse_mode: 'HTML' }
+            );
+        }
+        // ====================================================================
+        
+        await logUserAction(referrerId, 'referral_bonus_received', { type: 'referrer', referred_user_id: newUser.id });
+
     } catch (e) {
-         console.error(`[Referral] Не удалось начислить приветственный бонус ${newUser.id}:`, e.message);
+        console.error(`[Referral] Ошибка при начислении реферального бонуса для ${newUser.id} и ${newUser.referrer_id}:`, e);
     }
 }
