@@ -1,4 +1,4 @@
-// index.js (обновлённая версия: быстрый дашборд, /tmp для загрузок, Referer, webhook)
+// index.js (продакшен-вебхук с диагностикой, быстрый дашборд, /tmp для загрузок, Referer)
 
 import express from 'express';
 import session from 'express-session';
@@ -11,6 +11,7 @@ import pgSessionFactory from 'connect-pg-simple';
 import fs from 'fs';
 import os from 'os';
 import mime from 'mime-types';
+
 import {
   pool,
   getUserById,
@@ -40,8 +41,9 @@ import {
   getReferrerInfo,
   getReferredUsers,
   getReferralStats,
-  getUsersTotalsSnapshot // <-- быстрый агрегирующий запрос для дашборда
+  getUsersTotalsSnapshot
 } from './db.js';
+
 import { initializeWorkers } from './services/workerManager.js';
 import { runBroadcastBatch } from './services/broadcastManager.js';
 import { setMaintenanceMode } from './services/appState.js';
@@ -56,9 +58,10 @@ import { downloadQueue, initializeDownloadManager } from './services/downloadMan
 
 const app = express();
 
+// Храним временные файлы в /tmp (на Render быстрее)
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
-    const dest = path.join(os.tmpdir(), 'uploads'); // Быстрее на Render
+    const dest = path.join(os.tmpdir(), 'uploads');
     fs.mkdirSync(dest, { recursive: true });
     cb(null, dest);
   },
@@ -71,6 +74,9 @@ const upload = multer({ storage, limits: { fileSize: 49 * 1024 * 1024 } });
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// Позволяет принудительно включить polling для диагностики (FORCE_POLLING=1)
+const forcePolling = process.env.FORCE_POLLING === '1';
 
 // index.js -> startApp()
 async function startApp() {
@@ -85,9 +91,7 @@ async function startApp() {
     downloadQueue.start();
     console.log('[App] Очередь скачивания принудительно запущена.');
 
-    setupExpress();
-
-    if (process.env.NODE_ENV === 'production') {
+    if (process.env.NODE_ENV === 'production' && !forcePolling) {
       const fullBase = WEBHOOK_URL.endsWith('/') ? WEBHOOK_URL.slice(0, -1) : WEBHOOK_URL;
       const fullWebhookUrl = fullBase + WEBHOOK_PATH;
       const allowedUpdates = ['message', 'callback_query', 'inline_query'];
@@ -99,15 +103,56 @@ async function startApp() {
       });
       console.log('[App] Вебхук успешно настроен.');
 
-      // Вешаем на конкретный путь
-      app.use(WEBHOOK_PATH, bot.webhookCallback(WEBHOOK_PATH));
+      // Логируем текущее состояние вебхука в Telegram
+      try {
+        const info = await bot.telegram.getWebhookInfo();
+        console.log('[WebhookInfo]', JSON.stringify(info, null, 2));
+      } catch (e) {
+        console.warn('[WebhookInfo] Ошибка получения информации:', e.message);
+      }
+
+      // Точечный маршрут вебхука + лог каждого входящего апдейта
+      app.post(
+        WEBHOOK_PATH,
+        express.json({ limit: '1mb' }),
+        (req, res, next) => {
+          try {
+            const u = req.body || {};
+            const type =
+              u.message ? 'message' :
+              u.callback_query ? 'callback_query' :
+              u.inline_query ? 'inline_query' :
+              Object.keys(u).filter(k => k !== 'update_id')[0] || 'unknown';
+            console.log(`[Webhook] Update ${u.update_id || '-'} type=${type}`);
+          } catch {}
+          next();
+        },
+        bot.webhookCallback(WEBHOOK_PATH)
+      );
+
+      // После монтирования вебхука настраиваем Express (админка/страницы)
+      setupExpress();
     } else {
+      // Режим long-polling (для разработки или диагностики)
       console.log('[App] Запуск бота в режиме long-polling...');
       await bot.telegram.deleteWebhook({ drop_pending_updates: true });
       bot.launch({
         allowedUpdates: ['message', 'callback_query', 'inline_query']
       });
+
+      setupExpress();
     }
+
+    // Диагностический роут для просмотра состояния вебхука
+    app.get('/debug/webhook', async (req, res) => {
+      try {
+        const info = await bot.telegram.getWebhookInfo();
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        res.end(JSON.stringify(info, null, 2));
+      } catch (e) {
+        res.status(500).send(e.message);
+      }
+    });
 
     const server = app.listen(PORT, () => console.log(`✅ [App] Сервер запущен на порту ${PORT}.`));
     initializeWorkers(server, bot);
@@ -151,11 +196,13 @@ function setupExpress() {
   app.use(compression({ threshold: 1024 }));
   app.use(express.urlencoded({ extended: true, limit: '1mb' }));
   app.use(express.json({ limit: '1mb' }));
+
   app.use('/static', express.static(path.join(__dirname, 'public'), {
     maxAge: '1h',
     etag: true,
     immutable: true
   }));
+
   app.use(expressLayouts);
   app.set('view engine', 'ejs');
   app.set('views', path.join(__dirname, 'views'));
@@ -189,10 +236,12 @@ function setupExpress() {
 
   app.get('/health', (req, res) => res.status(200).send('OK'));
   app.get('/', requireAuth, (req, res) => res.redirect('/dashboard'));
+
   app.get('/admin', (req, res) => {
     if (req.session.authenticated) return res.redirect('/dashboard');
     res.render('login', { title: 'Вход', page: 'login', layout: false, error: null });
   });
+
   app.post('/admin', (req, res) => {
     if (req.body.username === ADMIN_LOGIN && req.body.password === ADMIN_PASSWORD) {
       req.session.authenticated = true;
@@ -202,9 +251,10 @@ function setupExpress() {
       res.render('login', { title: 'Вход', error: 'Неверные данные', page: 'login', layout: false });
     }
   });
+
   app.get('/logout', (req, res) => req.session.destroy(() => res.redirect('/admin')));
 
-  // Дашборд: быстрые агрегаты
+  // Дашборд — быстрые агрегаты
   app.get('/dashboard', requireAuth, async (req, res) => {
     try {
       let storageStatus = { available: false, error: '' };
@@ -300,8 +350,8 @@ function setupExpress() {
         chartDataHourly
       });
     } catch (error) {
-      console.error("Ошибка дашборда:", error);
-      res.status(500).send("Ошибка сервера");
+      console.error('Ошибка дашборда:', error);
+      res.status(500).send('Ошибка сервера');
     }
   });
 
@@ -314,8 +364,8 @@ function setupExpress() {
       const queryParams = { q, status, page, limit, sort, order };
       res.render('users', { title: 'Пользователи', page: 'users', users, totalUsers, totalPages, currentPage: parseInt(page), limit: parseInt(limit), searchQuery: q, statusFilter: status, queryParams });
     } catch (error) {
-      console.error("Ошибка на странице пользователей:", error);
-      res.status(500).send("Ошибка сервера");
+      console.error('Ошибка на странице пользователей:', error);
+      res.status(500).send('Ошибка сервера');
     }
   });
 
@@ -327,8 +377,8 @@ function setupExpress() {
       res.setHeader('Content-Disposition', `attachment; filename="users_${new Date().toISOString().slice(0, 10)}.csv"`);
       res.send(csvData);
     } catch (error) {
-      console.error("Ошибка при экспорте пользователей:", error);
-      res.status(500).send("Не удалось сгенерировать CSV-файл");
+      console.error('Ошибка при экспорте пользователей:', error);
+      res.status(500).send('Не удалось сгенерировать CSV-файл');
     }
   });
 
@@ -341,8 +391,8 @@ function setupExpress() {
       const queryParams = { q, status, page, limit, sort, order };
       res.render('partials/users-table', { users, totalPages, currentPage: parseInt(page), queryParams, layout: false });
     } catch (error) {
-      console.error("Ошибка при обновлении таблицы:", error);
-      res.status(500).send("Ошибка сервера");
+      console.error('Ошибка при обновлении таблицы:', error);
+      res.status(500).send('Ошибка сервера');
     }
   });
 
@@ -387,7 +437,7 @@ function setupExpress() {
 
     } catch (error) {
       console.error(`Ошибка при получении профиля пользователя ${req.params.id}:`, error);
-      res.status(500).send("Ошибка сервера");
+      res.status(500).send('Ошибка сервера');
     }
   });
 
@@ -458,7 +508,7 @@ function setupExpress() {
           renderOptions.error = 'Технический канал-хранилище (BROADCAST_STORAGE_ID) не настроен!';
           return res.render('broadcast-form', renderOptions);
         }
-        console.log(`[Broadcast] Загружен новый файл, отправляю в хранилище...`);
+        console.log('[Broadcast] Загружен новый файл, отправляю в хранилище...');
         const mimeType = file.mimetype || mime.lookup(file.originalname) || '';
         let sentMessage;
         const source = { source: file.path };
@@ -481,7 +531,7 @@ function setupExpress() {
         file_mime_type: fileMimeType,
         targetAudience,
         disableNotification: !!disable_notification,
-        disable_web_page_preview: !enable_web_page_preview,
+        disable_web_page_preview: !enable_web_page_preview
       };
 
       if (action === 'preview') {
@@ -527,10 +577,9 @@ function setupExpress() {
         texts,
         success: req.query.success
       });
-
     } catch (error) {
-      console.error("Ошибка на странице текстов:", error);
-      res.status(500).send("Ошибка сервера");
+      console.error('Ошибка на странице текстов:', error);
+      res.status(500).send('Ошибка сервера');
     }
   });
 
@@ -540,8 +589,8 @@ function setupExpress() {
       await setText(key, value);
       res.redirect('/texts?success=true');
     } catch (error) {
-      console.error("Ошибка при обновлении текста:", error);
-      res.status(500).send("Ошибка сервера");
+      console.error('Ошибка при обновлении текста:', error);
+      res.status(500).send('Ошибка сервера');
     }
   });
 
@@ -550,7 +599,7 @@ function setupExpress() {
       const users = await getExpiringUsers();
       res.render('expiring-users', { title: 'Истекающие подписки', page: 'expiring-users', users });
     } catch (e) {
-      res.status(500).send("Ошибка сервера");
+      res.status(500).send('Ошибка сервера');
     }
   });
 
@@ -588,7 +637,7 @@ function setupExpress() {
     const { userId } = req.body;
     if (userId) {
       await updateUserField(userId, 'downloads_today', 0);
-      await updateUserField(userId, 'tracks_today', '[]');
+      await updateUserField(userId, 'tracks_today', []);
     }
     const back = req.get('Referer') || '/users';
     res.redirect(back);
