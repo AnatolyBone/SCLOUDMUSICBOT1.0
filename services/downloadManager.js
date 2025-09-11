@@ -115,8 +115,13 @@ function extractMetadataFromInfo(info) {
 
 async function ensureTaskMetadata(task) {
   let { metadata, cacheKey } = task;
-  const url = task.url;
+  const url = task.url || task.originalUrl;
+  
   if (!metadata) {
+    if (!url) {
+      // Задача вообще без URL — это ошибка постановки задачи (обычно из bot.js)
+      throw new Error('TASK_MISSING_URL');
+    }
     console.warn('[Worker] metadata отсутствует, тяну метаданные через youtube-dl-exec для URL:', url);
     const info = await ytdl(url, { 'dump-single-json': true, ...YTDL_COMMON });
     const md = extractMetadataFromInfo(info);
@@ -124,19 +129,20 @@ async function ensureTaskMetadata(task) {
     metadata = md;
     cacheKey = cacheKey || getCacheKey(md, task.originalUrl || url);
   }
-  return { metadata, cacheKey, source: task.source || 'soundcloud' };
+  return { metadata, cacheKey, source: task.source || 'soundcloud', url };
 }
+// ВСТАВЬ ЭТОТ КОД ВМЕСТО СТАРОЙ ФУНКЦИИ trackDownloadProcessor
+
 export async function trackDownloadProcessor(task) {
   try {
-    const { userId, url } = task;
+    const { userId } = task; // url берём из ensured
 
     let tempFilePath = null;
     let statusMessage = null;
 
     try {
-      // Гарантируем, что есть metadata и cacheKey
       const ensured = await ensureTaskMetadata(task);
-      const { metadata, cacheKey, source } = ensured;
+      const { metadata, cacheKey, source, url: ensuredUrl } = ensured;
 
       const { title, uploader, id: trackId, duration, thumbnail, ext, acodec, filesize } = metadata;
       const roundedDuration = duration ? Math.round(duration) : undefined;
@@ -146,7 +152,6 @@ export async function trackDownloadProcessor(task) {
 
       if (filesize && filesize > MAX_FILE_SIZE_BYTES) throw new Error('FILE_TOO_LARGE');
 
-      // Формируем выходной путь и аргументы в зависимости от наличия ffmpeg
       let ytdlArgs;
       if (FFMPEG_AVAILABLE) {
         const tempFileName = `${trackId || 'track'}-${crypto.randomUUID()}.mp3`;
@@ -170,13 +175,14 @@ export async function trackDownloadProcessor(task) {
           };
         }
 
-        await ytdl(url, ytdlArgs);
+        await ytdl(ensuredUrl, ytdlArgs);
       } else {
         const baseName = `${trackId || 'track'}-${crypto.randomUUID()}`;
         const outputTemplate = path.join(cacheDir, `${baseName}.%(ext)s`);
         ytdlArgs = { output: outputTemplate, ...YTDL_COMMON };
-        await ytdl(url, ytdlArgs);
+        await ytdl(ensuredUrl, ytdlArgs);
 
+        // Ищем реальный файл по baseName
         const files = await fs.promises.readdir(cacheDir);
         const found = files.find(f => f.startsWith(`${baseName}.`));
         if (!found) throw new Error('Файл не был создан.');
@@ -195,7 +201,7 @@ export async function trackDownloadProcessor(task) {
         userId,
         { source: fs.createReadStream(tempFilePath) },
         {
-          title: metadata.title,
+          title,
           performer: uploader || 'Unknown Artist',
           duration: roundedDuration
         }
@@ -206,7 +212,7 @@ export async function trackDownloadProcessor(task) {
       }
 
       if (sentToUserMessage?.audio?.file_id) {
-        await incrementDownload(userId, metadata.title, sentToUserMessage.audio.file_id, cacheKey);
+        await incrementDownload(userId, title, sentToUserMessage.audio.file_id, cacheKey);
 
         if (STORAGE_CHANNEL_ID) {
           try {
@@ -214,30 +220,31 @@ export async function trackDownloadProcessor(task) {
             await db.cacheTrack({
               url: cacheKey,
               fileId: sentToStorage.audio.file_id,
-              title: metadata.title,
+              title,
               artist: uploader,
               duration: roundedDuration,
               thumbnail
             });
-            console.log(`✅ [Cache] Трек "${metadata.title}" успешно закэширован.`);
+            console.log(`✅ [Cache] Трек "${title}" успешно закэширован.`);
           } catch (e) {
-            console.error(`❌ [Cache] Ошибка при кэшировании трека "${metadata.title}":`, e.message);
+            console.error(`❌ [Cache] Ошибка при кэшировании трека "${title}":`, e.message);
           }
         }
       }
     } catch (err) {
       const errorDetails = err?.stderr || err?.message || String(err);
-      let userErrorMessage = `❌ Не удалось обработать трек.`;
-
-      if (errorDetails.includes('META_MISSING')) {
+      let userErrorMessage = '❌ Не удалось обработать трек.';
+      if (errorDetails.includes('TASK_MISSING_URL')) {
+        userErrorMessage = '❌ Внутренняя ошибка постановки задачи (нет URL). Попробуйте ещё раз.';
+        console.error('[Worker] Задача без URL. Источник задачи формирует некорректный payload:', task);
+      } else if (errorDetails.includes('META_MISSING')) {
         userErrorMessage = '❌ Не удалось получить информацию о треке.';
       } else if (errorDetails.includes('FILE_TOO_LARGE')) {
-        userErrorMessage = '❌ Не удалось обработать трек: файл слишком большой.';
+        userErrorMessage = '❌ Файл слишком большой.';
       } else if (errorDetails.includes('timed out')) {
         userErrorMessage = '❌ Ошибка сети при обработке трека.';
       }
-
-      console.error(`❌ Ошибка воркера:`, errorDetails);
+      console.error('❌ Ошибка воркера:', errorDetails);
       if (statusMessage) await bot.telegram.editMessageText(userId, statusMessage.message_id, undefined, userErrorMessage).catch(() => {});
       else await safeSendMessage(userId, userErrorMessage);
     } finally {
@@ -383,20 +390,31 @@ export function enqueue(ctx, userId, url) {
           }
         }
       });
+// ... перед downloadQueue.add(...)
 
       let finalMessage = '';
       if (sentFromCacheCount > 0) finalMessage += `✅ ${sentFromCacheCount} трек(ов) отправлено из кэша.\n`;
 
-      if (remaining > 0 && tasksToDownload.length > 0) {
-        const tasksToReallyDownload = tasksToDownload.slice(0, remaining);
-        finalMessage += `⏳ ${tasksToReallyDownload.length} трек(ов) добавлено в очередь.`;
-        const prio = user.premium_limit || 0;
-        for (const task of tasksToReallyDownload) {
-          downloadQueue.add({ userId, ...task, priority: prio });
-        }
-      } else if (sentFromCacheCount === 0) {
-        finalMessage += `🚫 Ваш дневной лимит исчерпан.`;
-      }
+      // ... внутри функции enqueue
+if (remaining > 0 && tasksToDownload.length > 0) {
+  const tasksToReallyDownload = tasksToDownload.slice(0, remaining);
+  finalMessage += `⏳ ${tasksToReallyDownload.length} трек(ов) добавлено в очередь.`;
+  const prio = user.premium_limit || 0;
+  for (const task of tasksToReallyDownload) {
+    // Лог ПЕРЕД добавлением в очередь
+    console.log('[Queue] Добавляю задачу', {
+      userId,
+      prio,
+      url: task.url,
+      hasMeta: !!task.metadata,
+      cacheKey: task.cacheKey
+    });
+    downloadQueue.add({ userId, ...task, priority: prio });
+  }
+} else if (sentFromCacheCount === 0) {
+  finalMessage += `🚫 Ваш дневной лимит исчерпан.`;
+}
+// ...
 
       if (statusMessage) {
         await bot.telegram.editMessageText(userId, statusMessage.message_id, undefined, finalMessage || "Все треки отправлены.").catch(() => {});
