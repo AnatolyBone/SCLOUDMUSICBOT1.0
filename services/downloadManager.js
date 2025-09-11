@@ -28,9 +28,9 @@ const FAKE_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/5
 
 // ffmpeg может отсутствовать (например, FFMPEG_STATIC_SKIP_DOWNLOAD=1)
 const FFMPEG_AVAILABLE =
-    (!!ffmpegPath && fs.existsSync(ffmpegPath)) &&
-    process.env.FFMPEG_AVAILABLE !== '0' &&
-    process.env.FFMPEG_STATIC_SKIP_DOWNLOAD !== '1';
+  (!!ffmpegPath && fs.existsSync(ffmpegPath)) &&
+  process.env.FFMPEG_AVAILABLE !== '0' &&
+  process.env.FFMPEG_STATIC_SKIP_DOWNLOAD !== '1';
 
 const YTDL_COMMON = {
   'ffmpeg-location': ffmpegPath || undefined,
@@ -95,6 +95,7 @@ async function getUserUsage(userId) {
   if (typeof db.getUserLite === 'function') return await db.getUserLite(userId);
   return await db.getUser(userId);
 }
+
 function extractMetadataFromInfo(info) {
   const e = Array.isArray(info?.entries) ? info.entries[0] : info;
   if (!e) return null;
@@ -116,27 +117,27 @@ function extractMetadataFromInfo(info) {
 async function ensureTaskMetadata(task) {
   let { metadata, cacheKey } = task;
   const url = task.url || task.originalUrl;
-  
+
   if (!metadata) {
-    if (!url) {
-      // Задача вообще без URL — это ошибка постановки задачи (обычно из bot.js)
-      throw new Error('TASK_MISSING_URL');
-    }
+    if (!url) throw new Error('TASK_MISSING_URL');
     console.warn('[Worker] metadata отсутствует, тяну метаданные через youtube-dl-exec для URL:', url);
     const info = await ytdl(url, { 'dump-single-json': true, ...YTDL_COMMON });
     const md = extractMetadataFromInfo(info);
     if (!md) throw new Error('META_MISSING');
     metadata = md;
-    cacheKey = cacheKey || getCacheKey(md, task.originalUrl || url);
   }
+
+  // ВСЕГДА проставляем cacheKey, даже если metadata уже была
+  if (!cacheKey) {
+    cacheKey = getCacheKey(metadata, task.originalUrl || url);
+  }
+
   return { metadata, cacheKey, source: task.source || 'soundcloud', url };
 }
-// ВСТАВЬ ЭТОТ КОД ВМЕСТО СТАРОЙ ФУНКЦИИ trackDownloadProcessor
 
 export async function trackDownloadProcessor(task) {
   try {
-    const { userId } = task; // url берём из ensured
-
+    const { userId } = task;
     let tempFilePath = null;
     let statusMessage = null;
 
@@ -217,8 +218,9 @@ export async function trackDownloadProcessor(task) {
         if (STORAGE_CHANNEL_ID) {
           try {
             const sentToStorage = await bot.telegram.sendAudio(STORAGE_CHANNEL_ID, sentToUserMessage.audio.file_id);
+            const normalizedKey = cacheKey || getCacheKey(metadata, ensuredUrl);
             await db.cacheTrack({
-              url: cacheKey,
+              url: normalizedKey,
               fileId: sentToStorage.audio.file_id,
               title,
               artist: uploader,
@@ -256,6 +258,7 @@ export async function trackDownloadProcessor(task) {
     console.error('🔴 КРИТИЧЕСКАЯ НЕПЕРЕХВАЧЕННАЯ ОШИБКА В ВОРКЕРЕ!', e);
   }
 }
+
 export const downloadQueue = new TaskQueue({
   maxConcurrent: 1,
   taskProcessor: trackDownloadProcessor
@@ -321,9 +324,7 @@ export function enqueue(ctx, userId, url) {
             uploader: e.uploader || 'Unknown Artist',
             duration: e.duration,
             thumbnail: e.thumbnail,
-            ext,
-            acodec,
-            filesize
+            ext, acodec, filesize
           };
           const realUrl = e.webpage_url || e.url;
           const key = getCacheKey(md, realUrl);
@@ -344,12 +345,20 @@ export function enqueue(ctx, userId, url) {
         await bot.telegram.editMessageText(userId, statusMessage.message_id, undefined, '🔄 Проверяю кэш...').catch(() => {});
       }
 
+      // Собираем пары ключей: новый sc:<id> и старый (legacy) — по URL
+      const keyPairs = tracksToProcess.map(t => ({
+        primary: t.cacheKey,
+        legacy: t.originalUrl || t.url
+      }));
+      const uniqueKeys = Array.from(new Set(
+        keyPairs.flatMap(k => [k.primary, k.legacy].filter(Boolean))
+      ));
+
       let cacheMap = new Map();
-      const keys = tracksToProcess.map(t => t.cacheKey);
       if (typeof db.findCachedTracks === 'function') {
-        cacheMap = await db.findCachedTracks(keys);
+        cacheMap = await db.findCachedTracks(uniqueKeys);
       } else {
-        for (const k of keys) {
+        for (const k of uniqueKeys) {
           const c = await db.findCachedTrack(k);
           if (c) cacheMap.set(k, c);
         }
@@ -362,7 +371,9 @@ export function enqueue(ctx, userId, url) {
       const cachedToSend = [];
       for (const track of tracksToProcess) {
         if (remaining <= 0) break;
-        const cached = cacheMap.get(track.cacheKey);
+        const primary = track.cacheKey;
+        const legacy = track.originalUrl || track.url;
+        const cached = cacheMap.get(primary) || (legacy ? cacheMap.get(legacy) : undefined);
         if (cached) cachedToSend.push({ track, cached });
         else tasksToDownload.push(track);
       }
@@ -390,31 +401,27 @@ export function enqueue(ctx, userId, url) {
           }
         }
       });
-// ... перед downloadQueue.add(...)
 
       let finalMessage = '';
       if (sentFromCacheCount > 0) finalMessage += `✅ ${sentFromCacheCount} трек(ов) отправлено из кэша.\n`;
 
-      // ... внутри функции enqueue
-if (remaining > 0 && tasksToDownload.length > 0) {
-  const tasksToReallyDownload = tasksToDownload.slice(0, remaining);
-  finalMessage += `⏳ ${tasksToReallyDownload.length} трек(ов) добавлено в очередь.`;
-  const prio = user.premium_limit || 0;
-  for (const task of tasksToReallyDownload) {
-    // Лог ПЕРЕД добавлением в очередь
-    console.log('[Queue] Добавляю задачу', {
-      userId,
-      prio,
-      url: task.url,
-      hasMeta: !!task.metadata,
-      cacheKey: task.cacheKey
-    });
-    downloadQueue.add({ userId, ...task, priority: prio });
-  }
-} else if (sentFromCacheCount === 0) {
-  finalMessage += `🚫 Ваш дневной лимит исчерпан.`;
-}
-// ...
+      if (remaining > 0 && tasksToDownload.length > 0) {
+        const tasksToReallyDownload = tasksToDownload.slice(0, remaining);
+        finalMessage += `⏳ ${tasksToReallyDownload.length} трек(ов) добавлено в очередь.`;
+        const prio = user.premium_limit || 0;
+        for (const task of tasksToReallyDownload) {
+          console.log('[Queue] Добавляю задачу', {
+            userId,
+            prio,
+            url: task.url,
+            hasMeta: !!task.metadata,
+            cacheKey: task.cacheKey
+          });
+          downloadQueue.add({ userId, ...task, priority: prio });
+        }
+      } else if (sentFromCacheCount === 0) {
+        finalMessage += `🚫 Ваш дневной лимит исчерпан.`;
+      }
 
       if (statusMessage) {
         await bot.telegram.editMessageText(userId, statusMessage.message_id, undefined, finalMessage || "Все треки отправлены.").catch(() => {});
