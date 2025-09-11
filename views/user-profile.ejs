@@ -48,15 +48,15 @@ function formatDate(s) {
           </dd>
 
           <!-- ======================= НОВЫЙ БЛОК: ИНФО О РЕФЕРАЛЕ ======================= -->
-          <dt class="col-sm-5">Источник</dt>
-          <dd class="col-sm-7">
-            <% if (referrer) { %>
-              Приглашен <a href="/user/<%= referrer.id %>"><%= referrer.first_name || referrer.id %></a>
-            <% } else { %>
-              Пришел сам
-            <% } %>
-          </dd>
-          <!-- ============================================================================== -->
+<dt class="col-sm-5">Источник</dt>
+<dd class="col-sm-7">
+  <% if (referrer) { %>
+    Приглашен <a href="/user/<%= referrer.id %>"><%= referrer.first_name || referrer.username || referrer.id %></a>
+  <% } else { %>
+    Пришел сам
+  <% } %>
+</dd>
+<!-- ============================================================================== -->
 
           <dt class="col-sm-5">Лимит/день</dt><dd class="col-sm-7"><%= userProfile.premium_limit %></dd>
           <dt class="col-sm-5">Подписка до</dt><dd class="col-sm-7"><%= formatDate(userProfile.premium_until) %></dd>
@@ -129,7 +129,7 @@ function formatDate(s) {
     </div>
     <% } %>
     <!-- ======================================================================================= -->
-    
+
     <!-- Скачанные треки -->
     <div class="card shadow-sm">
       <!-- ... (блок со скачанными треками без изменений, но я его удалю, чтобы не путать) ... -->
