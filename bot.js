@@ -213,9 +213,15 @@ bot.use(async (ctx, next) => {
     return next();
 });
 bot.start(async (ctx) => {
-    console.log(`[DEBUG] Checkpoint 1 (bot.start): startPayload = ${ctx.startPayload}`);
-    // 1. Мы вызываем ТОЛЬКО getUser, передавая в него всю информацию, включая startPayload.
-    // getUser сам разберется: если пользователя нет - создаст его с referrer_id, если есть - просто вернет.
+                // ==========================================================
+                //            ДОБАВЬ ЭТУ СТРОКУ ДЛЯ ОТЛАДКИ
+                // ==========================================================
+                console.log('[START] got start for', ctx.from.id, 'payload=', ctx.startPayload);
+                // ==========================================================
+                
+                console.log(`[DEBUG] Checkpoint 1 (bot.start): startPayload = ${ctx.startPayload}`);
+                // 1. Мы вызываем ТОЛЬКО getUser, передавая в него всю информацию, включая startPayload.
+                // getUser сам разберется: если пользователя нет - создаст его с referrer_id, если есть - просто вернет.
     const user = await getUser(ctx.from.id, ctx.from.first_name, ctx.from.username, ctx.startPayload || null);
     
     // 2. Проверяем, действительно ли это новая регистрация.
