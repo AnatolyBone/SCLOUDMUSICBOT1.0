@@ -260,6 +260,27 @@ export async function findCachedTrack(trackUrl) {
     return null;
   }
 }
+// Поиск кэша по метаданным (на случай старых записей с CDN-URL)
+export async function findCachedTrackByMeta({ title, artist, duration }) {
+  try {
+    const { rows } = await query(
+      `SELECT url, file_id, title, artist, duration
+       FROM track_cache
+       WHERE lower(title) = lower($1)
+         AND ($2::text IS NULL OR lower(artist) = lower($2))
+         AND ($3::int IS NULL OR abs(duration - $3::int) <= 2)
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [title || '', artist || null, duration || null]
+    );
+    if (!rows.length) return null;
+    const r = rows[0];
+    return { fileId: r.file_id, trackName: r.title, url: r.url };
+  } catch (e) {
+    console.error('[DB] findCachedTrackByMeta error:', e.message);
+    return null;
+  }
+}
 export async function getCachedTracksCount() {
   try {
     const { rows } = await query('SELECT COUNT(*) FROM track_cache');
