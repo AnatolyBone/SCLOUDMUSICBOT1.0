@@ -456,9 +456,19 @@ export async function getUsersTotalsSnapshot() {
 }
 
 // Для обратной совместимости: старое имя функции
-export { getUsersTotalsSnapshot as getDashboardCounters };
-// Опционально: алиас, если где-то используешь другое имя
 
+// (Опционально для лёгкого дашборда — если решишь разгрузить /dashboard)
+export async function getDashboardCounters() {
+  const { rows } = await query(`
+    SELECT
+      COUNT(*)::int AS total_users,
+      COUNT(*) FILTER (WHERE active)::int AS active_users,
+      COALESCE(SUM(total_downloads), 0)::bigint AS total_downloads,
+      COUNT(*) FILTER (WHERE last_active::date = CURRENT_DATE)::int AS active_today
+    FROM users
+  `);
+  return rows[0];
+}
 export async function deleteBroadcastTask(taskId) {
   // Удалять можно только задачи, которые еще не были запущены
   await query(`DELETE FROM broadcast_tasks WHERE id = $1 AND status = 'pending'`, [taskId]);
@@ -748,17 +758,4 @@ export async function incrementDownloadsAndLogPg(userId, trackTitle, fileId, url
   } finally {
     client.release();
   }
-}
-
-// (Опционально для лёгкого дашборда — если решишь разгрузить /dashboard)
-export async function getDashboardCounters() {
-  const { rows } = await query(`
-    SELECT
-      COUNT(*)::int AS total_users,
-      COUNT(*) FILTER (WHERE active)::int AS active_users,
-      COALESCE(SUM(total_downloads), 0)::bigint AS total_downloads,
-      COUNT(*) FILTER (WHERE last_active::date = CURRENT_DATE)::int AS active_today
-    FROM users
-  `);
-  return rows[0];
 }
