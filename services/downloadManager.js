@@ -302,46 +302,50 @@ export const downloadQueue = new TaskQueue({
   taskProcessor: trackDownloadProcessor
 });
 
-export function initializeDownloadManager() {
-  // no-op
-}
+export function initializeDownloadManager() {}
 
 export function enqueue(ctx, userId, url) {
     (async () => {
         let statusMessage = null;
         try {
-            if (url.includes('spotify.com')) {
-                // Здесь будет заглушка или вызов spotifyEnqueue
-                return;
-            }
-
+            if (url.includes('spotify.com')) return;
             await db.resetDailyLimitIfNeeded(userId);
             
-            // ====================================================================
-            //         НОВАЯ, ПРАВИЛЬНАЯ ЛОГИКА: ПРОВЕРКА ЛИМИТА В САМОМ НАЧАЛЕ
-            // ====================================================================
-            const user = await getUserUsage(userId); // Используем "легкую" функцию
+            // --- ПРОВЕРКА ЛИМИТА (ИСПРАВЛЕННАЯ ВЕРСИЯ) ---
+            const user = await getUser(userId); // Используем полную функцию, т.к. нам нужно subscribed_bonus_used
+            // ЗАМЕНИ БЛОК ПРОВЕРКИ ЛИМИТА В downloadManager.js -> enqueue
 
-            if ((user.downloads_today || 0) >= (user.premium_limit || 0)) {
-                // Если лимит исчерпан, сразу отправляем сообщение и выходим.
-                // Не тратим время на анализ ссылки.
-                const fullUser = (user.subscribed_bonus_used === undefined) ? await db.getUser(userId) : user;
-                let bonusMessageText = '';
-                if (!fullUser.subscribed_bonus_used && CHANNEL_USERNAME) {
-                    const cleanUsername = CHANNEL_USERNAME.replace('@', '');
-                    const channelLink = `[${cleanUsername}](https://t.me/${cleanUsername})`;
-                    bonusMessageText = `\n🎁 У тебя есть доступный бонус! Подпишись на ${channelLink} и получи *7 дней тарифа Plus*.\n`;
-                }
-                let message = T('limitReached').replace('{bonus_message}', bonusMessageText);
-                const extra = { parse_mode: 'Markdown', disable_web_page_preview: true };
-                if (!fullUser.subscribed_bonus_used && CHANNEL_USERNAME) {
-                    extra.reply_markup = { inline_keyboard: [[ Markup.button.callback('✅ Я подписался, забрать бонус', 'check_subscription') ]] };
-                }
-                await safeSendMessage(userId, message, extra);
-                return; // <-- ВЫХОДИМ!
-            }
+if (user.downloads_today >= user.premium_limit) {
+    // 1. Берем базовое сообщение из текстов
+    let message = T('limitReached');
+    
+    // 2. Формируем и ДОБАВЛЯЕМ бонусный блок, если нужно
+    if (!user.subscribed_bonus_used && CHANNEL_USERNAME) {
+        const cleanUsername = CHANNEL_USERNAME.replace('@', '');
+        const channelLink = `[${cleanUsername}](https://t.me/${cleanUsername})`;
+        message += `\n\n🎁 У тебя есть доступный бонус! Подпишись на ${channelLink} и получи *7 дней тарифа Plus*.`;
+    }
+    
+    // 3. ДОБАВЛЯЕМ стандартный призыв к действию в конец
+    message += `\n\n💡 Чтобы скачивать больше, воспользуйтесь кнопкой «Расширить лимит».`;
 
-      statusMessage = await safeSendMessage(userId, '🔍 Получаю информацию о треке...');
+    // 4. Формируем опции и кнопку
+    const extra = { 
+        parse_mode: 'Markdown', 
+        disable_web_page_preview: true 
+    };
+    if (!user.subscribed_bonus_used && CHANNEL_USERNAME) {
+        extra.reply_markup = { 
+            inline_keyboard: [[ Markup.button.callback('✅ Я подписался, забрать бонус', 'check_subscription') ]] 
+        };
+    }
+    
+    // 5. Отправляем финальное, собранное сообщение
+    await safeSendMessage(userId, message, extra);
+    return;
+}
+
+            statusMessage = await safeSendMessage(userId, '🔍 Получаю информацию о треке...');
 
       const remainingDailyLimit = Math.max(0, (user.premium_limit || 0) - (user.downloads_today || 0));
       const playlistLimit = (user.premium_limit || 0) <= 10 ? 5 : UNLIMITED_PLAYLIST_LIMIT;
