@@ -149,31 +149,43 @@ export async function trackDownloadProcessor(task) {
       const { title, uploader, id: trackId, duration, thumbnail, ext, acodec, filesize } = metadata;
       const roundedDuration = duration ? Math.round(duration) : undefined;
 
-      // РАННИЙ ЧЕК КЭША: если нашли — сразу отправляем и выходим
-      try {
-        const primary = cacheKey;                           // новый ключ sc:<id>
-        const legacy = task.originalUrl || ensuredUrl;      // старый ключ по URL (для старого кэша)
-        let cached = await db.findCachedTrack(primary);
-        if (!cached && legacy) cached = await db.findCachedTrack(legacy);
-
-        if (cached?.fileId) {
-          await bot.telegram.sendAudio(
-            userId,
-            cached.fileId,
-            {
-              title: cached.trackName || title,
-              performer: uploader || 'Unknown Artist',
-              duration: roundedDuration
-            }
-          );
-          await incrementDownload(userId, cached.trackName || title, cached.fileId, primary);
-          return; // нашли в кэше — не качаем
-        }
-      } catch (e) {
-        console.error('[Worker] Ошибка раннего чека кэша:', e.message);
+  // ===================================================================
+//              ВСТАВЬ ЭТОТ БЛОК В trackDownloadProcessor
+// ===================================================================
+// РАННИЙ ЧЕК КЭША: сначала sc:<id>, затем legacy URL, затем по метаданным
+try {
+  const primaryKey = cacheKey; // Новый ключ, sc:<id>
+  const legacyKey = task.originalUrl || ensuredUrl; // Старый ключ по URL
+  let cached = await db.findCachedTrack(primaryKey);
+  if (!cached && legacyKey) {
+    cached = await db.findCachedTrack(legacyKey);
+  }
+  if (!cached) {
+    // Попытка найти по метаданным для самых старых записей с CDN-URL
+    cached = await db.findCachedTrackByMeta({ title, artist: uploader, duration: roundedDuration });
+  }
+  
+  // Если что-то нашли любым из трех способов
+  if (cached?.fileId) {
+    console.log(`[Worker/Cache] ХИТ! Отправляю "${cached.trackName || title}" из кэша.`);
+    await bot.telegram.sendAudio(
+      userId,
+      cached.fileId,
+      {
+        title: cached.trackName || title,
+        performer: uploader || 'Unknown Artist',
+        duration: roundedDuration
       }
-
-      // Если в кэше нет — показываем статус и качаем
+    );
+    // Записываем скачивание в лог и обновляем счетчики
+    await incrementDownload(userId, cached.trackName || title, cached.fileId, primaryKey);
+    return; // Нашли в кэше — выходим, не скачивая
+  }
+} catch (e) {
+  console.error('[Worker] Ошибка раннего чека кэша:', e.message);
+  // Не страшно, просто продолжаем и пытаемся скачать
+}
+// ===================================================================
       statusMessage = await safeSendMessage(userId, `⏳ Начинаю скачивание трека: "${title}"`);
       console.log(`[Worker] Получена задача для "${title}" (источник: ${source}).`);
 
