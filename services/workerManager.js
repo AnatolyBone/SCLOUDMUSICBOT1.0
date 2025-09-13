@@ -2,6 +2,7 @@
 
 import cron from 'node-cron';
 import { pool, getAndStartPendingBroadcastTask, updateBroadcastStatus, getUsersForBroadcastBatch, findAndInterruptActiveBroadcast } from '../db.js';
+import { checkAndSendExpirationNotifications } from './notifier.js';
 import redisService from './redisClient.js';
 import { downloadQueue } from './downloadManager.js';
 import { isShuttingDown, setShuttingDown, isBroadcasting, setBroadcasting } from './appState.js';
