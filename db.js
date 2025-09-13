@@ -641,13 +641,20 @@ export async function resetStaleBroadcasts() {
 
 export async function resetOtherTariffsToFree() {
   console.log('[DB-Admin] Начинаю сброс нестандартных тарифов...');
-  const { rowCount } = await query(`
-    UPDATE users SET premium_limit = 5, premium_until = NULL WHERE premium_limit NOT IN (5, 30, 100, 10000);
-  `);
+  const sql = `
+    UPDATE users
+    SET
+      premium_limit = 5,
+      premium_until = NULL,
+      notified_about_expiration = FALSE
+    WHERE
+      premium_limit IS NULL
+      OR premium_limit NOT IN (5, 30, 100, 10000)
+  `;
+  const { rowCount } = await query(sql);
   console.log(`[DB-Admin] Сброшено ${rowCount} пользователей на тариф Free.`);
   return rowCount;
 }
-
 export async function getActiveFreeUsers() {
   const { rows } = await query(`SELECT id FROM users WHERE active = TRUE AND premium_limit <= 5`);
   return rows;
