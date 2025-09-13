@@ -86,23 +86,30 @@ async function startApp() {
     await loadTexts(true);
     await redisService.connect();
     initializeDownloadManager(bot);
-
+    
+    // Отслеживаем "тишину" апдейтов
+    let lastUpdateTs = Date.now();
+    bot.use((ctx, next) => { lastUpdateTs = Date.now(); return next(); });
+    
     // Очередь скачивания
     downloadQueue.start();
     console.log('[App] Очередь скачивания принудительно запущена.');
-
+    
+    let EXPECTED_WEBHOOK = null; // сюда сохраним фактический URL вебхука
+    
     if (process.env.NODE_ENV === 'production' && !forcePolling) {
       const fullBase = WEBHOOK_URL.endsWith('/') ? WEBHOOK_URL.slice(0, -1) : WEBHOOK_URL;
       const fullWebhookUrl = fullBase + WEBHOOK_PATH;
       const allowedUpdates = ['message', 'callback_query', 'inline_query'];
-
+      
       console.log('[App] Принудительно устанавливаю вебхук и сбрасываю очередь...');
       await bot.telegram.setWebhook(fullWebhookUrl, {
         drop_pending_updates: true,
         allowed_updates: allowedUpdates
       });
       console.log('[App] Вебхук успешно настроен.');
-
+      EXPECTED_WEBHOOK = fullWebhookUrl; // ВАЖНО: сохраняем ожидаемый URL
+      
       // Логируем текущее состояние вебхука в Telegram
       try {
         const info = await bot.telegram.getWebhookInfo();
@@ -110,7 +117,7 @@ async function startApp() {
       } catch (e) {
         console.warn('[WebhookInfo] Ошибка получения информации:', e.message);
       }
-
+      
       // Точечный маршрут вебхука + лог каждого входящего апдейта
       app.post(
         WEBHOOK_PATH,
@@ -129,7 +136,7 @@ async function startApp() {
         },
         bot.webhookCallback(WEBHOOK_PATH)
       );
-
+      
       // После монтирования вебхука настраиваем Express (админка/страницы)
       setupExpress();
     } else {
@@ -139,10 +146,10 @@ async function startApp() {
       bot.launch({
         allowedUpdates: ['message', 'callback_query', 'inline_query']
       });
-
+      
       setupExpress();
     }
-
+    
     // Диагностический роут для просмотра состояния вебхука
     app.get('/debug/webhook', async (req, res) => {
       try {
@@ -153,22 +160,52 @@ async function startApp() {
         res.status(500).send(e.message);
       }
     });
-
+    
     const server = app.listen(PORT, () => console.log(`✅ [App] Сервер запущен на порту ${PORT}.`));
     initializeWorkers(server, bot);
-
+    
     console.log('[App] Настройка фоновых задач...');
     setInterval(async () => {
       try { await resetDailyStats(); } catch (e) { console.error('[Cron] resetDailyStats error:', e.message); }
     }, 24 * 3600 * 1000);
     setInterval(() => console.log(`[Monitor] Очередь: ${downloadQueue.size} в ожидании, ${downloadQueue.pending} в работе.`), 60000);
-
+    
+    // --- Watchdog вебхука: авто-починка и детектор тишины ---
+    if (EXPECTED_WEBHOOK) {
+      // 1) Раз в 10 минут проверяем состояние вебхука в Telegram
+      setInterval(async () => {
+        try {
+          const info = await bot.telegram.getWebhookInfo();
+          const hasError = Boolean(info.last_error_date);
+          const urlMismatch = info.url !== EXPECTED_WEBHOOK;
+          if (hasError || urlMismatch) {
+            console.warn('[WebhookWatch] Проблема с вебхуком:', {
+              currentUrl: info.url,
+              last_error_message: info.last_error_message,
+              last_error_date: info.last_error_date
+            });
+            await bot.telegram.setWebhook(EXPECTED_WEBHOOK);
+            console.log('[WebhookWatch] Вебхук переустановлен.');
+          }
+        } catch (e) {
+          console.error('[WebhookWatch] Ошибка проверки вебхука:', e.message);
+        }
+      }, 10 * 60 * 1000);
+      
+      // 2) Детектор "тишины": если 15 минут нет апдейтов — переустановим вебхук
+      setInterval(async () => {
+        if (Date.now() - lastUpdateTs > 15 * 60 * 1000) {
+          console.warn('[WebhookWatch] Давно не было апдейтов, переустанавливаю вебхук...');
+          try { await bot.telegram.setWebhook(EXPECTED_WEBHOOK); } catch (e) {}
+          lastUpdateTs = Date.now();
+        }
+      }, 5 * 60 * 1000);
+    }
   } catch (err) {
     console.error('🔴 Критическая ошибка при запуске:', err);
     process.exit(1);
   }
 }
-
 function parseButtons(buttonsText) {
   if (!buttonsText || typeof buttonsText !== 'string' || buttonsText.trim() === '') {
     return null;
