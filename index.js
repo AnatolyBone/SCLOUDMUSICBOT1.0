@@ -41,9 +41,9 @@ import {
   getReferrerInfo,
   getReferredUsers,
   getReferralStats,
+  resetOtherTariffsToFree,
   getUsersTotalsSnapshot
 } from './db.js';
-
 import { initializeWorkers } from './services/workerManager.js';
 import { runBroadcastBatch } from './services/broadcastManager.js';
 import { setMaintenanceMode } from './services/appState.js';
@@ -378,6 +378,7 @@ function setupExpress() {
         stats,
         storageStatus,
         startDate: req.query.startDate,
+        resetOthers: req.query.resetOthers || null,
         endDate: req.query.endDate,
         chartDataCombined,
         chartDataTariffs,
@@ -675,7 +676,15 @@ app.get('/user/:id', requireAuth, async (req, res) => {
     const back = req.get('Referer') || '/users';
     res.redirect(back);
   });
-
+app.post('/tariffs/reset-others', requireAuth, async (req, res) => {
+  try {
+    const n = await resetOtherTariffsToFree();
+    res.redirect('/dashboard?resetOthers=' + n);
+  } catch (e) {
+    console.error('[Tariffs] reset-others error:', e);
+    res.redirect('/dashboard?resetOthers=err');
+  }
+});
   app.post('/user/set-status', requireAuth, async (req, res) => {
     const { userId, newStatus } = req.body;
     if (userId && (newStatus === 'true' || newStatus === 'false')) {
