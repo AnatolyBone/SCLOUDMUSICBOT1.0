@@ -730,15 +730,23 @@ export async function getReferralStats() {
 }
 
 export async function findUsersToNotify(days = 3) {
-    const targetDate = new Date();
-    targetDate.setDate(targetDate.getDate() + days);
-    const { data, error } = await supabase.from('users').select('*')
-        .lte('premium_until', targetDate.toISOString())
-        .gt('premium_until', new Date().toISOString())
-        .is('notified_about_expiration', false)
-        .eq('active', true);
-    if (error) { console.error('[DB] Ошибка поиска пользователей для уведомления:', error); return []; }
-    return data || [];
+  const now = new Date();
+  const nowIso = now.toISOString();
+  const targetIso = new Date(now.getTime() + days * 24 * 60 * 60 * 1000).toISOString();
+  
+  const { data, error } = await supabase
+    .from('users')
+    .select('id, first_name, premium_until, active') // достаточно этих полей
+    .gt('premium_until', nowIso)
+    .lte('premium_until', targetIso)
+    .eq('notified_about_expiration', false)
+    .eq('active', true);
+  
+  if (error) {
+    console.error('[DB] Ошибка поиска пользователей для уведомления:', error);
+    return [];
+  }
+  return data || [];
 }
 
 export async function markAsNotified(userId) {
