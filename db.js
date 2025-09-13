@@ -729,11 +729,11 @@ export async function findUsersToNotify(days = 3) {
   
   const { data, error } = await supabase
     .from('users')
-    .select('id, first_name, premium_until, active') // достаточно этих полей
-    .gt('premium_until', nowIso)
-    .lte('premium_until', targetIso)
-    .eq('notified_about_expiration', false)
-    .eq('active', true);
+    .select('id, first_name, premium_until, active')
+    .gte('premium_until', nowIso) // включаем ровно "сейчас"
+    .lte('premium_until', targetIso) // и до целевой даты включительно
+    .eq('active', true)
+    .or('notified_about_expiration.is.null,notified_about_expiration.eq.false'); // false ИЛИ null
   
   if (error) {
     console.error('[DB] Ошибка поиска пользователей для уведомления:', error);
@@ -741,7 +741,6 @@ export async function findUsersToNotify(days = 3) {
   }
   return data || [];
 }
-
 export async function markAsNotified(userId) {
     return await updateUserField(userId, 'notified_about_expiration', true);
 }
