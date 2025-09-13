@@ -116,5 +116,6 @@ function startBroadcastWorker() {
 export function initializeWorkers(server, bot) {
     botInstance = bot;
     startBroadcastWorker();
+    startNotifierWorker(); // ← ДОБАВЬ ЭТО
     setupGracefulShutdown(server);
 }
