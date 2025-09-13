@@ -50,6 +50,11 @@ const editableTexts = {
   noTracks: 'Вы еще не скачивали треков сегодня.',
   limitReached: '🚫 Дневной лимит загрузок исчерпан.',
   blockedMessage: '❌ Ваш аккаунт заблокирован администратором.',
+
+  // Уведомления об истечении подписки (используем плейсхолдеры: {name}, {days}, {days_word})
+  exp_3d: '👋 Привет, {name}!\nВаша подписка истекает через {days} {days_word}.\nНе забудьте продлить её, чтобы сохранить доступ ко всем возможностям!\n\nНажмите /premium, чтобы посмотреть тарифы.',
+  exp_1d: '👋 Привет, {name}!\nВаша подписка истекает завтра.\nПродлите заранее, чтобы не потерять доступ. Нажмите /premium.',
+  exp_0d: '⚠️ Привет, {name}!\nВаша подписка истекает сегодня.\nПродлите сейчас: /premium',
 };
 
 // --- Внутренняя логика (остается без изменений) ---
@@ -57,12 +62,12 @@ const editableTexts = {
 const defaults = { ...systemKeys, ...editableTexts };
 
 export function getEditableTexts() {
-    const currentTexts = allTextsSync();
-    const result = {};
-    for (const key in editableTexts) {
-        result[key] = currentTexts[key] ?? editableTexts[key];
-    }
-    return result;
+  const currentTexts = allTextsSync();
+  const result = {};
+  for (const key in editableTexts) {
+    result[key] = currentTexts[key] ?? editableTexts[key];
+  }
+  return result;
 }
 
 let cache = { ...defaults };
@@ -108,8 +113,8 @@ export async function setText(key, value) {
   lastLoad = 0;
   return true;
 }
-// ДОБАВЬ ЭТУ ФУНКЦИЮ В КОНЕЦ ФАЙЛА config/texts.js
 
+// Подстановка плейсхолдеров {name}, {days}, {days_word} и т.д.
 export function Tf(key, params = {}) {
   const s = T(key) || '';
   return s.replace(/\{(\w+)\}/g, (_, k) => (params[k] ?? ''));
