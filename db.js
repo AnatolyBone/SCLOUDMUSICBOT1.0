@@ -107,7 +107,11 @@ const allowedFields = new Set([
   'premium_limit', 'downloads_today', 'total_downloads', 'first_name', 'username',
   'premium_until', 'subscribed_bonus_used', 'tracks_today', 'last_reset_date',
   'active', 'referred_count', 'promo_1plus1_used', 'has_reviewed',
-  'notified_about_expiration', 'can_receive_broadcasts' // <-- добавить
+  'notified_about_expiration', // уже было
+  'notified_exp_3d', 'notified_exp_1d', 'notified_exp_0d', // НОВЫЕ флаги этапов
+  // если заведёшь отметки времени — добавь и их:
+  // 'notified_exp_3d_at', 'notified_exp_1d_at', 'notified_exp_0d_at',
+  'can_receive_broadcasts'
 ]);
 export async function updateUserField(id, updates) {
   const fieldsToUpdate = (typeof updates === 'string')
@@ -729,6 +733,7 @@ export async function getReferralStats() {
     return { topReferrers: topError ? [] : topReferrers, totalReferred: countError ? 0 : totalReferred };
 }
 
+// Оставим, если где-то используешь "в течение N дней"
 export async function findUsersToNotify(days = 3) {
   const now = new Date();
   const nowIso = now.toISOString();
@@ -737,8 +742,8 @@ export async function findUsersToNotify(days = 3) {
   const { data, error } = await supabase
     .from('users')
     .select('id, first_name, premium_until, active')
-    .gte('premium_until', nowIso) // включаем ровно "сейчас"
-    .lte('premium_until', targetIso) // и до целевой даты включительно
+    .gte('premium_until', nowIso)
+    .lte('premium_until', targetIso)
     .eq('active', true)
     .or('notified_about_expiration.is.null,notified_about_expiration.eq.false'); // false ИЛИ null
   
@@ -748,8 +753,41 @@ export async function findUsersToNotify(days = 3) {
   }
   return data || [];
 }
+
 export async function markAsNotified(userId) {
-    return await updateUserField(userId, 'notified_about_expiration', true);
+  return updateUserField(userId, 'notified_about_expiration', true);
+}
+
+// Ровно N дней: [UTC-полуночь N-го дня; UTC-полуночь следующего)
+export async function findUsersExpiringIn(days, flagField) {
+  const allowed = new Set(['notified_exp_3d', 'notified_exp_1d', 'notified_exp_0d']);
+  if (!allowed.has(flagField)) {
+    throw new Error(`findUsersExpiringIn: invalid flag "${flagField}"`);
+  }
+  
+  const now = new Date();
+  const start = new Date(Date.UTC(
+    now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + days, 0, 0, 0
+  ));
+  const end = new Date(start);
+  end.setUTCDate(end.getUTCDate() + 1);
+  
+  const { data, error } = await supabase
+    .from('users')
+    .select('id, first_name, premium_until, active')
+    .gte('premium_until', start.toISOString())
+    .lt('premium_until', end.toISOString())
+    .eq('active', true)
+    .or(`${flagField}.is.null,${flagField}.eq.false`); // <-- нужны бэктики и строка
+  
+  if (error) {
+    console.error('[DB] findUsersExpiringIn error:', error);
+    return [];
+  }
+  return data || [];
+}
+export async function markStageNotified(userId, flagField) {
+return updateUserField(userId, { [flagField]: true });
 }
 // Быстрая выборка лимитов/активности пользователя
 export async function getUserUsage(userId) {
