@@ -1,64 +1,88 @@
 // services/notifier.js
 
-import { findUsersToNotify, markAsNotified, updateUserField } from '../db.js';
+import { findUsersExpiringIn, markStageNotified, updateUserField } from '../db.js';
+import { T } from '../config/texts.js';
 
-let lastNotificationDate = null; 
+let lastNotificationDate = null;
+
+function pluralDays(n) {
+  const a = Math.abs(n) % 100;
+  const b = a % 10;
+  if (a > 10 && a < 20) return 'дней';
+  if (b > 1 && b < 5) return 'дня';
+  if (b === 1) return 'день';
+  return 'дней';
+}
 
 /**
- * Главная функция, которая проверяет, пора ли отправлять уведомления, и делает это.
- * Вызывается из cron-задачи в workerManager.
- * @param {Telegraf} bot - Экземпляр Telegraf для отправки сообщений.
+ * Ежедневная рассылка уведомлений об истечении подписки.
+ * Вызывается планировщиком раз в минуту (workerManager).
  */
 export async function checkAndSendExpirationNotifications(bot) {
-    const now = new Date();
-    // Запускаем рассылку в 10 утра по UTC
-    if (now.getUTCHours() !== 10) {
-        return;
-    }
+  const now = new Date();
+  const currentDate = now.toISOString().slice(0, 10);
 
-    const currentDate = now.toISOString().slice(0, 10);
-    // Проверяем, не отправляли ли мы уже сегодня
-    if (currentDate === lastNotificationDate) {
-        return;
-    }
+  // Уже делали сегодня — выходим
+  if (currentDate === lastNotificationDate) return;
 
-    console.log(`[Notifier] Настало время для ежедневной рассылки уведомлений (${currentDate}).`);
+  // Шлём ОДИН РАЗ после 10:00 UTC (чтобы не промахнуться при рестартах)
+  if (now.getUTCHours() < 10) return;
+
+  console.log(`[Notifier] Старт рассылки за ${currentDate} (UTC>=10:00).`);
+
+  const stages = [
+    { days: 3, flag: 'notified_exp_3d', key: 'exp_3d' },
+    { days: 1, flag: 'notified_exp_1d', key: 'exp_1d' },
+    { days: 0, flag: 'notified_exp_0d', key: 'exp_0d' }
+  ];
+
+  try {
+    for (const s of stages) {
+      const users = await findUsersExpiringIn(s.days, s.flag);
+      if (!users?.length) continue;
+
+      console.log(`[Notifier] Этап ${s.days}д: ${users.length} пользователей.`);
+
+      for (const u of users) {
+        const name = u.first_name || 'пользователь';
+        const daysWord = pluralDays(s.days);
+
+        // Шаблон из текстов или дефолт
+        let tpl = T(s.key) || (
+          s.days === 3
+            ? `👋 Привет, {name}!\nВаша подписка истекает через {days} {days_word}.\nНе забудьте продлить её, чтобы сохранить доступ ко всем возможностям!\n\nНажмите /premium, чтобы посмотреть тарифы.`
+            : s.days === 1
+              ? `👋 Привет, {name}!\nВаша подписка истекает завтра.\nПродлите заранее, чтобы не потерять доступ. Нажмите /premium.`
+              : `⚠️ Привет, {name}!\nВаша подписка истекает сегодня.\nПродлите сейчас: /premium`
+        );
+
+        const msg = tpl
+          .replace('{name}', name)
+          .replace('{days}', String(s.days))
+          .replace('{days_word}', daysWord);
+
+        try {
+          await bot.telegram.sendMessage(u.id, msg);
+          await markStageNotified(u.id, s.flag);
+        } catch (e) {
+          if (e?.response?.error_code === 403) {
+            // Пользователь заблокировал бота
+            await updateUserField(u.id, 'active', false).catch(() => {});
+            await markStageNotified(u.id, s.flag).catch(() => {});
+          } else {
+            console.error(`[Notifier] Ошибка отправки ${u.id}:`, e?.message || e);
+          }
+        }
+
+        // ~3.3 сообщения/сек (чтобы не упереться в лимиты Telegram)
+        await new Promise(r => setTimeout(r, 300));
+      }
+    }
+  } catch (e) {
+    console.error('[Notifier] Fatal:', e);
+  } finally {
+    // Помечаем, что рассылка за текущую дату выполнена (даже если 0 получателей)
     lastNotificationDate = currentDate;
-
-    try {
-        const users = await findUsersToNotify(3); // Ищем тех, у кого тариф истекает через 3 дня
-        if (users.length === 0) {
-            console.log('[Notifier] Пользователей для уведомления нет.');
-            return;
-        }
-
-        console.log(`[Notifier] Найдено ${users.length} пользователей. Начинаю рассылку...`);
-        for (const user of users) {
-            const daysLeft = Math.ceil((new Date(user.premium_until) - new Date()) / (1000 * 60 * 60 * 24));
-            if (daysLeft <= 0) continue; // На всякий случай
-
-            const daysWord = daysLeft === 1 ? 'день' : 'дня'; // Упрощено для 1 и 3 дней
-
-            const message = `👋 Привет, ${user.first_name || 'пользователь'}!\n\n` +
-                            `Напоминаем, что ваша подписка истекает через ${daysLeft} ${daysWord}. ` +
-                            `Не забудьте продлить ее, чтобы сохранить доступ ко всем возможностям!\n\n` +
-                            `Нажмите /premium, чтобы посмотреть доступные тарифы.`;
-
-            try {
-                await bot.telegram.sendMessage(user.id, message);
-                await markAsNotified(user.id);
-            } catch (e) {
-                if (e.response?.error_code === 403) {
-                    await updateUserField(user.id, 'active', false);
-                } else {
-                    console.error(`❌ Ошибка отправки уведомления пользователю ${user.id}:`, e.message);
-                }
-            }
-            // Задержка 300мс, чтобы не превышать лимиты Telegram (~3 сообщения в секунду)
-            await new Promise(resolve => setTimeout(resolve, 300)); 
-        }
-        console.log('[Notifier] Ежедневная рассылка уведомлений завершена.');
-    } catch (e) {
-        console.error('🔴 Критическая ошибка в процессе рассылки уведомлений:', e);
-    }
+    console.log('[Notifier] Завершено.');
+  }
 }
