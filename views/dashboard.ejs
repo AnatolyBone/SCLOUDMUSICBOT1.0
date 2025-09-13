@@ -26,7 +26,14 @@
         <button type="submit" class="btn btn-sm btn-primary">Применить</button>
     </form>
   </div>
-</div>
+</div> <!-- закрываем шапку с border-bottom -->
+<% if (typeof resetOthers !== 'undefined' && resetOthers !== null) { %>
+<% if (resetOthers === 'err') { %>
+<div class="alert alert-danger mt-2">Не удалось сбросить «Другие (старые)».</div>
+<% } else { %>
+<div class="alert alert-success mt-2">Сброшено пользователей: <b><%= resetOthers %></b>.</div>
+<% } %>
+<% } %>
 
 <!-- Верхние метрики -->
 <div class="row row-cols-1 row-cols-md-3 row-cols-lg-5 g-4 mb-4">
