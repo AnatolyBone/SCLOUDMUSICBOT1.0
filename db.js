@@ -205,33 +205,26 @@ export async function getUsersAsCsv(options) {
 // --- Тарифы и лимиты ---
 // ЗАМЕНИ СТАРУЮ ФУНКЦИЮ setPremium НА ЭТУ В db.js
 
-export async function setPremium(userId, limit, days) {
-  const user = await getUser(userId); // Нам нужны данные о текущей подписке
-  if (!user) return; // На всякий случай, если пользователя нет
+export async function setPremium(userId, limit, days = 30) {
+  const user = await getUser(userId);
+  if (!user) return false;
   
-  let newPremiumUntil;
   const now = new Date();
   
-  // ==========================================================
-  //         ВОТ НОВАЯ, УМНАЯ ЛОГИКА
-  // ==========================================================
-  // Если у пользователя есть подписка И она еще не истекла...
-  if (user.premium_until && new Date(user.premium_until) > now) {
-    // ...то мы берем ДАТУ ОКОНЧАНИЯ СТАРОЙ ПОДПИСКИ и прибавляем к ней дни.
-    newPremiumUntil = new Date(user.premium_until);
-    newPremiumUntil.setDate(newPremiumUntil.getDate() + days);
-    console.log(`[Premium] Продлеваю подписку для ${userId}. Старая дата: ${user.premium_until}, новая: ${newPremiumUntil.toISOString()}`);
-  } else {
-    // ...иначе (если подписки нет или она истекла) считаем от СЕГОДНЯ.
-    newPremiumUntil = new Date();
-    newPremiumUntil.setDate(now.getDate() + days);
-    console.log(`[Premium] Выдаю новую подписку для ${userId}. Новая дата: ${newPremiumUntil.toISOString()}`);
-  }
-  // ==========================================================
+  // Если подписка активна — продлеваем от старой даты, иначе считаем от "сейчас"
+  const base = (user.premium_until && new Date(user.premium_until) > now) ?
+    new Date(user.premium_until) :
+    now;
+  
+  const newPremiumUntil = new Date(base);
+  newPremiumUntil.setDate(newPremiumUntil.getDate() + Number(days || 0));
+  
+  console.log(`[Premium] ${base === now ? 'Выдаю новую' : 'Продлеваю'} подписку для ${userId}. Старая дата: ${user.premium_until || '-'}, новая: ${newPremiumUntil.toISOString()}`);
   
   return updateUserField(userId, {
-    premium_limit: limit,
-    premium_until: newPremiumUntil.toISOString()
+    premium_limit: Number(limit),
+    premium_until: newPremiumUntil.toISOString(),
+    notified_about_expiration: false // Сбрасываем флаг, чтобы в новом периоде снова пришло напоминание
   });
 }
 export async function resetDailyLimitIfNeeded(userId) {
