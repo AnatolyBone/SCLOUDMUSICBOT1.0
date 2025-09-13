@@ -45,7 +45,22 @@ function setupGracefulShutdown(server) {
     process.on('SIGINT', () => gracefulShutdown('SIGINT'));
     process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 }
+function startNotifierWorker() {
+  console.log('[Notifier] Планировщик запущен (tick=60s).');
+  let running = false;
 
+  cron.schedule('* * * * *', async () => {
+    if (running || isShuttingDown) return;
+    running = true;
+    try {
+      await checkAndSendExpirationNotifications(botInstance);
+    } catch (e) {
+      console.error('[Notifier] tick error:', e.message);
+    } finally {
+      running = false;
+    }
+  });
+}
 // ЗАМЕНИ СТАРУЮ ФУНКЦИЮ startBroadcastWorker НА ЭТУ В workerManager.js
 
 function startBroadcastWorker() {
