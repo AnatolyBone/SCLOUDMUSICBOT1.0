@@ -21,6 +21,54 @@ async function query(text, params) {
 
 // --- Пользователи ---
 // ДОБАВЬ ЭТУ ФУНКЦИЮ В db.js
+export async function resetExpiredPremiumIfNeeded(userId) {
+  const sql = `
+    UPDATE users
+    SET
+      premium_limit = 5,
+      premium_until = NULL,
+      notified_about_expiration = FALSE,
+      notified_exp_3d = FALSE,
+      notified_exp_1d = FALSE,
+      notified_exp_0d = FALSE
+    WHERE id = $1
+      AND premium_until IS NOT NULL
+      AND premium_until < NOW()
+      AND premium_limit <> 5
+    RETURNING id
+  `;
+  try {
+    const { rows } = await query(sql, [userId]);
+    if (rows?.length) {
+      console.log(`[Premium/AutoReset] Пользователь ${userId} понижен до Free (истёк тариф).`);
+    }
+  } catch (e) {
+    console.error('[DB] resetExpiredPremiumIfNeeded error:', e.message);
+  }
+}
+export async function resetExpiredPremiumsBulk() {
+  const sql = `
+    UPDATE users
+    SET
+      premium_limit = 5,
+      premium_until = NULL,
+      notified_about_expiration = FALSE,
+      notified_exp_3d = FALSE,
+      notified_exp_1d = FALSE,
+      notified_exp_0d = FALSE
+    WHERE premium_until IS NOT NULL
+      AND premium_until < NOW()
+      AND premium_limit <> 5
+  `;
+  try {
+    const { rowCount } = await query(sql);
+    if (rowCount) console.log(`[Premium/BulkReset] Понижено до Free: ${rowCount}`);
+    return rowCount || 0;
+  } catch (e) {
+    console.error('[DB] resetExpiredPremiumsBulk error:', e.message);
+    return 0;
+  }
+}
 
 export async function getReferrerInfo(userId) {
   const { rows } = await query(
