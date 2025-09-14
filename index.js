@@ -42,6 +42,7 @@ import {
   getReferredUsers,
   getReferralStats,
   resetOtherTariffsToFree,
+  resetExpiredPremiumsBulk,
   getUsersTotalsSnapshot
 } from './db.js';
 import { initializeWorkers } from './services/workerManager.js';
@@ -505,6 +506,15 @@ app.get('/user/:id', requireAuth, async (req, res) => {
     await deleteBroadcastTask(taskId);
     res.redirect('/broadcasts');
   });
+  app.post('/tariffs/reset-expired', requireAuth, async (req, res) => {
+try {
+const n = await resetExpiredPremiumsBulk();
+res.redirect('/dashboard?resetExpired=' + n);
+} catch (e) {
+console.error('[Tariffs] reset-expired error:', e.message);
+res.redirect('/dashboard?resetExpired=err');
+}
+});
 
   app.post(['/broadcast/new', '/broadcast/edit/:id'], requireAuth, upload.single('file'), async (req, res) => {
     const isEditing = !!req.params.id;
