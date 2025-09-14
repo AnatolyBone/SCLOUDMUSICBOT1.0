@@ -315,8 +315,8 @@ function setupExpress() {
         topTracks,
         topUsers,
         hourlyActivity,
-        expiredCountResult,
-        referralStats
+        referralStats,
+        expiredCountResult
       ] = await Promise.all([
         getUsersTotalsSnapshot(),
         getCachedTracksCount(),
@@ -336,7 +336,7 @@ function setupExpress() {
             AND premium_limit <> 5
         `)
       ]);
-const expiredCount = expiredCountResult?.rows?.[0]?.expired_count ?? 0; // <-- ДОБАВИЛИ
+const expiredCount = Number(expiredCountResult?.rows?.[0]?.expired_count ?? 0); // <-- ДОБАВИЛИ
       const stats = {
         total_users: totals.total_users,
         active_users: totals.active_users,
