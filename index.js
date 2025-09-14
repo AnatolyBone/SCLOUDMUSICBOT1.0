@@ -385,6 +385,7 @@ function setupExpress() {
         chartDataTariffs,
         chartDataWeekday,
         topTracks,
+        resetExpired: req.query.resetExpired || null,
         topUsers,
         chartDataHourly
       });
