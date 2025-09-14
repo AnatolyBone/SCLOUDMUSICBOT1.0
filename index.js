@@ -315,6 +315,7 @@ function setupExpress() {
         topTracks,
         topUsers,
         hourlyActivity,
+        expiredCountResult,
         referralStats
       ] = await Promise.all([
         getUsersTotalsSnapshot(),
@@ -326,9 +327,16 @@ function setupExpress() {
         getTopTracks(),
         getTopUsers(),
         getHourlyActivity(),
-        getReferralStats()
+        getReferralStats(),
+        pool.query(`
+          SELECT COUNT(*)::int AS expired_count
+          FROM users
+          WHERE premium_until IS NOT NULL
+            AND premium_until < NOW()
+            AND premium_limit <> 5
+        `)
       ]);
-
+const expiredCount = expiredCountResult?.rows?.[0]?.expired_count ?? 0; // <-- ДОБАВИЛИ
       const stats = {
         total_users: totals.total_users,
         active_users: totals.active_users,
@@ -387,7 +395,8 @@ function setupExpress() {
         topTracks,
         resetExpired: req.query.resetExpired || null,
         topUsers,
-        chartDataHourly
+        chartDataHourly,
+        expiredCount
       });
     } catch (error) {
       console.error('Ошибка дашборда:', error);
