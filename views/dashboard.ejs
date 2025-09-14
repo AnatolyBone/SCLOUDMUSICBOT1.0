@@ -122,12 +122,12 @@
           Number(stats?.usersByTariff?.Legacy ?? 0) ||
           0;
         %>
-        <% const expiredCount = typeof expiredCount !== 'undefined' ? Number(expiredCount) : 0; %>
+       <% const expiredCountSafe = Number(typeof locals.expiredCount !== 'undefined' ? locals.expiredCount : 0); %>
 
         <ul class="list-group list-group-flush">
           <li class="list-group-item d-flex justify-content-between align-items-center px-0">
             <span>🆓 Free</span>
-            <span class="fw-bold"><%= (stats.usersByTariff && stats.usersByTariff.Free) || 0 %></span>
+           <span class="fw-bold"><%= expiredCountSafe %></span>
           </li>
           <li class="list-group-item d-flex justify-content-between align-items-center px-0">
             <span>🎯 Plus</span>
