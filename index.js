@@ -294,134 +294,149 @@ function setupExpress() {
 
   // Дашборд — быстрые агрегаты
   app.get('/dashboard', requireAuth, async (req, res) => {
-    try {
-      let storageStatus = { available: false, error: '' };
-      if (STORAGE_CHANNEL_ID) {
-        try {
-          await bot.telegram.getChat(STORAGE_CHANNEL_ID);
-          storageStatus.available = true;
-        } catch (e) {
-          storageStatus.error = e.message;
-        }
+  try {
+    let storageStatus = { available: false, error: '' };
+    if (STORAGE_CHANNEL_ID) {
+      try {
+        await bot.telegram.getChat(STORAGE_CHANNEL_ID);
+        storageStatus.available = true;
+      } catch (e) {
+        storageStatus.error = e.message;
       }
-
-      const [
-  totals,
-  cachedTracksCount,
-  usersByTariff,
-  topSources,
-  dailyStats,
-  weekdayActivity,
-  topTracks,
-  topUsers,
-  hourlyActivity,
-  referralStats,
-  expiredCountResult
-] = await Promise.all([
-  getUsersTotalsSnapshot(),
-  getCachedTracksCount(),
-  getUsersCountByTariff(),
-  getTopReferralSources(),
-  getDailyStats({ startDate: req.query.startDate, endDate: req.query.endDate }),
-  getActivityByWeekday(),
-  getTopTracks(),
-  getTopUsers(),
-  getHourlyActivity(),
-  getReferralStats(),
-  pool.query(`
-    SELECT COUNT(*)::int AS expired_count
-    FROM users
-    WHERE premium_until IS NOT NULL
-      AND premium_until < NOW()
-      AND premium_limit <> 5
-  `)
-]);
-
-const expiredCount = Number(expiredCountResult?.rows?.[0]?.expired_count ?? 0);
-
-// Нормализация тарифов
-const rawTariffs = usersByTariff || {};
-const normalizedTariffs = {
-  Free: Number(rawTariffs.Free ?? rawTariffs.free ?? 0),
-  Plus: Number(rawTariffs.Plus ?? rawTariffs.plus ?? 0),
-  Pro: Number(rawTariffs.Pro ?? rawTariffs.pro ?? 0),
-  Unlimited: Number(rawTariffs.Unlimited ?? rawTariffs.unlimited ?? 0),
-  Other: Number(rawTariffs.Other ?? rawTariffs.other ?? rawTariffs.Legacy ?? 0)
-};
-
-// Фоллбек для Free (если не пришёл из БД)
-if (!normalizedTariffs.Free) {
-  const knownSum = normalizedTariffs.Plus + normalizedTariffs.Pro + normalizedTariffs.Unlimited + normalizedTariffs.Other;
-  const totalUsers = Number(totals.total_users || 0);
-  if (totalUsers >= knownSum) normalizedTariffs.Free = totalUsers - knownSum;
-}
-
-const stats = {
-  total_users: totals.total_users,
-  active_users: totals.active_users,
-  total_downloads: Number(totals.total_downloads) || 0,
-  active_today: totals.active_today,
-  queueWaiting: downloadQueue.size,
-  queueActive: downloadQueue.pending,
-  cachedTracksCount: cachedTracksCount,
-  usersByTariff: normalizedTariffs, // <= используем нормализованные
-  topSources: topSources || [],
-  totalReferred: referralStats.totalReferred,
-  topReferrers: referralStats.topReferrers
-};
-
-// Круговая диаграмма тоже по нормализованным значениям и в фиксированном порядке
-const chartDataTariffs = {
-  labels: ['Free', 'Plus', 'Pro', 'Unlimited', 'Other'],
-  datasets: [{
-    data: [
-      normalizedTariffs.Free,
-      normalizedTariffs.Plus,
-      normalizedTariffs.Pro,
-      normalizedTariffs.Unlimited,
-      normalizedTariffs.Other
-    ],
-    backgroundColor: ['#6c757d', '#17a2b8', '#ffc107', '#007bff', '#dc3545']
-  }]
-};
-      const chartDataWeekday = {
-        labels: (weekdayActivity || []).map(d => d.weekday.trim()),
-        datasets: [{ label: 'Загрузки', data: (weekdayActivity || []).map(d => d.count), backgroundColor: 'rgba(13, 110, 253, 0.5)' }]
-      };
-
-      const chartDataHourly = {
-        labels: Array.from({ length: 24 }, (_, i) => `${i.toString().padStart(2, '0')}:00`),
-        datasets: [{
-          label: 'Загрузки',
-          data: hourlyActivity,
-          backgroundColor: 'rgba(255, 99, 132, 0.5)',
-          borderColor: 'rgba(255, 99, 132, 1)',
-          borderWidth: 1
-        }]
-      };
-
-      res.render('dashboard', {
-        title: 'Дашборд',
-        page: 'dashboard',
-        stats,
-        storageStatus,
-        startDate: req.query.startDate,
-        resetOthers: req.query.resetOthers || null,
-        endDate: req.query.endDate,
-        chartDataCombined,
-        chartDataTariffs,
-        chartDataWeekday,
-        topTracks,
-        resetExpired: req.query.resetExpired || null,
-        topUsers,
-        chartDataHourly,
-        expiredCount
-      });
-    } catch (error) {
-      console.error('Ошибка дашборда:', error);
-      res.status(500).send('Ошибка сервера');
     }
-  });
+    
+    const [
+      totals,
+      cachedTracksCount,
+      usersByTariff,
+      topSources,
+      dailyStats,
+      weekdayActivity,
+      topTracks,
+      topUsers,
+      hourlyActivity,
+      referralStats,
+      expiredCountResult
+    ] = await Promise.all([
+      getUsersTotalsSnapshot(),
+      getCachedTracksCount(),
+      getUsersCountByTariff(),
+      getTopReferralSources(),
+      getDailyStats({ startDate: req.query.startDate, endDate: req.query.endDate }),
+      getActivityByWeekday(),
+      getTopTracks(),
+      getTopUsers(),
+      getHourlyActivity(),
+      getReferralStats(),
+      pool.query(`
+        SELECT COUNT(*)::int AS expired_count
+        FROM users
+        WHERE premium_until IS NOT NULL
+          AND premium_until < NOW()
+          AND premium_limit <> 5
+      `)
+    ]);
+    
+    const expiredCount = Number(expiredCountResult?.rows?.[0]?.expired_count ?? 0);
+    
+    // Нормализация тарифов (фиксируем регистр ключей + фоллбек для Free)
+    const rawTariffs = usersByTariff || {};
+    const normalizedTariffs = {
+      Free: Number(rawTariffs.Free ?? rawTariffs.free ?? 0),
+      Plus: Number(rawTariffs.Plus ?? rawTariffs.plus ?? 0),
+      Pro: Number(rawTariffs.Pro ?? rawTariffs.pro ?? 0),
+      Unlimited: Number(rawTariffs.Unlimited ?? rawTariffs.unlimited ?? 0),
+      Other: Number(rawTariffs.Other ?? rawTariffs.other ?? rawTariffs.Legacy ?? 0)
+    };
+    
+    if (!normalizedTariffs.Free) {
+      const knownSum = normalizedTariffs.Plus + normalizedTariffs.Pro + normalizedTariffs.Unlimited + normalizedTariffs.Other;
+      const totalUsers = Number(totals.total_users || 0);
+      if (totalUsers >= knownSum) normalizedTariffs.Free = totalUsers - knownSum;
+    }
+    
+    const stats = {
+      total_users: totals.total_users,
+      active_users: totals.active_users,
+      total_downloads: Number(totals.total_downloads) || 0,
+      active_today: totals.active_today,
+      queueWaiting: downloadQueue.size,
+      queueActive: downloadQueue.pending,
+      cachedTracksCount: cachedTracksCount,
+      usersByTariff: normalizedTariffs,
+      topSources: topSources || [],
+      totalReferred: referralStats.totalReferred,
+      topReferrers: referralStats.topReferrers
+    };
+    
+    // ДАННЫЕ ДЛЯ ГРАФИКОВ
+    const chartDataCombined = {
+      labels: (dailyStats || []).map(d =>
+        new Date(d.day).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })
+      ),
+      datasets: [
+        { label: 'Регистрации', data: (dailyStats || []).map(d => d.registrations), borderColor: '#198754', tension: 0.1, fill: false },
+        { label: 'Активные юзеры', data: (dailyStats || []).map(d => d.active_users), borderColor: '#0d6efd', tension: 0.1, fill: false },
+        { label: 'Загрузки', data: (dailyStats || []).map(d => d.downloads), borderColor: '#fd7e14', tension: 0.1, fill: false }
+      ]
+    };
+    
+    const chartDataTariffs = {
+      labels: ['Free', 'Plus', 'Pro', 'Unlimited', 'Other'],
+      datasets: [{
+        data: [
+          normalizedTariffs.Free,
+          normalizedTariffs.Plus,
+          normalizedTariffs.Pro,
+          normalizedTariffs.Unlimited,
+          normalizedTariffs.Other
+        ],
+        backgroundColor: ['#6c757d', '#17a2b8', '#ffc107', '#007bff', '#dc3545']
+      }]
+    };
+    
+    const chartDataWeekday = {
+      labels: (weekdayActivity || []).map(d => (d.weekday || '').toString().trim()),
+      datasets: [{
+        label: 'Загрузки',
+        data: (weekdayActivity || []).map(d => d.count),
+        backgroundColor: 'rgba(13, 110, 253, 0.5)'
+      }]
+    };
+    
+    const chartDataHourly = {
+      labels: Array.from({ length: 24 }, (_, i) => `${i.toString().padStart(2, '0')}:00`),
+      datasets: [{
+        label: 'Загрузки',
+        data: hourlyActivity,
+        backgroundColor: 'rgba(255, 99, 132, 0.5)',
+        borderColor: 'rgba(255, 99, 132, 1)',
+        borderWidth: 1
+      }]
+    };
+    
+    res.render('dashboard', {
+      title: 'Дашборд',
+      page: 'dashboard',
+      stats,
+      storageStatus,
+      startDate: req.query.startDate,
+      resetOthers: req.query.resetOthers || null,
+      endDate: req.query.endDate,
+      chartDataCombined,
+      chartDataTariffs,
+      chartDataWeekday,
+      topTracks,
+      resetExpired: req.query.resetExpired || null,
+      topUsers,
+      chartDataHourly,
+      expiredCount
+    });
+  } catch (error) {
+    console.error('Ошибка дашборда:', error);
+    res.status(500).send('Ошибка сервера');
+  }
+});
 
   app.get('/users', requireAuth, async (req, res) => {
     try {
