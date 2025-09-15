@@ -1,7 +1,14 @@
 // services/notifier.js
-import { findUsersExpiringIn, markStageNotified, updateUserField, pool, logUserAction } from '../db.js';
+
+import {
+  findUsersExpiringIn,
+  markStageNotified,
+  updateUserField,
+  logUserAction
+} from '../db.js';
 import { T } from '../config/texts.js';
 
+// Чтобы отправлять раз в сутки (после 10:00 UTC)
 let lastNotificationDate = null;
 
 function pluralDays(n) {
@@ -13,11 +20,22 @@ function pluralDays(n) {
   return 'дней';
 }
 
-// Дневной нотайфер: 3д/1д/0д (у тебя уже был)
+/**
+ * Дневной нотайфер: 3д / 1д / 0д
+ * Вызывается часто (раз в минуту), но реально срабатывает 1 раз в день после 10:00 UTC.
+ * Использует окна (сутки по UTC) и флаги:
+ *  - notified_exp_3d
+ *  - notified_exp_1d
+ *  - notified_exp_0d
+ */
 export async function checkAndSendExpirationNotifications(bot) {
   const now = new Date();
   const currentDate = now.toISOString().slice(0, 10);
+
+  // Уже делали сегодня — выходим
   if (currentDate === lastNotificationDate) return;
+
+  // Шлем ОДИН РАЗ после 10:00 UTC (устойчиво к рестартам)
   if (now.getUTCHours() < 10) return;
 
   console.log(`[Notifier] Старт рассылки за ${currentDate} (UTC>=10:00).`);
@@ -32,11 +50,14 @@ export async function checkAndSendExpirationNotifications(bot) {
     for (const s of stages) {
       const users = await findUsersExpiringIn(s.days, s.flag);
       if (!users?.length) continue;
+
       console.log(`[Notifier] Этап ${s.days}д: ${users.length} пользователей.`);
 
       for (const u of users) {
         const name = u.first_name || 'пользователь';
         const daysWord = pluralDays(s.days);
+
+        // Текст из конфигов, либо дефолт
         let tpl = T(s.key) || (
           s.days === 3
             ? `👋 Привет, {name}!\nВаша подписка истекает через {days} {days_word}.\nНе забудьте продлить: /premium`
@@ -44,49 +65,52 @@ export async function checkAndSendExpirationNotifications(bot) {
               ? `👋 Привет, {name}!\nВаша подписка истекает завтра.\nПродлите заранее: /premium`
               : `⚠️ Привет, {name}!\nВаша подписка истекает сегодня.\nПродлите сейчас: /premium`
         );
-        const msg = tpl.replace('{name}', name).replace('{days}', String(s.days)).replace('{days_word}', daysWord);
+
+        const msg = tpl
+          .replace('{name}', name)
+          .replace('{days}', String(s.days))
+          .replace('{days_word}', daysWord);
 
         try {
           await bot.telegram.sendMessage(u.id, msg);
           await markStageNotified(u.id, s.flag);
-          await logUserAction(u.id, 'premium_expiring_notified', { stage: s.flag, premium_until: u.premium_until });
+          await logUserAction(u.id, 'premium_expiring_notified', {
+            stage: s.flag,
+            premium_until: u.premium_until
+          });
         } catch (e) {
           if (e?.response?.error_code === 403) {
+            // Пользователь заблокировал бота — деактивируем и помечаем флаг, чтобы не спамить
             await updateUserField(u.id, 'active', false).catch(() => {});
             await markStageNotified(u.id, s.flag).catch(() => {});
           } else {
             console.error(`[Notifier] Ошибка отправки ${u.id}:`, e?.message || e);
           }
         }
+
+        // Лёгкий троттлинг ~3.3 сообщения/сек
         await new Promise(r => setTimeout(r, 300));
       }
     }
   } catch (e) {
     console.error('[Notifier] Fatal:', e);
   } finally {
+    // Помечаем, что рассылка за текущую дату выполнена (даже если 0 получателей)
     lastNotificationDate = currentDate;
     console.log('[Notifier] Завершено.');
   }
 }
 
-// Почасовой нотайфер: страхует "сегодня" (0d), чтобы не промахнуться
-export async function notifyExpiringTodayHourly(bot, lookaheadHours = 24) {
+/**
+ * Почасовой нотайфер: страхует только "сегодня" (0д).
+ * Использует тот же флаг notified_exp_0d — дублей с дневным не будет.
+ * Планировать раз в час.
+ */
+export async function notifyExpiringTodayHourly(bot) {
   try {
-    const { rows: users } = await pool.query(
-      `
-      SELECT id, first_name, premium_until
-      FROM users
-      WHERE premium_limit <> 5
-        AND premium_until IS NOT NULL
-        AND premium_until > NOW()
-        AND premium_until <= NOW() + ($1 || ' hours')::interval
-        AND COALESCE(notified_exp_0d, false) = false
-      LIMIT 300
-      `,
-      [lookaheadHours]
-    );
-
-    if (!users.length) return;
+    // Берём тех, у кого истечение сегодня (окно суток по UTC), и кто ещё не уведомлён по 0d
+    const users = await findUsersExpiringIn(0, 'notified_exp_0d');
+    if (!users?.length) return;
 
     console.log(`[Notifier/Hourly-0d] кандидатов: ${users.length}`);
 
@@ -95,6 +119,7 @@ export async function notifyExpiringTodayHourly(bot, lookaheadHours = 24) {
         day: '2-digit', month: '2-digit', year: 'numeric',
         hour: '2-digit', minute: '2-digit'
       });
+
       const text =
         `⏳ Ваша подписка истекает сегодня.\n\n` +
         `Дата окончания: ${untilText}.\n` +
@@ -105,10 +130,14 @@ export async function notifyExpiringTodayHourly(bot, lookaheadHours = 24) {
       } catch (e) {
         console.warn('[Notifier/Hourly-0d] send fail', u.id, e.message);
       } finally {
-        // помечаем вне зависимости от результата, чтобы не дудосить
+        // Флаг ставим в любом случае, чтобы не дудосить при повторных проверках
         await markStageNotified(u.id, 'notified_exp_0d').catch(() => {});
-        await logUserAction(u.id, 'premium_expiring_notified', { stage: 'notified_exp_0d', premium_until: u.premium_until }).catch(() => {});
+        await logUserAction(u.id, 'premium_expiring_notified', {
+          stage: 'notified_exp_0d',
+          premium_until: u.premium_until
+        }).catch(() => {});
       }
+
       await new Promise(r => setTimeout(r, 250));
     }
   } catch (e) {
