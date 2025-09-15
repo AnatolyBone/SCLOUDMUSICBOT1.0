@@ -116,52 +116,51 @@
     <div class="card shadow-sm h-100">
       <div class="card-header">Пользователи по тарифам</div>
       <div class="card-body">
-  <% const othersCount =
-    Number(stats?.usersByTariff?.Other ?? 0) ||
-    Number(stats?.usersByTariff?.other ?? 0) ||
-    Number(stats?.usersByTariff?.Legacy ?? 0) ||
-    0;
-  %>
-  <% const expiredCountSafe = Number(locals.expiredCount ?? 0); %>
+<% const othersCount =
+  Number(stats?.usersByTariff?.Other ?? 0) ||
+  Number(stats?.usersByTariff?.other ?? 0) ||
+  Number(stats?.usersByTariff?.Legacy ?? 0) ||
+  0;
+%>
+<% const expiredCountSafe = Number(locals.expiredCount ?? 0); %>
 
-  <ul class="list-group list-group-flush">
-    <li class="list-group-item d-flex justify-content-between align-items-center px-0">
-      <span>🆓 Free</span>
-      <span class="fw-bold"><%= (stats.usersByTariff?.Free ?? 0) %></span>
-    </li>
-    <li class="list-group-item d-flex justify-content-between align-items-center px-0">
-      <span>🎯 Plus</span>
-      <span class="fw-bold"><%= (stats.usersByTariff?.Plus ?? 0) %></span>
-    </li>
-    <li class="list-group-item d-flex justify-content-between align-items-center px-0">
-      <span>💪 Pro</span>
-      <span class="fw-bold"><%= (stats.usersByTariff?.Pro ?? 0) %></span>
-    </li>
-    <li class="list-group-item d-flex justify-content-between align-items-center px-0">
-      <span>💎 Unlimited</span>
-      <span class="fw-bold"><%= (stats.usersByTariff?.Unlimited ?? 0) %></span>
-    </li>
+<ul class="list-group list-group-flush">
+  <li class="list-group-item d-flex justify-content-between align-items-center px-0">
+    <span>🆓 Free</span>
+    <span class="fw-bold"><%= stats.usersByTariff?.Free ?? 0 %></span>
+  </li>
+  <li class="list-group-item d-flex justify-content-between align-items-center px-0">
+    <span>🎯 Plus</span>
+    <span class="fw-bold"><%= stats.usersByTariff?.Plus ?? 0 %></span>
+  </li>
+  <li class="list-group-item d-flex justify-content-between align-items-center px-0">
+    <span>💪 Pro</span>
+    <span class="fw-bold"><%= stats.usersByTariff?.Pro ?? 0 %></span>
+  </li>
+  <li class="list-group-item d-flex justify-content-between align-items-center px-0">
+    <span>💎 Unlimited</span>
+    <span class="fw-bold"><%= stats.usersByTariff?.Unlimited ?? 0 %></span>
+  </li>
 
-    <% if (othersCount > 0) { %>
-      <li class="list-group-item d-flex justify-content-between align-items-center px-0 bg-light-warning">
-        <span class="fw-bold">⚙️ Другие (старые)</span>
-        <span class="fw-bold"><%= othersCount %></span>
-      </li>
-      <li class="list-group-item px-0">
-        <form method="post" action="/tariffs/reset-others" class="mt-2">
-          <button type="submit" class="btn btn-sm btn-warning">
-            Сбросить «Другие (старые)» до Free (5)
-          </button>
-        </form>
-      </li>
-    <% } %>
-
-    <!-- Истёкшие показываем отдельно -->
-    <li class="list-group-item d-flex justify-content-between align-items-center px-0">
-      <span>⌛ Истёкшие (не Free)</span>
-      <span class="fw-bold"><%= expiredCountSafe %></span>
+  <% if (othersCount > 0) { %>
+    <li class="list-group-item d-flex justify-content-between align-items-center px-0 bg-light-warning">
+      <span class="fw-bold">⚙️ Другие (старые)</span>
+      <span class="fw-bold"><%= othersCount %></span>
     </li>
-  </ul>
+    <li class="list-group-item px-0">
+      <form method="post" action="/tariffs/reset-others" class="mt-2">
+        <button type="submit" class="btn btn-sm btn-warning">
+          Сбросить «Другие (старые)» до Free (5)
+        </button>
+      </form>
+    </li>
+  <% } %>
+
+  <li class="list-group-item d-flex justify-content-between align-items-center px-0">
+    <span>⌛ Истёкшие (не Free)</span>
+    <span class="fw-bold"><%= expiredCountSafe %></span>
+  </li>
+</ul>
 
   <form method="post" action="/tariffs/reset-expired" class="mt-2"
         onsubmit="return confirm('Сбросить все истёкшие подписки до Free (5/день)?');">
