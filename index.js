@@ -703,65 +703,39 @@ res.redirect('/dashboard?resetExpired=err');
       res.status(500).send('Ошибка сервера');
     }
   });
-
 app.post('/set-tariff', requireAuth, async (req, res) => {
   const { userId, limit, days, applyMode } = req.body;
-  const newLimit = parseInt(limit, 10);
-  const nDays = parseInt(days, 10) || 30;
-  const mode = applyMode === 'extend' ? 'extend' : 'set'; // по умолчанию НЕ суммируем
-  
   try {
-    let until = null;
-    
-    if (mode === 'extend') {
-      // Продление — оставляем твой setPremium как есть (он суммирует)
-      await setPremium(userId, newLimit, nDays);
-      if (newLimit > 5) {
-        const { rows } = await pool.query('SELECT premium_until FROM users WHERE id = $1', [userId]);
-        until = rows?.[0]?.premium_until || null;
-      }
-    } else {
-      // Установка заново — без суммирования
-      const { rows } = await pool.query(`
-        UPDATE users
-        SET premium_limit = $2,
-            premium_until = CASE
-              WHEN $2 <= 5 THEN NULL
-              ELSE NOW() + ($3::int * INTERVAL '1 day')
-            END
-        WHERE id = $1
-        RETURNING premium_until
-      `, [userId, newLimit, nDays]);
-      until = rows?.[0]?.premium_until || null;
-    }
-    
+    const newLimit = parseInt(limit, 10);
+    const nDays = parseInt(days, 10) || 30;
+    const mode = applyMode === 'extend' ? 'extend' : 'set'; // по умолчанию НЕ суммируем
+
+    const updated = await setTariffAdmin(userId, newLimit, nDays, { mode });
+
     await logUserAction(userId, 'tariff_changed_by_admin', {
-      new_limit: newLimit,
-      days: nDays,
-      mode
+      new_limit: newLimit, days: nDays, mode
     });
-    
+
     let tariffName = '';
     if (newLimit <= 5) tariffName = 'Free';
     else if (newLimit <= 30) tariffName = 'Plus';
     else if (newLimit <= 100) tariffName = 'Pro';
     else tariffName = 'Unlimited';
-    
-    const untilText = newLimit <= 5 ?
-      'бессрочно (Free)' :
-      new Date(until).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-    
-    const message =
+
+    const untilText = newLimit <= 5
+      ? 'бессрочно (Free)'
+      : new Date(updated.premium_until).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+
+    const msg =
       `🎉 Ваш тариф был обновлен администратором!\n\n` +
       `Новый тариф: *${tariffName}* (${newLimit} загрузок/день).\n` +
       `Срок действия: *${untilText}*` +
       (mode === 'extend' ? ` (продлён).` : ` (установлен заново).`);
-    
-    await bot.telegram.sendMessage(userId, message, { parse_mode: 'Markdown' });
+
+    await bot.telegram.sendMessage(userId, msg, { parse_mode: 'Markdown' });
   } catch (error) {
     console.error(`[Admin] Ошибка при смене тарифа для ${userId}:`, error.message);
   }
-  
   const back = req.get('Referer') || '/users';
   res.redirect(back);
 });
