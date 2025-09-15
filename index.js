@@ -315,8 +315,8 @@ function setupExpress() {
   topUsers,
   hourlyActivity,
   referralStats,
-  tariffsActiveResult, // активные тарифы без просроченных
-  othersResult, // другие (старые) — без учёта просрочки
+  tariffsActiveResult, // активные тарифы (без просроченных)
+  othersResult, // другие (старые)
   expiredCountResult // истёкшие (не Free)
 ] = await Promise.all([
   getUsersTotalsSnapshot(),
@@ -337,7 +337,7 @@ function setupExpress() {
       COUNT(*) FILTER (WHERE premium_limit > 100 AND (premium_until IS NULL OR premium_until >= NOW())) AS unlimited
     FROM users
   `),
-  // Другие (старые): считаем независимо от срока, просто все нестандартные/NULL лимиты
+  // Другие (старые): если хочешь считать всех (в т.ч. просроченных)
   pool.query(`
     SELECT COUNT(*)::int AS other
     FROM users
