@@ -258,29 +258,28 @@ export async function getUsersAsCsv(options) {
 // ЗАМЕНИ СТАРУЮ ФУНКЦИЮ setPremium НА ЭТУ В db.js
 
 export async function setPremium(userId, limit, days = 30) {
-  const user = await getUser(userId);
-  if (!user) return false;
-  
-  const now = new Date();
-  
-  // Если подписка активна — продлеваем от старой даты, иначе считаем от "сейчас"
-  const base = (user.premium_until && new Date(user.premium_until) > now) ?
-    new Date(user.premium_until) :
-    now;
-  
-  const newPremiumUntil = new Date(base);
-  newPremiumUntil.setDate(newPremiumUntil.getDate() + Number(days || 0));
-  
-  console.log(`[Premium] ${base === now ? 'Выдаю новую' : 'Продлеваю'} подписку для ${userId}. Старая дата: ${user.premium_until || '-'}, новая: ${newPremiumUntil.toISOString()}`);
-  
-  return updateUserField(userId, {
-    premium_limit: Number(limit),
-    premium_until: newPremiumUntil.toISOString(),
-    notified_about_expiration: false // Сбрасываем флаг, чтобы в новом периоде снова пришло напоминание
-  });
+  const d = Number(days) || 0;
+  const sql = `
+    UPDATE users
+    SET
+      premium_limit = $2,
+      premium_until = CASE
+        WHEN $2 <= 5 THEN NULL
+        ELSE
+          (CASE
+            WHEN premium_until IS NOT NULL AND premium_until > NOW()
+              THEN premium_until
+            ELSE NOW()
+          END) + ($3::int * INTERVAL '1 day')
+      END,
+      notified_about_expiration = false
+    WHERE id = $1
+    RETURNING id, premium_limit, premium_until
+  `;
+  const { rows } = await pool.query(sql, [userId, Number(limit), d]);
+  return rows[0];
 }
 export async function setTariffAdmin(userId, limit, days, { mode = 'set' } = {}) {
-  // mode: 'set' | 'extend'
   const sql = `
     UPDATE users
     SET
@@ -295,11 +294,12 @@ export async function setTariffAdmin(userId, limit, days, { mode = 'set' } = {})
            END) + ($3 || ' days')::interval
         ELSE
           NOW() + ($3 || ' days')::interval
-      END
+      END,
+      notified_about_expiration = false
     WHERE id = $1
     RETURNING id, premium_limit, premium_until
   `;
-  const { rows } = await pool.query(sql, [userId, limit, days, mode]);
+  const { rows } = await pool.query(sql, [userId, Number(limit), Number(days), mode]);
   return rows[0];
 }
 export async function resetDailyLimitIfNeeded(userId) {
