@@ -703,17 +703,21 @@ res.redirect('/dashboard?resetExpired=err');
       res.status(500).send('Ошибка сервера');
     }
   });
+import { setTariffAdmin } from './db.js';
+
 app.post('/set-tariff', requireAuth, async (req, res) => {
   const { userId, limit, days, applyMode } = req.body;
   try {
     const newLimit = parseInt(limit, 10);
     const nDays = parseInt(days, 10) || 30;
-    const mode = applyMode === 'extend' ? 'extend' : 'set'; // по умолчанию НЕ суммируем
+    const mode = applyMode === 'extend' ? 'extend' : 'set';
 
     const updated = await setTariffAdmin(userId, newLimit, nDays, { mode });
 
     await logUserAction(userId, 'tariff_changed_by_admin', {
-      new_limit: newLimit, days: nDays, mode
+      new_limit: newLimit,
+      days: nDays,
+      mode
     });
 
     let tariffName = '';
@@ -724,22 +728,24 @@ app.post('/set-tariff', requireAuth, async (req, res) => {
 
     const untilText = newLimit <= 5
       ? 'бессрочно (Free)'
-      : new Date(updated.premium_until).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+      : new Date(updated.premium_until).toLocaleString('ru-RU', {
+          day: '2-digit', month: '2-digit', year: 'numeric',
+          hour: '2-digit', minute: '2-digit'
+        });
 
-    const msg =
+    const message =
       `🎉 Ваш тариф был обновлен администратором!\n\n` +
       `Новый тариф: *${tariffName}* (${newLimit} загрузок/день).\n` +
-      `Срок действия: *${untilText}*` +
-      (mode === 'extend' ? ` (продлён).` : ` (установлен заново).`);
+      `Срок действия: *${untilText}* ` +
+      (mode === 'extend' ? '(продлён).' : '(установлен заново).');
 
-    await bot.telegram.sendMessage(userId, msg, { parse_mode: 'Markdown' });
+    await bot.telegram.sendMessage(userId, message, { parse_mode: 'Markdown' });
   } catch (error) {
     console.error(`[Admin] Ошибка при смене тарифа для ${userId}:`, error.message);
   }
   const back = req.get('Referer') || '/users';
   res.redirect(back);
 });
-
   app.post('/reset-bonus', requireAuth, async (req, res) => {
     const { userId } = req.body;
     if (userId) { await updateUserField(userId, 'subscribed_bonus_used', false); }
