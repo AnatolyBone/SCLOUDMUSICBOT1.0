@@ -279,6 +279,29 @@ export async function setPremium(userId, limit, days = 30) {
     notified_about_expiration: false // Сбрасываем флаг, чтобы в новом периоде снова пришло напоминание
   });
 }
+export async function setTariffAdmin(userId, limit, days, { mode = 'set' } = {}) {
+  // mode: 'set' | 'extend'
+  const sql = `
+    UPDATE users
+    SET
+      premium_limit = $2,
+      premium_until = CASE
+        WHEN $2 <= 5 THEN NULL
+        WHEN $4 = 'extend' THEN
+          (CASE
+             WHEN premium_until IS NOT NULL AND premium_until > NOW()
+               THEN premium_until
+             ELSE NOW()
+           END) + ($3 || ' days')::interval
+        ELSE
+          NOW() + ($3 || ' days')::interval
+      END
+    WHERE id = $1
+    RETURNING id, premium_limit, premium_until
+  `;
+  const { rows } = await pool.query(sql, [userId, limit, days, mode]);
+  return rows[0];
+}
 export async function resetDailyLimitIfNeeded(userId) {
   const { rows } = await query('SELECT last_reset_date FROM users WHERE id = $1', [userId]);
   if (rows.length > 0) {
