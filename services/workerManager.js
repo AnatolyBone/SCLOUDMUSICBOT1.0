@@ -1,4 +1,4 @@
-// services/workerManager.js (ИСПРАВЛЕННАЯ ВЕРСИЯ)
+// services/workerManager.js
 
 import cron from 'node-cron';
 import {
@@ -7,9 +7,12 @@ import {
   updateBroadcastStatus,
   getUsersForBroadcastBatch,
   findAndInterruptActiveBroadcast,
-  resetExpiredPremiumsBulk // ← добавлено
+  resetExpiredPremiumsBulk
 } from '../db.js';
-import { checkAndSendExpirationNotifications } from './notifier.js';
+import {
+  checkAndSendExpirationNotifications,
+  notifyExpiringTodayHourly
+} from './notifier.js';
 import redisService from './redisClient.js';
 import { downloadQueue } from './downloadManager.js';
 import { isShuttingDown, setShuttingDown, isBroadcasting, setBroadcasting } from './appState.js';
@@ -17,23 +20,25 @@ import { runBroadcastBatch, sendAdminReport } from './broadcastManager.js';
 
 let botInstance;
 
+// Аккуратное завершение сервиса
 function setupGracefulShutdown(server) {
   const SHUTDOWN_TIMEOUT = 25000;
 
   const gracefulShutdown = async (signal) => {
-    // =====> ИСПРАВЛЕНИЕ №1 <=====
+    // Защита от повторных входов
     if (isShuttingDown) return;
     setShuttingDown(true);
 
     console.log(`[Shutdown] Получен сигнал ${signal}. Начинаю изящное завершение...`);
     server.close(() => console.log('[Shutdown] HTTP сервер закрыт.'));
 
-    // =====> ИСПРАВЛЕНИЕ №2 <=====
+    // Если идёт рассылка — пометим прерванной
     if (isBroadcasting) {
       console.log('[Shutdown] Обнаружена активная рассылка. Помечаю ее как прерванную...');
       await findAndInterruptActiveBroadcast();
     }
 
+    // Ждём задачи очереди (или таймаут)
     if (downloadQueue.pending > 0 || downloadQueue.size > 0) {
       console.log(`[Shutdown] Ожидаю завершения задач в очереди (макс. ${SHUTDOWN_TIMEOUT / 1000}с)...`);
       await Promise.race([
@@ -53,24 +58,41 @@ function setupGracefulShutdown(server) {
   process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 }
 
+// Нотифаер: дневной + почасовой
 function startNotifierWorker() {
-  console.log('[Notifier] Планировщик запущен (tick=60s).');
-  let running = false;
+  console.log('[Notifier] Планировщик запущен (daily + hourly).');
 
+  let runningDaily = false;
+  let runningHourly = false;
+
+  // Дневной: проверяем каждую минуту; реально шлёт 1 раз после 10:00 UTC (внутренний гейт)
   cron.schedule('* * * * *', async () => {
-    if (running || isShuttingDown) return;
-    running = true;
+    if (runningDaily || isShuttingDown) return;
+    runningDaily = true;
     try {
       await checkAndSendExpirationNotifications(botInstance);
     } catch (e) {
-      console.error('[Notifier] tick error:', e.message);
+      console.error('[Notifier] daily tick error:', e.message);
     } finally {
-      running = false;
+      runningDaily = false;
+    }
+  });
+
+  // Почасовой: в начале каждого часа страхуем "сегодня" (0д)
+  cron.schedule('0 * * * *', async () => {
+    if (runningHourly || isShuttingDown) return;
+    runningHourly = true;
+    try {
+      await notifyExpiringTodayHourly(botInstance);
+    } catch (e) {
+      console.error('[Notifier] hourly tick error:', e.message);
+    } finally {
+      runningHourly = false;
     }
   });
 }
 
-// НОВЫЙ ВОРКЕР: ночной автосброс истёкших подписок до Free
+// Ночной автосброс истёкших подписок до Free
 function startPremiumAutoResetWorker() {
   console.log('[Premium/BulkReset] Планировщик запущен (ежедневно 00:10 UTC).');
   cron.schedule(
@@ -88,7 +110,7 @@ function startPremiumAutoResetWorker() {
   );
 }
 
-// ЗАМЕНИ СТАРУЮ ФУНКЦИЮ startBroadcastWorker НА ЭТУ В workerManager.js
+// Планировщик рассылок
 function startBroadcastWorker() {
   console.log('[Broadcast Worker] Планировщик запущен.');
   const BATCH_SIZE = 100;
@@ -97,7 +119,7 @@ function startBroadcastWorker() {
   cron.schedule('* * * * *', async () => {
     if (isBroadcasting || isShuttingDown) return;
 
-    let task; // Объявляем переменную task здесь
+    let task;
 
     try {
       task = await getAndStartPendingBroadcastTask();
@@ -129,7 +151,6 @@ function startBroadcastWorker() {
         await updateBroadcastStatus(task.id, 'failed', error.message);
       }
     } finally {
-      // Этот блок теперь выполнится, даже если бот упадет в try
       if (isBroadcasting) {
         setBroadcasting(false);
         downloadQueue.start();
@@ -142,7 +163,7 @@ function startBroadcastWorker() {
 export function initializeWorkers(server, bot) {
   botInstance = bot;
   startBroadcastWorker();
-  startNotifierWorker(); // ← ДОБАВЬ ЭТО
-  startPremiumAutoResetWorker(); // ← nightly auto-reset истёкших подписок
+  startNotifierWorker();
+  startPremiumAutoResetWorker();
   setupGracefulShutdown(server);
 }
