@@ -306,91 +306,102 @@ function setupExpress() {
     }
     
     const [
-  totals,
-  cachedTracksCount,
-  topSources,
-  dailyStats,
-  weekdayActivity,
-  topTracks,
-  topUsers,
-  hourlyActivity,
-  referralStats,
-  tariffsActiveResult, // <-- активные тарифы (без просроченных)
-  expiredCountResult // <-- истёкшие (не Free)
-] = await Promise.all([
-  getUsersTotalsSnapshot(),
-  getCachedTracksCount(),
-  getTopReferralSources(),
-  getDailyStats({ startDate: req.query.startDate, endDate: req.query.endDate }),
-  getActivityByWeekday(),
-  getTopTracks(),
-  getTopUsers(),
-  getHourlyActivity(),
-  getReferralStats(),
-  pool.query(`
-    SELECT
-      COUNT(*) FILTER (WHERE premium_limit = 5) AS free,
-      COUNT(*) FILTER (WHERE premium_limit BETWEEN 6 AND 30 AND (premium_until IS NULL OR premium_until >= NOW())) AS plus,
-      COUNT(*) FILTER (WHERE premium_limit BETWEEN 31 AND 100 AND (premium_until IS NULL OR premium_until >= NOW())) AS pro,
-      COUNT(*) FILTER (WHERE premium_limit > 100 AND (premium_until IS NULL OR premium_until >= NOW())) AS unlimited,
-      COUNT(*) FILTER (
-        WHERE (premium_limit IS NULL OR premium_limit NOT IN (5)
-               AND NOT (premium_limit BETWEEN 6 AND 30)
-               AND NOT (premium_limit BETWEEN 31 AND 100)
-               AND NOT (premium_limit > 100))
-          AND (premium_until IS NULL OR premium_until >= NOW())
-      ) AS other
-    FROM users
-  `),
-  pool.query(`
-    SELECT COUNT(*)::int AS expired_count
-    FROM users
-    WHERE premium_until IS NOT NULL
-      AND premium_until < NOW()
-      AND premium_limit <> 5
-  `)
-]);
-
-const expiredCount = Number(expiredCountResult?.rows?.[0]?.expired_count ?? 0);
-
-const t = tariffsActiveResult?.rows?.[0] || {};
-const usersByTariff = {
-  Free: Number(t.free || 0),
-  Plus: Number(t.plus || 0),
-  Pro: Number(t.pro || 0),
-  Unlimited: Number(t.unlimited || 0),
-  Other: Number(t.other || 0)
-};
-
-const stats = {
-  total_users: totals.total_users,
-  active_users: totals.active_users,
-  total_downloads: Number(totals.total_downloads) || 0,
-  active_today: totals.active_today,
-  queueWaiting: downloadQueue.size,
-  queueActive: downloadQueue.pending,
-  cachedTracksCount: cachedTracksCount,
-  usersByTariff, // <-- используем активные тарифы
-  topSources: topSources || [],
-  totalReferred: referralStats.totalReferred,
-  topReferrers: referralStats.topReferrers
-};
-
-// Круговая — строим по usersByTariff (без истёкших)
-const chartDataTariffs = {
-  labels: ['Free', 'Plus', 'Pro', 'Unlimited', 'Other'],
-  datasets: [{
-    data: [
-      usersByTariff.Free,
-      usersByTariff.Plus,
-      usersByTariff.Pro,
-      usersByTariff.Unlimited,
-      usersByTariff.Other
-    ],
-    backgroundColor: ['#6c757d', '#17a2b8', '#ffc107', '#007bff', '#dc3545']
-  }]
-};
-
+      totals,
+      cachedTracksCount,
+      topSources,
+      dailyStats,
+      weekdayActivity,
+      topTracks,
+      topUsers,
+      hourlyActivity,
+      referralStats,
+      tariffsActiveResult, // активные тарифы (без просроченных)
+      expiredCountResult // истёкшие (не Free)
+    ] = await Promise.all([
+      getUsersTotalsSnapshot(),
+      getCachedTracksCount(),
+      getTopReferralSources(),
+      getDailyStats({ startDate: req.query.startDate, endDate: req.query.endDate }),
+      getActivityByWeekday(),
+      getTopTracks(),
+      getTopUsers(),
+      getHourlyActivity(),
+      getReferralStats(),
+      pool.query(`
+        SELECT
+          COUNT(*) FILTER (WHERE premium_limit = 5) AS free,
+          COUNT(*) FILTER (WHERE premium_limit BETWEEN 6 AND 30 AND (premium_until IS NULL OR premium_until >= NOW())) AS plus,
+          COUNT(*) FILTER (WHERE premium_limit BETWEEN 31 AND 100 AND (premium_until IS NULL OR premium_until >= NOW())) AS pro,
+          COUNT(*) FILTER (WHERE premium_limit > 100 AND (premium_until IS NULL OR premium_until >= NOW())) AS unlimited,
+          COUNT(*) FILTER (
+            WHERE (premium_limit IS NULL OR premium_limit NOT IN (5)
+                   AND NOT (premium_limit BETWEEN 6 AND 30)
+                   AND NOT (premium_limit BETWEEN 31 AND 100)
+                   AND NOT (premium_limit > 100))
+              AND (premium_until IS NULL OR premium_until >= NOW())
+          ) AS other
+        FROM users
+      `),
+      pool.query(`
+        SELECT COUNT(*)::int AS expired_count
+        FROM users
+        WHERE premium_until IS NOT NULL
+          AND premium_until < NOW()
+          AND premium_limit <> 5
+      `)
+    ]);
+    
+    const expiredCount = Number(expiredCountResult?.rows?.[0]?.expired_count ?? 0);
+    
+    const t = tariffsActiveResult?.rows?.[0] || {};
+    const usersByTariff = {
+      Free: Number(t.free || 0),
+      Plus: Number(t.plus || 0),
+      Pro: Number(t.pro || 0),
+      Unlimited: Number(t.unlimited || 0),
+      Other: Number(t.other || 0)
+    };
+    
+    const stats = {
+      total_users: totals.total_users,
+      active_users: totals.active_users,
+      total_downloads: Number(totals.total_downloads) || 0,
+      active_today: totals.active_today,
+      queueWaiting: downloadQueue.size,
+      queueActive: downloadQueue.pending,
+      cachedTracksCount: cachedTracksCount,
+      usersByTariff,
+      topSources: topSources || [],
+      totalReferred: referralStats.totalReferred,
+      topReferrers: referralStats.topReferrers
+    };
+    
+    // Графики — ОБЯЗАТЕЛЬНО до res.render
+    const chartDataCombined = {
+      labels: (dailyStats || []).map(d =>
+        new Date(d.day).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })
+      ),
+      datasets: [
+        { label: 'Регистрации', data: (dailyStats || []).map(d => d.registrations), borderColor: '#198754', tension: 0.1, fill: false },
+        { label: 'Активные юзеры', data: (dailyStats || []).map(d => d.active_users), borderColor: '#0d6efd', tension: 0.1, fill: false },
+        { label: 'Загрузки', data: (dailyStats || []).map(d => d.downloads), borderColor: '#fd7e14', tension: 0.1, fill: false }
+      ]
+    };
+    
+    const chartDataTariffs = {
+      labels: ['Free', 'Plus', 'Pro', 'Unlimited', 'Other'],
+      datasets: [{
+        data: [
+          usersByTariff.Free,
+          usersByTariff.Plus,
+          usersByTariff.Pro,
+          usersByTariff.Unlimited,
+          usersByTariff.Other
+        ],
+        backgroundColor: ['#6c757d', '#17a2b8', '#ffc107', '#007bff', '#dc3545']
+      }]
+    };
+    
     const chartDataWeekday = {
       labels: (weekdayActivity || []).map(d => (d.weekday || '').toString().trim()),
       datasets: [{
