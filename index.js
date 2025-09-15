@@ -385,7 +385,14 @@ const stats = {
   totalReferred: referralStats.totalReferred,
   topReferrers: referralStats.topReferrers
 };
-
+const chartDataCombined = {
+        labels: (dailyStats || []).map(d => new Date(d.day).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })),
+        datasets: [
+          { label: 'Регистрации', data: (dailyStats || []).map(d => d.registrations), borderColor: '#198754', tension: 0.1, fill: false },
+          { label: 'Активные юзеры', data: (dailyStats || []).map(d => d.active_users), borderColor: '#0d6efd', tension: 0.1, fill: false },
+          { label: 'Загрузки', data: (dailyStats || []).map(d => d.downloads), borderColor: '#fd7e14', tension: 0.1, fill: false }
+        ]
+      };
 // Для круговой — тоже берём usersByTariff
 const chartDataTariffs = {
   labels: ['Free', 'Plus', 'Pro', 'Unlimited', 'Other'],
