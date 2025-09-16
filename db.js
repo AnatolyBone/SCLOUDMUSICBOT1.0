@@ -301,9 +301,9 @@ export async function setTariffAdmin(userId, limit, days, { mode = 'set' } = {})
              WHEN premium_until IS NOT NULL AND premium_until > NOW()
                THEN premium_until
              ELSE NOW()
-           END) + ($3 || ' days')::interval
+           END) + make_interval(days => $3::int)
         ELSE
-          NOW() + ($3 || ' days')::interval
+          NOW() + make_interval(days => $3::int)
       END,
       notified_about_expiration = FALSE,
       notified_exp_3d = FALSE,
@@ -1027,8 +1027,14 @@ export async function markStageNotified(userId, flagField) {
   if (!allowed.has(flagField)) {
     throw new Error(`markStageNotified: invalid flag "${flagField}"`);
   }
-  // Прямой UPDATE — без двусмысленностей
-  await query(`UPDATE users SET ${flagField} = TRUE WHERE id = $1`, [userId]);
+  // Обновляем только если флаг ещё не был выставлен
+  const { rowCount } = await query(
+    `UPDATE users
+     SET ${flagField} = TRUE
+     WHERE id = $1 AND COALESCE(${flagField}, FALSE) = FALSE`,
+    [userId]
+  );
+  return rowCount > 0; // true, если реально проставили флаг
 }
 
 /* ========================= Вспомогательные ========================= */
