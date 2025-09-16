@@ -273,10 +273,9 @@ export async function setPremium(userId, limit, days = 30) {
       premium_until = CASE
         WHEN $2 <= 5 THEN NULL
         ELSE (CASE
-                WHEN premium_until IS NOT NULL AND premium_until > NOW()
-                  THEN premium_until
+                WHEN premium_until IS NOT NULL AND premium_until > NOW() THEN premium_until
                 ELSE NOW()
-              END) + ($3::int * INTERVAL '1 day')
+              END) + make_interval(days => $3::int)
       END,
       notified_about_expiration = FALSE,
       notified_exp_3d = FALSE,
@@ -288,7 +287,6 @@ export async function setPremium(userId, limit, days = 30) {
   const { rows } = await query(sql, [userId, Number(limit), d]);
   return rows[0];
 }
-
 export async function setTariffAdmin(userId, limit, days, { mode = 'set' } = {}) {
   const sql = `
     UPDATE users
@@ -298,8 +296,7 @@ export async function setTariffAdmin(userId, limit, days, { mode = 'set' } = {})
         WHEN $2 <= 5 THEN NULL
         WHEN $4 = 'extend' THEN
           (CASE
-             WHEN premium_until IS NOT NULL AND premium_until > NOW()
-               THEN premium_until
+             WHEN premium_until IS NOT NULL AND premium_until > NOW() THEN premium_until
              ELSE NOW()
            END) + make_interval(days => $3::int)
         ELSE
@@ -1006,22 +1003,21 @@ export async function findUsersExpiringIn(days, flagField) {
   if (!allowed.has(flagField)) {
     throw new Error(`findUsersExpiringIn: invalid flag "${flagField}"`);
   }
-
+  
   const sql = `
     SELECT id, first_name, premium_until
     FROM users
     WHERE active = TRUE
       AND premium_limit <> 5
       AND premium_until IS NOT NULL
-      AND premium_until >= date_trunc('day', (NOW() AT TIME ZONE 'UTC')) + ($1 || ' days')::interval
-      AND premium_until <  date_trunc('day', (NOW() AT TIME ZONE 'UTC')) + (($1 + 1) || ' days')::interval
+      AND premium_until >= date_trunc('day', (NOW() AT TIME ZONE 'UTC')) + make_interval(days => $1::int)
+      AND premium_until <  date_trunc('day', (NOW() AT TIME ZONE 'UTC')) + make_interval(days => ($1::int + 1))
       AND COALESCE(${flagField}, FALSE) = FALSE
     ORDER BY premium_until ASC
   `;
   const { rows } = await query(sql, [Number(days) || 0]);
   return rows || [];
 }
-
 export async function markStageNotified(userId, flagField) {
   const allowed = new Set(['notified_exp_3d', 'notified_exp_1d', 'notified_exp_0d']);
   if (!allowed.has(flagField)) {
