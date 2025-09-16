@@ -703,7 +703,6 @@ res.redirect('/dashboard?resetExpired=err');
       res.status(500).send('Ошибка сервера');
     }
   });
-import { setTariffAdmin } from './db.js';
 
 app.post('/set-tariff', requireAuth, async (req, res) => {
   const { userId, limit, days, applyMode } = req.body;
