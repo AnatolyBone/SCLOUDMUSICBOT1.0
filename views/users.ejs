@@ -1,88 +1,226 @@
-<% // views/users.ejs (С КНОПКОЙ ЭКСПОРТА) %>
+<% // views/users.ejs %>
 
 <%- contentFor('body') %>
 
-<!-- Стили (без изменений) -->
 <style>
-  /* ... */
+  .hx-indicator {
+    display: none;
+  }
+  .hx-request .hx-indicator {
+    display: inline-block !important;
+  }
+  .spinner-sm {
+    width: 1rem; height: 1rem; border-width: .15rem;
+  }
+  .form-section-title {
+    font-size: .9rem; color: #6c757d;
+  }
 </style>
 
-<!-- Подключаем HTMX (если еще не подключен в главном шаблоне) -->
 <script src="https://unpkg.com/htmx.org@1.9.10"></script>
 
-<h1 class="h3 mb-3">Пользователи (<%= totalUsers %>)</h1>
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h1 class="h3 mb-0">Пользователи (<%= totalUsers %>)</h1>
 
-<!-- Фильтры с правильными атрибутами HTMX -->
-<form id="usersFilterForm" class="row g-3 align-items-center mb-4" 
-      hx-get="/users-table" 
-      hx-target="#users-table-container" 
-      hx-trigger="keyup changed delay:300ms from:#searchInput, change from:.form-select"
-      hx-swap="innerHTML">
-  <div class="col-md-4 col-sm-12">
-    <input type="text" class="form-control" id="searchInput" name="q" placeholder="Поиск по ID, имени, @username..." value="<%= searchQuery %>">
+  <!-- Индикатор HTMX -->
+  <div class="hx-indicator">
+    <div class="spinner-border text-primary spinner-sm" role="status">
+      <span class="visually-hidden">Загрузка...</span>
+    </div>
   </div>
-  <div class="col-md-3 col-sm-6">
-    <select class="form-select" name="status">
-      <option value="" <%= statusFilter === '' ? 'selected' : '' %>>Все статусы</option>
-      <option value="active" <%= statusFilter === 'active' ? 'selected' : '' %>>Активные</option>
-      <option value="inactive" <%= statusFilter === 'inactive' ? 'selected' : '' %>>Неактивные</option>
-    </select>
-  </div>
-  <div class="col-md-2 col-sm-6">
-    <select class="form-select" name="limit">
-      <option value="25" <%= limit == 25 ? 'selected' : '' %>>25</option>
-      <option value="50" <%= limit == 50 ? 'selected' : '' %>>50</option>
-      <option value="100" <%= limit == 100 ? 'selected' : '' %>>100</option>
-    </select>
-  </div>
-  
-  <!-- ======================= НОВАЯ КНОПКА ЭКСПОРТА ======================= -->
-  <div class="col-md-3 col-sm-12">
-    <a id="export-link" href="/users/export.csv" class="btn btn-outline-success w-100">
-      <i class="bi bi-file-earmark-spreadsheet"></i> Экспорт в CSV
-    </a>
-  </div>
-  <!-- ===================================================================== -->
-
-</form>
-
-<!-- Контейнер для "живой" перезагрузки -->
-<div id="users-table-container">
-  <%- include('partials/users-table', { users, totalPages, currentPage, queryParams }) %>
 </div>
 
-<!-- ======================= НОВЫЙ СКРИПТ ДЛЯ КНОПКИ ======================= -->
-<script>
-  function updateExportLink() {
-    // Находим текущие значения фильтров
-    const form = document.getElementById('usersFilterForm');
-    if (!form) return;
-    
-    const q = form.querySelector('input[name=q]').value;
-    const status = form.querySelector('select[name=status]').value;
-    
-    // Находим нашу ссылку
-    const exportLink = document.getElementById('export-link');
-    if (!exportLink) return;
+<form id="usersFilterForm"
+      class="row g-3 align-items-end mb-4"
+      hx-get="/users-table"
+      hx-target="#users-table-container"
+      hx-trigger="keyup changed delay:300ms from:#searchInput, change from:.form-select, change from:.adv-filter"
+      hx-swap="innerHTML"
+      hx-push-url="true">
 
-    // Собираем параметры для URL
+  <!-- Поиск / статус / лимит / экспорт -->
+  <div class="col-lg-4 col-md-6">
+    <label class="form-label form-section-title">Поиск</label>
+    <input type="text"
+           class="form-control"
+           id="searchInput"
+           name="q"
+           placeholder="ID, имя, @username..."
+           value="<%= typeof searchQuery !== 'undefined' ? searchQuery : (queryParams?.q || '') %>">
+  </div>
+
+  <div class="col-lg-2 col-md-6">
+    <label class="form-label form-section-title">Статус</label>
+    <select class="form-select" name="status">
+      <option value="" <%= (statusFilter === '' || (queryParams?.status || '') === '') ? 'selected' : '' %>>Все</option>
+      <option value="active"   <%= (statusFilter === 'active' || queryParams?.status === 'active') ? 'selected' : '' %>>Активные</option>
+      <option value="inactive" <%= (statusFilter === 'inactive' || queryParams?.status === 'inactive') ? 'selected' : '' %>>Неактивные</option>
+    </select>
+  </div>
+
+  <div class="col-lg-2 col-md-6">
+    <label class="form-label form-section-title">На странице</label>
+    <select class="form-select" name="limit">
+      <option value="25"  <%= (limit == 25  || queryParams?.limit == 25)  ? 'selected' : '' %>>25</option>
+      <option value="50"  <%= (limit == 50  || queryParams?.limit == 50)  ? 'selected' : '' %>>50</option>
+      <option value="100" <%= (limit == 100 || queryParams?.limit == 100) ? 'selected' : '' %>>100</option>
+    </select>
+  </div>
+
+  <div class="col-lg-4 col-md-6">
+    <label class="form-label form-section-title">Экспорт</label>
+    <div class="d-flex gap-2">
+      <a id="export-link" href="/users/export.csv" class="btn btn-outline-success w-100">
+        <i class="bi bi-file-earmark-spreadsheet"></i> Экспорт в CSV
+      </a>
+      <button type="button"
+              class="btn btn-outline-secondary"
+              onclick="resetUsersFilters()">
+        Сбросить
+      </button>
+    </div>
+  </div>
+
+  <!-- Тариф / Премиум -->
+  <div class="col-lg-2 col-md-6">
+    <label class="form-label form-section-title">Тариф</label>
+    <select class="form-select adv-filter" name="tariff">
+      <% const tariffSel = queryParams?.tariff || ''; %>
+      <option value="" <%= tariffSel === '' ? 'selected' : '' %>>Все</option>
+      <option value="Free"      <%= tariffSel === 'Free' ? 'selected' : '' %>>Free (5)</option>
+      <option value="Plus"      <%= tariffSel === 'Plus' ? 'selected' : '' %>>Plus (30)</option>
+      <option value="Pro"       <%= tariffSel === 'Pro' ? 'selected' : '' %>>Pro (100)</option>
+      <option value="Unlimited" <%= tariffSel === 'Unlimited' ? 'selected' : '' %>>Unlim</option>
+      <option value="Other"     <%= tariffSel === 'Other' ? 'selected' : '' %>>Other</option>
+    </select>
+  </div>
+
+  <div class="col-lg-3 col-md-6">
+    <label class="form-label form-section-title">Премиум</label>
+    <select class="form-select adv-filter" name="premium">
+      <% const premiumSel = queryParams?.premium || ''; %>
+      <option value=""        <%= premiumSel === '' ? 'selected' : '' %>>Любой</option>
+      <option value="active"  <%= premiumSel === 'active' ? 'selected' : '' %>>Активная премиум</option>
+      <option value="expired" <%= premiumSel === 'expired' ? 'selected' : '' %>>Истёкшая премиум</option>
+      <option value="free"    <%= premiumSel === 'free' ? 'selected' : '' %>>Только Free</option>
+    </select>
+  </div>
+
+  <!-- Расширенные фильтры (collapsible) -->
+  <div class="col-12">
+    <a class="text-decoration-none" data-bs-toggle="collapse" href="#advancedFilters" role="button" aria-expanded="false" aria-controls="advancedFilters">
+      Расширенные фильтры
+    </a>
+    <div class="collapse mt-3" id="advancedFilters">
+      <div class="row g-2">
+        <div class="col-md-3">
+          <label class="form-label">Дата регистрации c</label>
+          <input type="date"
+                 class="form-control adv-filter"
+                 name="created_from"
+                 value="<%= queryParams?.created_from || '' %>">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Дата регистрации по</label>
+          <input type="date"
+                 class="form-control adv-filter"
+                 name="created_to"
+                 value="<%= queryParams?.created_to || '' %>">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Был активен за N дней</label>
+          <input type="number"
+                 class="form-control adv-filter"
+                 name="active_within_days"
+                 min="1"
+                 placeholder="7"
+                 value="<%= queryParams?.active_within_days || '' %>">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Источник трафика</label>
+          <input type="text"
+                 class="form-control adv-filter"
+                 name="ref_source"
+                 placeholder="utm / ключевое..."
+                 value="<%= queryParams?.ref_source || '' %>">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Реферер</label>
+          <select class="form-select adv-filter" name="has_referrer">
+            <% const hasRef = queryParams?.has_referrer || ''; %>
+            <option value=""   <%= hasRef === '' ? 'selected' : '' %>>Любой</option>
+            <option value="yes"<%= hasRef === 'yes' ? 'selected' : '' %>>С реферером</option>
+            <option value="no" <%= hasRef === 'no' ? 'selected' : '' %>>Без реферера</option>
+          </select>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Скачиваний ≥</label>
+          <input type="number"
+                 class="form-control adv-filter"
+                 name="downloads_min"
+                 min="0"
+                 placeholder="1"
+                 value="<%= queryParams?.downloads_min || '' %>">
+        </div>
+      </div>
+    </div>
+  </div>
+</form>
+
+<!-- Контейнер для живой подстановки таблицы -->
+<div id="users-table-container">
+  <%- include('partials/users-table', {
+        users,
+        totalPages,
+        currentPage,
+        queryParams
+      }) %>
+</div>
+
+<script>
+  function collectFilters() {
+    const form = document.getElementById('usersFilterForm');
+    if (!form) return {};
+    const data = new FormData(form);
     const params = new URLSearchParams();
-    if (q) params.set('q', q);
-    if (status) params.set('status', status);
-    
-    // Обновляем атрибут href у ссылки
-    exportLink.href = `/users/export.csv?${params.toString()}`;
+
+    // Список полей, которые учитываем в экспорте
+    const fields = [
+      'q','status','limit','tariff','premium',
+      'created_from','created_to','active_within_days',
+      'ref_source','has_referrer','downloads_min'
+    ];
+    fields.forEach(k => {
+      const v = data.get(k);
+      if (v !== null && v !== '') params.set(k, v);
+    });
+    return params;
   }
 
-  // Обновляем ссылку сразу при загрузке страницы
+  function updateExportLink() {
+    const exportLink = document.getElementById('export-link');
+    if (!exportLink) return;
+    const params = collectFilters();
+    const qs = params.toString();
+    exportLink.href = qs ? `/users/export.csv?${qs}` : '/users/export.csv';
+  }
+
+  function resetUsersFilters() {
+    const form = document.getElementById('usersFilterForm');
+    if (!form) return;
+    form.reset();
+    // сброс hx-параметров и обновление таблицы
+    htmx.trigger(form, 'change');
+    updateExportLink();
+  }
+
   document.addEventListener('DOMContentLoaded', updateExportLink);
-  
-  // И обновляем ее каждый раз, когда меняется фильтр (после того, как HTMX отработает)
-  document.body.addEventListener('htmx:afterSettle', function(evt) {
-    // Проверяем, что событие пришло от нашей формы
-    if (evt.target.id === 'usersFilterForm') {
+
+  // После завершения любого HTMX-запроса от формы — обновим ссылку экспорта
+  document.body.addEventListener('htmx:afterSettle', function (evt) {
+    const form = document.getElementById('usersFilterForm');
+    if (evt?.detail?.elt === form || evt?.target?.id === 'usersFilterForm') {
       updateExportLink();
     }
   });
 </script>
-<!-- =================================================================== -->
