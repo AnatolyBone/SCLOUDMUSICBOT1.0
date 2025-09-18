@@ -18,68 +18,9 @@ async function query(text, params) {
     throw e;
   }
 }
-// Сброс дневного лимита для конкретного пользователя, если наступил новый день
-export async function resetDailyLimitIfNeeded(userId) {
-  // проверяем дату последнего сброса
-  const { rows } = await query(
-    'SELECT last_reset_date FROM users WHERE id = $1',
-    [userId]
-  );
-  if (!rows.length) return false;
 
-  const lastReset = rows[0].last_reset_date; // может быть null
-  // если ещё никогда не сбрасывали или дата < текущей даты — сбрасываем
-  if (!lastReset || new Date(lastReset).toDateString() !== new Date().toDateString()) {
-    await query(
-      `UPDATE users
-       SET downloads_today = 0,
-           tracks_today = '[]'::jsonb,
-           last_reset_date = CURRENT_DATE
-       WHERE id = $1`,
-      [userId]
-    );
-    return true;
-  }
-  return false;
-}
 /* ========================= Пользователи / Премиум ========================= */
-// === Тарифы и лимиты ===
 
-// Админская функция выдачи/продления тарифа
-// mode: 'set' — установить заново от NOW(); 'extend' — прибавить дни к текущей дате (если активна) или от NOW()
-export async function setTariffAdmin(userId, limit, days, { mode = 'set' } = {}) {
-  const sql = `
-    UPDATE users
-    SET
-      premium_limit = $2,
-      premium_until = CASE
-        WHEN $2 <= 5 THEN NULL
-        WHEN $4 = 'extend' THEN
-          (CASE
-             WHEN premium_until IS NOT NULL AND premium_until > NOW()
-               THEN premium_until
-             ELSE NOW()
-           END) + make_interval(days => $3::int)
-        ELSE
-          NOW() + make_interval(days => $3::int)
-      END,
-      -- сбрасываем флаги уведомлений, чтобы в новом периоде снова шли напоминания
-      notified_about_expiration = FALSE,
-      notified_exp_3d = FALSE,
-      notified_exp_1d = FALSE,
-      notified_exp_0d = FALSE
-    WHERE id = $1
-    RETURNING id, premium_limit, premium_until
-  `;
-  const { rows } = await query(sql, [userId, Number(limit), Number(days), mode]);
-  return rows[0];
-}
-
-// Обратная совместимость: setPremium (используется бонусами, рефералами и т.д.)
-// Всегда продлевает (extend) на days с указанным лимитом.
-export async function setPremium(userId, limit, days = 30) {
-  return setTariffAdmin(userId, Number(limit), Number(days), { mode: 'extend' });
-}
 export async function resetExpiredPremiumIfNeeded(userId) {
   const sql = `
     UPDATE users
