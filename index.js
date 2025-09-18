@@ -466,18 +466,44 @@ const chartDataTariffs = {
   });
 
   app.get('/users/export.csv', requireAuth, async (req, res) => {
-    try {
-      const { q = '', status = '' } = req.query;
-      const csvData = await getUsersAsCsv({ searchQuery: q, statusFilter: status });
-      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-      res.setHeader('Content-Disposition', `attachment; filename="users_${new Date().toISOString().slice(0, 10)}.csv"`);
-      res.send(csvData);
-    } catch (error) {
-      console.error('Ошибка при экспорте пользователей:', error);
-      res.status(500).send('Не удалось сгенерировать CSV-файл');
-    }
-  });
-
+  try {
+    const {
+      q = '',
+        status = '',
+        tariff = '',
+        premium = '',
+        created_from = '',
+        created_to = '',
+        active_within_days = '',
+        has_referrer = '',
+        ref_source = '',
+        downloads_min = ''
+    } = req.query;
+    
+    const csvData = await getUsersAsCsv({
+      searchQuery: q,
+      statusFilter: status,
+      tariff,
+      premium,
+      created_from,
+      created_to,
+      active_within_days,
+      has_referrer,
+      ref_source,
+      downloads_min
+    });
+    
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="users_${new Date().toISOString().slice(0, 10)}.csv"`
+    );
+    res.send(csvData);
+  } catch (error) {
+    console.error('Ошибка при экспорте пользователей:', error);
+    res.status(500).send('Не удалось сгенерировать CSV-файл');
+  }
+});
   app.get('/users-table', requireAuth, async (req, res) => {
     try {
       const { q = '', status = '', page = 1, limit = 25, sort = 'created_at', order = 'desc' } = req.query;
