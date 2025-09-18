@@ -18,7 +18,30 @@ async function query(text, params) {
     throw e;
   }
 }
+// Сброс дневного лимита для конкретного пользователя, если наступил новый день
+export async function resetDailyLimitIfNeeded(userId) {
+  // проверяем дату последнего сброса
+  const { rows } = await query(
+    'SELECT last_reset_date FROM users WHERE id = $1',
+    [userId]
+  );
+  if (!rows.length) return false;
 
+  const lastReset = rows[0].last_reset_date; // может быть null
+  // если ещё никогда не сбрасывали или дата < текущей даты — сбрасываем
+  if (!lastReset || new Date(lastReset).toDateString() !== new Date().toDateString()) {
+    await query(
+      `UPDATE users
+       SET downloads_today = 0,
+           tracks_today = '[]'::jsonb,
+           last_reset_date = CURRENT_DATE
+       WHERE id = $1`,
+      [userId]
+    );
+    return true;
+  }
+  return false;
+}
 /* ========================= Пользователи / Премиум ========================= */
 // === Тарифы и лимиты ===
 
