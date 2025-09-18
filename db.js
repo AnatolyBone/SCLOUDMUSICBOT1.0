@@ -180,80 +180,222 @@ export async function getAllUsers(includeInactive = true) {
 }
 
 export async function getPaginatedUsers(options) {
-  const { searchQuery = '', statusFilter = '', page = 1, limit = 25, sortBy = 'created_at', sortOrder = 'desc' } = options;
-  const allowedSortFields = ['id', 'total_downloads', 'created_at', 'last_active', 'premium_limit', 'active'];
+  let {
+    searchQuery = '',
+    statusFilter = '',
+    page = 1,
+    limit = 25,
+    sortBy = 'created_at',
+    sortOrder = 'desc',
+
+    // расширенные фильтры
+    tariff = '',
+    premium = '',
+    created_from = '',
+    created_to = '',
+    active_within_days = '',
+    has_referrer = '',
+    ref_source = '',
+    downloads_min = ''
+  } = options;
+
+  // сортировку жёстко белимитим
+  const allowedSortFields = [
+    'id', 'total_downloads', 'created_at', 'last_active',
+    'premium_limit', 'premium_until', 'active'
+  ];
   const safeSortBy = allowedSortFields.includes(sortBy) ? `"${sortBy}"` : '"created_at"';
-  const safeSortOrder = sortOrder.toLowerCase() === 'asc' ? 'ASC' : 'DESC';
+  const safeSortOrder = String(sortOrder).toLowerCase() === 'asc' ? 'ASC' : 'DESC';
+
+  page = Math.max(1, parseInt(page, 10) || 1);
+  limit = Math.min(500, Math.max(1, parseInt(limit, 10) || 25));
   const offset = (page - 1) * limit;
 
   const whereClauses = [];
-  const queryParams = [];
-  let paramIndex = 1;
+  const params = [];
+  let i = 1;
 
-  if (statusFilter === 'active') {
-    whereClauses.push('active = TRUE');
-  } else if (statusFilter === 'inactive') {
-    whereClauses.push('active = FALSE');
-  }
+  // статус
+  if (statusFilter === 'active') whereClauses.push('active = TRUE');
+  else if (statusFilter === 'inactive') whereClauses.push('active = FALSE');
 
+  // поиск
   if (searchQuery) {
-    queryParams.push(`%${searchQuery}%`);
-    whereClauses.push(`(CAST(id AS TEXT) ILIKE $${paramIndex} OR first_name ILIKE $${paramIndex} OR username ILIKE $${paramIndex})`);
-    paramIndex++;
+    params.push(`%${searchQuery}%`);
+    whereClauses.push(`(CAST(id AS TEXT) ILIKE $${i} OR first_name ILIKE $${i} OR username ILIKE $${i})`);
+    i++;
   }
 
-  const whereString = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
-  const totalQuery = `SELECT COUNT(*) FROM users ${whereString}`;
-  const totalResult = await query(totalQuery, queryParams);
-  const totalUsers = parseInt(totalResult.rows[0].count, 10);
-  const totalPages = Math.ceil(totalUsers / limit);
+  // тариф
+  if (tariff) {
+    if (tariff === 'Free') whereClauses.push('premium_limit <= 5');
+    else if (tariff === 'Plus') whereClauses.push('premium_limit = 30');
+    else if (tariff === 'Pro') whereClauses.push('premium_limit = 100');
+    else if (tariff === 'Unlimited') whereClauses.push('premium_limit >= 10000');
+    else if (tariff === 'Other') {
+      whereClauses.push('(premium_limit IS NULL OR (premium_limit NOT IN (5,30,100) AND premium_limit < 10000))');
+    }
+  }
 
-  queryParams.push(limit);
-  queryParams.push(offset);
+  // состояние премиума
+  if (premium) {
+    if (premium === 'active') {
+      whereClauses.push('premium_limit > 5 AND (premium_until IS NULL OR premium_until >= NOW())');
+    } else if (premium === 'expired') {
+      whereClauses.push('premium_limit > 5 AND premium_until IS NOT NULL AND premium_until < NOW()');
+    } else if (premium === 'free') {
+      whereClauses.push('premium_limit <= 5');
+    }
+  }
 
+  // даты регистрации
+  if (created_from) { params.push(created_from); whereClauses.push(`created_at::date >= $${i++}`); }
+  if (created_to)   { params.push(created_to);   whereClauses.push(`created_at::date <= $${i++}`); }
+
+  // активен за N дней
+  if (active_within_days) {
+    params.push(Number(active_within_days) || 7);
+    whereClauses.push(`last_active >= NOW() - ($${i++}::int * INTERVAL '1 day')`);
+  }
+
+  // реферер
+  if (has_referrer === 'yes') whereClauses.push('referrer_id IS NOT NULL');
+  else if (has_referrer === 'no') whereClauses.push('referrer_id IS NULL');
+
+  // источник трафика
+  if (ref_source) {
+    params.push(`%${ref_source}%`);
+    whereClauses.push(`referral_source ILIKE $${i++}`);
+  }
+
+  // минимальные скачивания
+  if (downloads_min !== '' && downloads_min !== null && downloads_min !== undefined) {
+    params.push(Number(downloads_min) || 0);
+    whereClauses.push(`total_downloads >= $${i++}`);
+  }
+
+  const whereSql = whereClauses.length ? `WHERE ${whereClauses.join(' AND ')}` : '';
+
+  // total
+  const totalQuery = `SELECT COUNT(*) FROM users ${whereSql}`;
+  const totalRes = await query(totalQuery, params);
+  const totalUsers = parseInt(totalRes.rows[0].count, 10);
+  const totalPages = Math.max(1, Math.ceil(totalUsers / limit));
+
+  // data
+  params.push(limit, offset);
   const usersQuery = `
-    SELECT * FROM users
-    ${whereString}
+    SELECT id, first_name, username, active,
+           premium_limit, premium_until,
+           total_downloads, created_at, last_active, referrer_id, referral_source
+    FROM users
+    ${whereSql}
     ORDER BY ${safeSortBy} ${safeSortOrder}
-    LIMIT $${paramIndex++} OFFSET $${paramIndex++}
+    LIMIT $${i++} OFFSET $${i++}
   `;
-  const usersResult = await query(usersQuery, queryParams);
-  return { users: usersResult.rows, totalPages, currentPage: page, totalUsers };
+  const usersRes = await query(usersQuery, params);
+
+  return { users: usersRes.rows, totalPages, currentPage: page, totalUsers };
 }
 
-function escapeCsv(str) {
-  if (str === null || str === undefined) return '';
-  const s = String(str);
-  if (s.includes(',') || s.includes('"') || s.includes('\n')) {
-    return `"${s.replace(/"/g, '""')}"`;
-  }
-  return s;
-}
+export async function getUsersAsCsv(options = {}) {
+  let {
+    searchQuery = '',
+    statusFilter = '',
 
-export async function getUsersAsCsv(options) {
-  const { searchQuery = '', statusFilter = '' } = options;
+    // те же расширенные фильтры, что и в списке
+    tariff = '',
+    premium = '',
+    created_from = '',
+    created_to = '',
+    active_within_days = '',
+    has_referrer = '',
+    ref_source = '',
+    downloads_min = ''
+  } = options;
+
   const whereClauses = [];
-  const queryParams = [];
-  let paramIndex = 1;
+  const params = [];
+  let i = 1;
 
-  if (statusFilter === 'active') {
-    whereClauses.push('active = TRUE');
-  } else if (statusFilter === 'inactive') {
-    whereClauses.push('active = FALSE');
-  }
+  // статус
+  if (statusFilter === 'active') whereClauses.push('active = TRUE');
+  else if (statusFilter === 'inactive') whereClauses.push('active = FALSE');
+
+  // поиск
   if (searchQuery) {
-    queryParams.push(`%${searchQuery}%`);
-    whereClauses.push(`(CAST(id AS TEXT) ILIKE $${paramIndex} OR first_name ILIKE $${paramIndex} OR username ILIKE $${paramIndex})`);
+    params.push(`%${searchQuery}%`);
+    whereClauses.push(`(CAST(id AS TEXT) ILIKE $${i} OR first_name ILIKE $${i} OR username ILIKE $${i})`);
+    i++;
   }
-  const whereString = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
 
-  const { rows } = await query(`SELECT * FROM users ${whereString} ORDER BY created_at DESC`, queryParams);
+  // тариф
+  if (tariff) {
+    if (tariff === 'Free') whereClauses.push('premium_limit <= 5');
+    else if (tariff === 'Plus') whereClauses.push('premium_limit = 30');
+    else if (tariff === 'Pro') whereClauses.push('premium_limit = 100');
+    else if (tariff === 'Unlimited') whereClauses.push('premium_limit >= 10000');
+    else if (tariff === 'Other') {
+      whereClauses.push('(premium_limit IS NULL OR (premium_limit NOT IN (5,30,100) AND premium_limit < 10000))');
+    }
+  }
+
+  // состояние премиума
+  if (premium) {
+    if (premium === 'active') {
+      whereClauses.push('premium_limit > 5 AND (premium_until IS NULL OR premium_until >= NOW())');
+    } else if (premium === 'expired') {
+      whereClauses.push('premium_limit > 5 AND premium_until IS NOT NULL AND premium_until < NOW()');
+    } else if (premium === 'free') {
+      whereClauses.push('premium_limit <= 5');
+    }
+  }
+
+  // даты регистрации
+  if (created_from) { params.push(created_from); whereClauses.push(`created_at::date >= $${i++}`); }
+  if (created_to)   { params.push(created_to);   whereClauses.push(`created_at::date <= $${i++}`); }
+
+  // активность за N дней
+  if (active_within_days) {
+    params.push(Number(active_within_days) || 7);
+    whereClauses.push(`last_active >= NOW() - ($${i++}::int * INTERVAL '1 day')`);
+  }
+
+  // реферер
+  if (has_referrer === 'yes') whereClauses.push('referrer_id IS NOT NULL');
+  else if (has_referrer === 'no') whereClauses.push('referrer_id IS NULL');
+
+  // источник
+  if (ref_source) {
+    params.push(`%${ref_source}%`);
+    whereClauses.push(`referral_source ILIKE $${i++}`);
+  }
+
+  // скачивания
+  if (downloads_min !== '' && downloads_min !== null && downloads_min !== undefined) {
+    params.push(Number(downloads_min) || 0);
+    whereClauses.push(`total_downloads >= $${i++}`);
+  }
+
+  const whereSql = whereClauses.length ? `WHERE ${whereClauses.join(' AND ')}` : '';
+  const { rows } = await query(
+    `SELECT id, first_name, username, active,
+            total_downloads, premium_limit, premium_until,
+            created_at, last_active
+     FROM users
+     ${whereSql}
+     ORDER BY created_at DESC`,
+    params
+  );
 
   const headers = 'ID,FirstName,Username,Status,TotalDownloads,PremiumLimit,PremiumUntil,CreatedAt,LastActive\n';
   const csvRows = rows.map(u => [
-    u.id, escapeCsv(u.first_name), escapeCsv(u.username),
+    u.id,
+    escapeCsv(u.first_name),
+    escapeCsv(u.username),
     u.active ? 'active' : 'inactive',
-    u.total_downloads || 0, u.premium_limit || 0,
+    u.total_downloads || 0,
+    u.premium_limit || 0,
     u.premium_until ? new Date(u.premium_until).toISOString() : '',
     new Date(u.created_at).toISOString(),
     u.last_active ? new Date(u.last_active).toISOString() : ''
@@ -261,94 +403,6 @@ export async function getUsersAsCsv(options) {
 
   return headers + csvRows.join('\n');
 }
-
-/* ========================= Тарифы и лимиты ========================= */
-
-export async function setPremium(userId, limit, days = 30) {
-  const d = Number(days) || 0;
-  const sql = `
-    UPDATE users
-    SET
-      premium_limit = $2,
-      premium_until = CASE
-        WHEN $2 <= 5 THEN NULL
-        ELSE (CASE
-                WHEN premium_until IS NOT NULL AND premium_until > NOW() THEN premium_until
-                ELSE NOW()
-              END) + make_interval(days => $3::int)
-      END,
-      notified_about_expiration = FALSE,
-      notified_exp_3d = FALSE,
-      notified_exp_1d = FALSE,
-      notified_exp_0d = FALSE
-    WHERE id = $1
-    RETURNING id, premium_limit, premium_until
-  `;
-  const { rows } = await query(sql, [userId, Number(limit), d]);
-  return rows[0];
-}
-export async function setTariffAdmin(userId, limit, days, { mode = 'set' } = {}) {
-  const sql = `
-    UPDATE users
-    SET
-      premium_limit = $2,
-      premium_until = CASE
-        WHEN $2 <= 5 THEN NULL
-        WHEN $4 = 'extend' THEN
-          (CASE
-             WHEN premium_until IS NOT NULL AND premium_until > NOW() THEN premium_until
-             ELSE NOW()
-           END) + make_interval(days => $3::int)
-        ELSE
-          NOW() + make_interval(days => $3::int)
-      END,
-      notified_about_expiration = FALSE,
-      notified_exp_3d = FALSE,
-      notified_exp_1d = FALSE,
-      notified_exp_0d = FALSE
-    WHERE id = $1
-    RETURNING id, premium_limit, premium_until
-  `;
-  const { rows } = await query(sql, [userId, Number(limit), Number(days), mode]);
-  return rows[0];
-}
-
-export async function resetDailyLimitIfNeeded(userId) {
-  const { rows } = await query('SELECT last_reset_date FROM users WHERE id = $1', [userId]);
-  if (rows.length > 0) {
-    const lastReset = new Date(rows[0].last_reset_date);
-    const today = new Date();
-    if (lastReset.toDateString() !== today.toDateString()) {
-      await query(
-        `UPDATE users
-         SET downloads_today = 0, tracks_today = '[]'::jsonb, last_reset_date = CURRENT_DATE
-         WHERE id = $1`,
-        [userId]
-      );
-    }
-  }
-}
-
-export async function resetDailyStats() {
-  await query(
-    `UPDATE users
-     SET downloads_today = 0, tracks_today = '[]'::jsonb, last_reset_date = CURRENT_DATE
-     WHERE last_reset_date < CURRENT_DATE`
-  );
-}
-
-export async function getExpiringUsers(days = 3) {
-  const { rows } = await query(
-    `SELECT * FROM users
-     WHERE premium_until IS NOT NULL
-       AND premium_until BETWEEN NOW() AND NOW() + INTERVAL '${days} days'
-     ORDER BY premium_until ASC`
-  );
-  return rows;
-}
-
-/* ========================= Кэш треков ========================= */
-
 export async function searchTracksInCache(searchQuery, limit = 7) {
   try {
     const { data, error } = await supabase.rpc('search_tracks', { search_query: searchQuery, result_limit: limit });
