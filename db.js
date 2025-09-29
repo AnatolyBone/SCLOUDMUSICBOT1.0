@@ -129,7 +129,27 @@ export async function resetExpiredPremiumsBulk() {
     return 0;
   }
 }
+// db.js -- ДОБАВЬ ЭТУ ФУНКЦИЮ
 
+/**
+ * @description Сбрасывает дневную статистику (загрузки, треки) для всех пользователей.
+ *              Вызывается раз в сутки фоновой задачей.
+ */
+export async function resetDailyStats() {
+  console.log('[Cron] Запускаю ежедневный сброс статистики...');
+  try {
+    const { rowCount } = await pool.query(
+      `UPDATE users
+       SET downloads_today = 0,
+           tracks_today = '[]'::jsonb,
+           last_reset_date = CURRENT_DATE
+       WHERE last_reset_date < CURRENT_DATE OR last_reset_date IS NULL`
+    );
+    console.log(`[Cron] Дневная статистика сброшена для ${rowCount} пользователей.`);
+  } catch (error) {
+    console.error('[Cron] Ошибка при ежедневном сбросе статистики:', error);
+  }
+}
 export async function getReferrerInfo(userId) {
   const { rows } = await query(
     `SELECT r.id, r.first_name, r.username 
