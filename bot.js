@@ -836,7 +836,7 @@ bot.on('text', async (ctx) => {
                 }
                 
                 // =====> ПРАВИЛЬНЫЙ ВАРИАНТ <=====
-                if (isMaintenanceMode && ctx.from.id !== ADMIN_ID) { // ПРАВИЛЬНО: и здесь тоже нет
+                if (isMaintenanceMode() && ctx.from.id !== ADMIN_ID) { // ПРАВИЛЬНО: и здесь тоже нет
                     return await ctx.reply('⏳ Бот на плановом обслуживании. Новые запросы временно не принимаются. Пожалуйста, попробуйте через 5-10 минут.');
                 }
     if (ctx.chat.type !== 'private') {
