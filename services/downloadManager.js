@@ -1,4 +1,4 @@
-// services/downloadManager.js (безопасная финальная версия для бесплатных тарифов)
+// services/downloadManager.js (ИСПРАВЛЕННАЯ ВЕРСИЯ)
 
 import fetch from 'node-fetch';
 import pMap from 'p-map';
@@ -20,17 +20,14 @@ import * as db from '../db.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(path.dirname(__filename));
 
-// ========================= CONFIGURATION =========================
-
 const cacheDir = path.join(os.tmpdir(), 'cache');
 if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir, { recursive: true });
 
 const YTDL_TIMEOUT = 120;
-const MAX_FILE_SIZE_BYTES = 49 * 1024 * 1024; // 49 МБ (лимит Telegram)
+const MAX_FILE_SIZE_BYTES = 49 * 1024 * 1024;
 const UNLIMITED_PLAYLIST_LIMIT = 100;
 const FAKE_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36';
 
-// Для бесплатных тарифов Render.com: 2 одновременных загрузки (чтобы не превышать лимиты CPU/RAM)
 const MAX_CONCURRENT_DOWNLOADS = parseInt(process.env.MAX_CONCURRENT_DOWNLOADS, 10) || 2;
 
 const FFMPEG_AVAILABLE =
@@ -46,8 +43,6 @@ const YTDL_COMMON = {
   'socket-timeout': YTDL_TIMEOUT,
   'no-warnings': true
 };
-
-// ========================= HELPER FUNCTIONS =========================
 
 function sanitizeFilename(name) {
   if (!name || typeof name !== 'string') return 'track';
@@ -184,8 +179,6 @@ function startCacheCleanup() {
 }
 startCacheCleanup();
 
-// ========================= CORE WORKER & QUEUE =========================
-
 export async function trackDownloadProcessor(task) {
   let tempFilePath = null;
   let statusMessage = null;
@@ -202,28 +195,31 @@ export async function trackDownloadProcessor(task) {
     const { title, uploader, id: trackId, duration, thumbnail, ext, acodec } = metadata;
     const roundedDuration = duration ? Math.round(duration) : undefined;
     
-    // <-- НАЧАЛО ЗАВЕРШЕНИЯ КОДА
-    // --- Ранняя проверка кеша (продолжение) ---
-      if (cached?.fileId) {
-        console.log(`[Worker/Cache] ХИТ! Отправляю "${cached.trackName || title}" из кэша.`);
-        await bot.telegram.sendAudio(userId, cached.fileId, { title: cached.trackName || title, performer: uploader || 'Unknown Artist', duration: roundedDuration });
-        await incrementDownload(userId, cached.trackName || title, cached.fileId, primaryKey);
-        return;
-      }
-    } catch (e) {
-      console.error('[Worker] Ошибка раннего чека кэша:', e.message);
+    const primaryKey = cacheKey;
+    const legacyKey = task.originalUrl || ensuredUrl;
+    let cached = await db.findCachedTrack(primaryKey);
+    if (!cached && legacyKey) {
+      cached = await db.findCachedTrack(legacyKey);
+    }
+    if (!cached && typeof db.findCachedTrackByMeta === 'function') {
+      cached = await db.findCachedTrackByMeta({ title, artist: uploader, duration: roundedDuration });
     }
 
+    if (cached?.fileId) {
+      console.log(`[Worker/Cache] ХИТ! Отправляю "${cached.trackName || title}" из кэша.`);
+      await bot.telegram.sendAudio(userId, cached.fileId, { title: cached.trackName || title, performer: uploader || 'Unknown Artist', duration: roundedDuration });
+      await incrementDownload(userId, cached.trackName || title, cached.fileId, primaryKey);
+      return;
+    }
+    
     statusMessage = await safeSendMessage(userId, `⏳ Начинаю скачивание трека: "${title}"`);
     console.log(`[Worker] Получена задача для "${title}" (источник: ${source}).`);
 
-    // --- Предварительная проверка размера ---
     const sizeCheck = await checkFileSize(ensuredUrl);
     if (!sizeCheck.ok && sizeCheck.reason === 'FILE_TOO_LARGE') {
       throw new Error('FILE_TOO_LARGE');
     }
     
-    // --- Скачивание файла ---
     let ytdlArgs;
     if (FFMPEG_AVAILABLE) {
       const tempFileName = `${trackId || 'track'}-${crypto.randomUUID()}.mp3`;
@@ -368,4 +364,3 @@ export function enqueue(ctx, userId, url) {
     }
   })();
 }
-// <-- КОНЕЦ КОДА
