@@ -11,7 +11,7 @@ import pgSessionFactory from 'connect-pg-simple';
 import fs from 'fs';
 import os from 'os';
 import mime from 'mime-types';
-
+import { checkAndSendExpirationNotifications, notifyExpiringTodayHourly } from './services/notifier.js';
 import {
   pool,
   getUserById,
@@ -167,6 +167,20 @@ async function startApp() {
     initializeWorkers(server, bot);
     
     console.log('[App] Настройка фоновых задач...');
+    setInterval(() => {
+      checkAndSendExpirationNotifications(bot).catch(e => {
+        console.error('[Cron] Ошибка дневного нотификатора:', e.message);
+      });
+    }, 60000); // 1 минута
+    
+    // Почасовой страховщик для истекающих сегодня
+    setInterval(() => {
+      notifyExpiringTodayHourly(bot).catch(e => {
+        console.error('[Cron] Ошибка почасового нотификатора:', e.message);
+      });
+    }, 3600000); // 1 час
+    
+    console.log('[App] Нотификаторы истечения подписок запущены.');
     setInterval(async () => {
       try { await resetDailyStats(); } catch (e) { console.error('[Cron] resetDailyStats error:', e.message); }
     }, 24 * 3600 * 1000);
