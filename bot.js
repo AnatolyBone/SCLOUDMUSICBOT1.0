@@ -830,7 +830,7 @@ async function handleSoundCloudUrl(ctx, url) {
 }
 bot.on('text', async (ctx) => {
                 // =====> ПРАВИЛЬНЫЙ ВАРИАНТ <=====
-                if (isShuttingDown) { // ПРАВИЛЬНО: скобок нет
+                if (isShuttingDown()) { // ПРАВИЛЬНО: скобок нет
                     console.log('[Shutdown] Отклонен новый запрос, так как идет завершение работы.');
                     return;
                 }
