@@ -193,6 +193,8 @@ export const CONFIG = Object.freeze({
   BOT_TOKEN: getRequired('BOT_TOKEN'),
   ADMIN_ID: getRequiredInt('ADMIN_ID'),
   DATABASE_URL: getRequired('DATABASE_URL'),
+
+export const BOT_USERNAME = process.env.BOT_USERNAME || '';
   
   // --- Сервер ---
   WEBHOOK_URL: isDev ? '' : getRequired('WEBHOOK_URL'),
