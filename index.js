@@ -604,7 +604,16 @@ app.get('/user/:id', requireAuth, async (req, res) => {
     res.render('broadcast-form', { title: 'Новая рассылка', page: 'broadcasts', error: null, success: null });
     console.log(`[Broadcast Debug] Использую BROADCAST_STORAGE_ID: '${BROADCAST_STORAGE_ID}' (тип: ${typeof BROADCAST_STORAGE_ID})`);
   });
-
+// Диагностический эндпоинт для просмотра состояния приложения
+app.get('/debug/state', requireAuth, async (req, res) => {
+  const state = getAppState(); // Импортируй из appState.js
+  res.json({
+    ...state,
+    queueSize: downloadQueue.size,
+    queuePending: downloadQueue.pending,
+    uptime: process.uptime()
+  });
+});
   app.get('/broadcast/edit/:id', requireAuth, async (req, res) => {
     const task = await getBroadcastTaskById(req.params.id);
     if (!task || task.status !== 'pending') {
