@@ -703,160 +703,165 @@ export function enqueue(ctx, userId, url) {
         tracksToProcess = tracksToProcess.slice(0, playlistEnd);
       }
 
-      // --- Обновление статуса ---
-      if (statusMessage) {
-        await bot.telegram.editMessageText(
-          userId, 
-          statusMessage.message_id, 
-          undefined, 
-          '🔄 Проверяю кэш...'
-        ).catch(() => {});
-      }
+// --- Проверка кэша для всех треков ---
+if (statusMessage) {
+  await bot.telegram.editMessageText(
+    userId, 
+    statusMessage.message_id, 
+    undefined, 
+    '🔄 Проверяю кэш...'
+  ).catch(() => {});
+}
 
-      // --- Проверка кэша для всех треков ---
-      const keyPairs = tracksToProcess.map(t => ({ 
-        primary: t.cacheKey, 
-        legacy: t.originalUrl || t.url 
-      }));
-      const uniqueKeys = Array.from(
-        new Set(keyPairs.flatMap(k => [k.primary, k.legacy].filter(Boolean)))
+// Собираем все возможные ключи для поиска
+const keyPairs = tracksToProcess.map(t => ({ 
+  track: t, // Сохраняем ссылку на трек
+  primary: t.cacheKey, 
+  legacy: t.originalUrl || t.url 
+}));
+
+const uniqueKeys = Array.from(
+  new Set(keyPairs.flatMap(k => [k.primary, k.legacy].filter(Boolean)))
+);
+
+console.log(`[Enqueue] Проверяю кэш для ${uniqueKeys.length} ключей`);
+
+let cacheMap = new Map();
+if (typeof db.findCachedTracks === 'function') {
+  cacheMap = await db.findCachedTracks(uniqueKeys);
+} else {
+  // Fallback для старой версии БД
+  for (const k of uniqueKeys) {
+    const c = await db.findCachedTrack(k);
+    if (c) cacheMap.set(k, c);
+  }
+}
+
+console.log(`[Enqueue] Найдено в кэше: ${cacheMap.size} треков`);
+
+// --- Разделение на закэшированные и новые ---
+const usage = await getUserUsage(userId);
+let remaining = Math.max(0, (usage.premium_limit || 0) - (usage.downloads_today || 0));
+
+const tasksToDownload = [];
+const cachedToSend = [];
+
+for (const pair of keyPairs) {
+  if (remaining <= 0) break;
+  
+  // Проверяем ОБА ключа (primary и legacy)
+  const cached = cacheMap.get(pair.primary) || cacheMap.get(pair.legacy);
+  
+  if (cached) {
+    console.log(`[Enqueue] ХИТ кэша для "${pair.track.metadata.title}"`);
+    cachedToSend.push({ track: pair.track, cached });
+  } else {
+    console.log(`[Enqueue] ПРОМАХ кэша для "${pair.track.metadata.title}"`);
+    tasksToDownload.push(pair.track);
+  }
+}
+
+let sentFromCacheCount = 0;
+
+// --- Отправка закэшированных треков (параллельно, но с лимитом) ---
+await pMap(
+  cachedToSend,
+  async ({ track, cached }) => {
+    if (remaining <= 0) return;
+    
+    try {
+      await bot.telegram.sendAudio(
+        userId,
+        cached.fileId,
+        { 
+          title: cached.trackName || cached.title || track.metadata.title, 
+          performer: track.metadata.uploader || 'Unknown Artist',
+          duration: track.metadata.duration 
+        }
       );
 
-      let cacheMap = new Map();
-      if (typeof db.findCachedTracks === 'function') {
-        cacheMap = await db.findCachedTracks(uniqueKeys);
+      const ok = await incrementDownload(
+        userId, 
+        cached.trackName || cached.title || track.metadata.title, 
+        cached.fileId, 
+        track.cacheKey
+      );
+
+      if (ok !== null) {
+        remaining -= 1;
+        sentFromCacheCount++;
+      }
+    } catch (err) {
+      // Если file_id устарел — добавляем в очередь на повторную загрузку
+      if (err?.description?.includes('FILE_REFERENCE_EXPIRED') || 
+          err?.description?.includes('file_id')) {
+        console.warn(`[Cache] File ID устарел для трека "${track.metadata.title}", добавляю в очередь.`);
+        tasksToDownload.push(track);
       } else {
-        // Fallback для старой версии БД
-        for (const k of uniqueKeys) {
-          const c = await db.findCachedTrack(k);
-          if (c) cacheMap.set(k, c);
-        }
+        console.error(`⚠️ Ошибка отправки из кэша для ${userId}:`, err.message);
       }
+    }
+  },
+  { concurrency: 3 } // Отправляем по 3 одновременно
+);
 
-      // --- Разделение на закэшированные и новые ---
-      const usage = await getUserUsage(userId);
-      let remaining = Math.max(0, (usage.premium_limit || 0) - (usage.downloads_today || 0));
+// --- Формирование финального сообщения ---
+let finalMessage = '';
 
-      // services/downloadManager.js - ЧАСТЬ 3 (ФИНАЛ)
+if (sentFromCacheCount > 0) {
+  finalMessage += `✅ ${sentFromCacheCount} трек(ов) отправлено из кэша.\n`;
+}
 
-      const tasksToDownload = [];
-      const cachedToSend = [];
+if (remaining > 0 && tasksToDownload.length > 0) {
+  const tasksToReallyDownload = tasksToDownload.slice(0, remaining);
+  const currentQueueSize = downloadQueue.size;
 
-      for (const track of tracksToProcess) {
-        if (remaining <= 0) break;
-        
-        const primary = track.cacheKey;
-        const legacy = track.originalUrl || track.url;
-        const cached = cacheMap.get(primary) || (legacy ? cacheMap.get(legacy) : undefined);
-        
-        if (cached) {
-          cachedToSend.push({ track, cached });
-        } else {
-          tasksToDownload.push(track);
-        }
-      }
+  finalMessage += `\n⏳ ${tasksToReallyDownload.length} трек(ов) добавлено в очередь.\n`;
+  
+  if (currentQueueSize > 0) {
+    finalMessage += `📍 Ваша позиция в очереди: ~${currentQueueSize + 1}.\n`;
+    finalMessage += `⏱ Примерное время ожидания: ~${Math.ceil(currentQueueSize * 1.5)} мин.`;
+  } else {
+    finalMessage += `🚀 Начинаю обработку прямо сейчас!`;
+  }
 
-      let sentFromCacheCount = 0;
+  // --- Добавление задач в очередь ---
+  const prio = usage.premium_limit || 0;
+  for (const task of tasksToReallyDownload) {
+    console.log('[Queue] Добавляю задачу', { 
+      userId, 
+      prio, 
+      url: task.url, 
+      hasMeta: !!task.metadata, 
+      cacheKey: task.cacheKey 
+    });
+    
+    downloadQueue.add({ 
+      userId, 
+      ...task, 
+      priority: prio 
+    });
+  }
 
-      // --- Отправка закэшированных треков (параллельно, но с лимитом) ---
-      await pMap(
-        cachedToSend,
-        async ({ track, cached }) => {
-          if (remaining <= 0) return;
-          
-          try {
-            await bot.telegram.sendAudio(
-              userId,
-              cached.fileId,
-              { 
-                title: cached.trackName || cached.title || track.metadata.title, 
-                performer: track.metadata.uploader || 'Unknown Artist',
-                duration: track.metadata.duration 
-              }
-            );
+} else if (tasksToDownload.length > 0 && remaining <= 0) {
+  finalMessage += `\n🚫 Ваш дневной лимит исчерпан. Оставшиеся треки не были добавлены в очередь.`;
+}
 
-            const ok = await incrementDownload(
-              userId, 
-              cached.trackName || cached.title || track.metadata.title, 
-              cached.fileId, 
-              track.cacheKey
-            );
+// --- Отправка финального сообщения ---
+if (finalMessage.trim() === '' && tasksToDownload.length === 0 && sentFromCacheCount === 0) {
+  finalMessage = '✅ Все треки уже были отправлены ранее или обработаны.';
+}
 
-            if (ok !== null) {
-              remaining -= 1;
-              sentFromCacheCount++;
-            }
-          } catch (err) {
-            // Если file_id устарел — добавляем в очередь на повторную загрузку
-            if (err?.description?.includes('FILE_REFERENCE_EXPIRED') || 
-                err?.description?.includes('file_id')) {
-              console.warn(`[Cache] File ID устарел для трека "${track.metadata.title}", добавляю в очередь.`);
-              tasksToDownload.push(track);
-            } else {
-              console.error(`⚠️ Ошибка отправки из кэша для ${userId}:`, err.message);
-            }
-          }
-        },
-        { concurrency: 3 } // Отправляем по 3 одновременно
-      );
-
-      // --- Формирование финального сообщения ---
-      let finalMessage = '';
-
-      if (sentFromCacheCount > 0) {
-        finalMessage += `✅ ${sentFromCacheCount} трек(ов) отправлено из кэша.\n`;
-      }
-
-      if (remaining > 0 && tasksToDownload.length > 0) {
-        const tasksToReallyDownload = tasksToDownload.slice(0, remaining);
-        const currentQueueSize = downloadQueue.size;
-
-        finalMessage += `\n⏳ ${tasksToReallyDownload.length} трек(ов) добавлено в очередь.\n`;
-        
-        if (currentQueueSize > 0) {
-          finalMessage += `📍 Ваша позиция в очереди: ~${currentQueueSize + 1}.\n`;
-          finalMessage += `⏱ Примерное время ожидания: ~${Math.ceil(currentQueueSize * 1.5)} мин.`;
-        } else {
-          finalMessage += `🚀 Начинаю обработку прямо сейчас!`;
-        }
-
-        // --- Добавление задач в очередь ---
-        const prio = usage.premium_limit || 0;
-        for (const task of tasksToReallyDownload) {
-          console.log('[Queue] Добавляю задачу', { 
-            userId, 
-            prio, 
-            url: task.url, 
-            hasMeta: !!task.metadata, 
-            cacheKey: task.cacheKey 
-          });
-          
-          downloadQueue.add({ 
-            userId, 
-            ...task, 
-            priority: prio 
-          });
-        }
-
-      } else if (tasksToDownload.length > 0 && remaining <= 0) {
-        finalMessage += `\n🚫 Ваш дневной лимит исчерпан. Оставшиеся треки не были добавлены в очередь.`;
-      }
-
-      // --- Отправка финального сообщения ---
-      if (finalMessage.trim() === '' && tasksToDownload.length === 0 && sentFromCacheCount === 0) {
-        finalMessage = '✅ Все треки уже были отправлены ранее или обработаны.';
-      }
-
-      if (statusMessage) {
-        await bot.telegram.editMessageText(
-          userId, 
-          statusMessage.message_id, 
-          undefined, 
-          finalMessage.trim() || 'Готово.'
-        ).catch(() => {});
-      } else if (finalMessage.trim()) {
-        await safeSendMessage(userId, finalMessage.trim());
-      }
+if (statusMessage) {
+  await bot.telegram.editMessageText(
+    userId, 
+    statusMessage.message_id, 
+    undefined, 
+    finalMessage.trim() || 'Готово.'
+  ).catch(() => {});
+} else if (finalMessage.trim()) {
+  await safeSendMessage(userId, finalMessage.trim());
+}
 
     } catch (err) {
       // --- Обработка глобальных ошибок ---
