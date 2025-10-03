@@ -287,7 +287,29 @@ function setupExpress() {
     res.redirect('/admin');
   };
 
-  app.get('/health', (req, res) => res.status(200).send('OK'));
+app.get('/health', async (req, res) => {
+  try {
+    const redisAvailable = await redisService.isAvailable();
+    const dbAvailable = await pool.query('SELECT 1').then(() => true).catch(() => false);
+    
+    const health = {
+      status: 'ok',
+      timestamp: new Date().toISOString(),
+      uptime: Math.floor(process.uptime()),
+      services: {
+        redis: redisAvailable ? '✅' : '❌',
+        database: dbAvailable ? '✅' : '❌',
+        downloadQueue: downloadQueue.size > 0 ? `⏳ ${downloadQueue.size} в очереди` : '✅'
+      }
+    };
+    
+    // Если хотя бы один сервис недоступен, возвращаем 503
+    const allOk = redisAvailable && dbAvailable;
+    res.status(allOk ? 200 : 503).json(health);
+  } catch (e) {
+    res.status(500).json({ status: 'error', message: e.message });
+  }
+});
   app.get('/', requireAuth, (req, res) => res.redirect('/dashboard'));
 
   app.get('/admin', (req, res) => {
