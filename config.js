@@ -193,8 +193,6 @@ export const CONFIG = Object.freeze({
   BOT_TOKEN: getRequired('BOT_TOKEN'),
   ADMIN_ID: getRequiredInt('ADMIN_ID'),
   DATABASE_URL: getRequired('DATABASE_URL'),
-
-export const BOT_USERNAME = process.env.BOT_USERNAME || '';
   
   // --- Сервер ---
   WEBHOOK_URL: isDev ? '' : getRequired('WEBHOOK_URL'),
@@ -225,7 +223,7 @@ export const BOT_USERNAME = process.env.BOT_USERNAME || '';
   isDev,
   isProduction: !isDev,
   nodeEnv: process.env.NODE_ENV || 'development'
-});
+}); // <-- ЗАКРЫВАЮЩАЯ СКОБКА ОБЪЕКТА И ТОЧКА С ЗАПЯТОЙ!
 
 // ========================= NAMED EXPORTS (для обратной совместимости) =========================
 
@@ -266,7 +264,7 @@ export function getSafeConfig() {
     
     // Маскируем секреты
     BOT_TOKEN: CONFIG.BOT_TOKEN ? '***' + CONFIG.BOT_TOKEN.slice(-4) : null,
-    DATABASE_URL: CONFIG.DATABASE_URL ? CONFIG.DATABASE_URL.split('@')[1] : null, // только хост
+    DATABASE_URL: CONFIG.DATABASE_URL ? CONFIG.DATABASE_URL.split('@')[1] : null,
     SESSION_SECRET: CONFIG.SESSION_SECRET ? `***${CONFIG.SESSION_SECRET.length} chars***` : null,
     ADMIN_PASSWORD: CONFIG.ADMIN_PASSWORD ? '***' : null,
     REDIS_URL: CONFIG.REDIS_URL ? 'configured' : 'not set',
