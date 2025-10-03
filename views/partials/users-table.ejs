@@ -1,26 +1,38 @@
-<% // views/partials/users-table.ejs (ИСПРАВЛЕННАЯ ВЕРСИЯ) %>
+<%# views/partials/users-table.ejs (безопасная финальная версия) %>
 
 <div class="table-responsive">
-  <table class="table table-striped table-hover align-middle adaptive-table">
-    <thead>
+  <table class="table table-striped table-hover align-middle">
+    <thead class="table-light">
       <tr>
-        <% function sortLink(field, title) { 
-          const params = new URLSearchParams(queryParams || {});
+        <%# === Функция для генерации ссылок сортировки === %>
+        <% 
+        function sortLink(field, title) { 
+          const params = new URLSearchParams();
+          // Безопасно копируем параметры
+          if (queryParams) {
+            Object.keys(queryParams).forEach(k => {
+              if (k !== 'page') params.set(k, queryParams[k]); // Сбрасываем пагинацию при сортировке
+            });
+          }
+          
           const isCurrent = (queryParams?.sort === field);
-          const nextOrder = (isCurrent && (queryParams?.order === 'asc')) ? 'desc' : 'asc';
+          const nextOrder = (isCurrent && queryParams?.order === 'asc') ? 'desc' : 'asc';
           params.set('sort', field);
           params.set('order', nextOrder);
+          params.set('page', 1); // Возвращаемся на первую страницу
+          
+          const icon = isCurrent 
+            ? (queryParams?.order === 'asc' ? '↑' : '↓')
+            : '';
         %>
           <th scope="col" class="text-nowrap">
             <a href="/users-table?<%= params.toString() %>"
                hx-get="/users-table?<%= params.toString() %>"
                hx-include="#usersFilterForm"
                hx-target="#users-table-container"
-               class="text-decoration-none text-dark fw-bold">
-              <%= title %>
-              <% if (isCurrent) { %>
-                <i class="bi bi-arrow-<%= (queryParams?.order === 'asc') ? 'up' : 'down' %>-short"></i>
-              <% } %>
+               hx-swap="innerHTML"
+               class="text-decoration-none text-body fw-semibold">
+              <%= title %> <% if (icon) { %><span class="text-primary"><%= icon %></span><% } %>
             </a>
           </th>
         <% } %>
@@ -34,60 +46,109 @@
         <%- sortLink('created_at', 'Регистрация') %>
         <%- sortLink('last_active', 'Активность') %>
         <th>Смена тарифа</th>
-        <th>Действия</th>
+        <th class="text-center">Действия</th>
       </tr>
     </thead>
 
     <tbody>
       <% if (users && users.length > 0) { %>
         <% users.forEach(u => { 
-            const plan =
-              (u.premium_limit <= 5)     ? 'Free' :
-              (u.premium_limit >= 10000) ? 'Unlim' :
-              (u.premium_limit === 100)  ? 'Pro' :
-              (u.premium_limit === 30)   ? 'Plus' : 'Other';
+            // === Безопасное экранирование данных ===
+            const escapeHtml = (str) => {
+              if (!str) return '';
+              return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
+            };
+            
+            const safeName = escapeHtml(u.first_name) || 'Без имени';
+            const safeUsername = u.username ? '@' + escapeHtml(u.username) : '';
+            
+            // === Определение тарифа ===
+            const plan = (() => {
+              if (u.premium_limit <= 5) return 'Free';
+              if (u.premium_limit >= 10000) return 'Unlim';
+              if (u.premium_limit === 100) return 'Pro';
+              if (u.premium_limit === 30) return 'Plus';
+              return 'Other';
+            })();
 
             const planBadge = {
               Free: 'bg-secondary',
-              Plus: 'bg-info',
-              Pro: 'bg-warning',
+              Plus: 'bg-info text-dark',
+              Pro: 'bg-warning text-dark',
               Unlim: 'bg-primary',
               Other: 'bg-dark'
-            }[plan] || 'bg-dark';
+            }[plan];
 
+            // === Проверка истечения премиума ===
             const premiumUntilDate = u.premium_until ? new Date(u.premium_until) : null;
             const isExpired = (u.premium_limit > 5) && premiumUntilDate && (premiumUntilDate < new Date());
+            
+            // === Форматирование дат ===
+            const formatDate = (date) => {
+              if (!date) return '—';
+              return new Date(date).toLocaleDateString('ru-RU', {
+                day: '2-digit',
+                month: '2-digit',
+                year: 'numeric'
+              });
+            };
+            
+            const formatDateTime = (date) => {
+              if (!date) return '—';
+              return new Date(date).toLocaleString('ru-RU', {
+                day: '2-digit',
+                month: '2-digit',
+                year: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit'
+              });
+            };
         %>
           <tr>
+            <%# === ID === %>
             <td data-label="ID">
-              <a href="/user/<%= u.id %>" class="text-decoration-none"><%= u.id %></a>
+              <a href="/user/<%= u.id %>" class="text-decoration-none fw-semibold">
+                <%= u.id %>
+              </a>
             </td>
 
+            <%# === Пользователь === %>
             <td data-label="Пользователь">
-              <div class="fw-semibold"><%= u.first_name || 'Без имени' %></div>
-              <div class="text-muted small"><%= u.username ? '@' + u.username : '' %></div>
-            </td>
-
-            <td data-label="Статус">
-              <% if (u.active) { %>
-                <span class="badge bg-success">Активен</span>
-              <% } else { %>
-                <span class="badge bg-danger">Заблокирован</span>
+              <div class="fw-semibold"><%- safeName %></div>
+              <% if (safeUsername) { %>
+                <div class="text-muted small"><%- safeUsername %></div>
               <% } %>
             </td>
 
-            <td data-label="Загрузок" class="text-center"><%= u.total_downloads || 0 %></td>
+            <%# === Статус === %>
+            <td data-label="Статус">
+              <span class="badge <%= u.active ? 'bg-success' : 'bg-danger' %>">
+                <%= u.active ? '✓ Активен' : '✗ Заблокирован' %>
+              </span>
+            </td>
 
+            <%# === Загрузок === %>
+            <td data-label="Загрузок" class="text-center">
+              <span class="badge bg-light text-dark"><%= u.total_downloads || 0 %></span>
+            </td>
+
+            <%# === Тариф === %>
             <td data-label="Тариф" class="text-center">
               <span class="badge <%= planBadge %>"><%= plan %></span>
             </td>
 
+            <%# === Премиум до === %>
             <td data-label="Премиум до" class="text-nowrap">
               <% if (u.premium_limit <= 5) { %>
-                —
+                <span class="text-muted">—</span>
               <% } else { %>
                 <span class="<%= isExpired ? 'text-danger fw-semibold' : '' %>">
-                  <%= premiumUntilDate ? premiumUntilDate.toLocaleString('ru-RU', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' }) : '—' %>
+                  <%= formatDateTime(u.premium_until) %>
                 </span>
                 <% if (isExpired) { %>
                   <span class="badge bg-danger ms-1">⌛ истёк</span>
@@ -95,72 +156,107 @@
               <% } %>
             </td>
 
+            <%# === Регистрация === %>
             <td data-label="Регистрация" class="text-nowrap">
-              <%= u.created_at ? new Date(u.created_at).toLocaleDateString('ru-RU') : '-' %>
+              <%= formatDate(u.created_at) %>
             </td>
 
+            <%# === Активность === %>
             <td data-label="Активность" class="text-nowrap">
-              <%= u.last_active
-                  ? new Date(u.last_active).toLocaleString('ru-RU', {day:'2-digit',month:'2-digit',year:'numeric', hour:'2-digit', minute:'2-digit'})
-                  : '-' %>
+              <%= formatDateTime(u.last_active) %>
             </td>
 
+            <%# === Смена тарифа === %>
             <td data-label="Смена тарифа">
-              <form class="d-flex flex-wrap gap-2 align-items-center tariff-form" action="/set-tariff" method="post">
+              <form class="d-flex flex-wrap gap-2 align-items-center tariff-form" 
+                    action="/set-tariff" 
+                    method="post">
                 <input type="hidden" name="userId" value="<%= u.id %>">
                 <input type="hidden" name="applyMode" value="set">
-                <select name="limit" class="form-select form-select-sm" style="min-width: 120px;">
+                
+                <select name="limit" class="form-select form-select-sm" style="min-width: 110px;" required>
                   <option value="5"     <%= u.premium_limit <= 5      ? 'selected' : '' %>>Free (5)</option>
                   <option value="30"    <%= u.premium_limit === 30    ? 'selected' : '' %>>Plus (30)</option>
                   <option value="100"   <%= u.premium_limit === 100   ? 'selected' : '' %>>Pro (100)</option>
                   <option value="10000" <%= u.premium_limit >= 10000  ? 'selected' : '' %>>Unlim</option>
                 </select>
-                <input type="number" name="days" class="form-control form-control-sm" value="30" style="width: 80px;" placeholder="Дни" min="1">
-                <button type="submit" class="btn btn-sm btn-primary" title="Применить">✓</button>
+                
+                <input type="number" 
+                       name="days" 
+                       class="form-control form-control-sm" 
+                       value="30" 
+                       style="width: 70px;" 
+                       placeholder="Дни" 
+                       min="1" 
+                       max="365"
+                       required>
+                
+                <button type="submit" 
+                        class="btn btn-sm btn-primary" 
+                        title="Применить"
+                        data-confirm="Изменить тариф для <%= safeName %>?">
+                  ✓
+                </button>
               </form>
             </td>
 
-            <td data-label="Действия" class="text-nowrap">
-              <div class="dropdown">
-                <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown">...</button>
+            <%# === Действия === %>
+            <td data-label="Действия" class="text-nowrap text-center">
+              <div class="btn-group">
+                <button class="btn btn-sm btn-outline-secondary dropdown-toggle" 
+                        type="button" 
+                        data-bs-toggle="dropdown" 
+                        aria-expanded="false">
+                  ⋮
+                </button>
                 <ul class="dropdown-menu dropdown-menu-end">
                   <li>
-                    <a class="dropdown-item" href="/user/<%= u.id %>" target="_blank">Открыть профиль</a>
+                    <a class="dropdown-item" href="/user/<%= u.id %>">
+                      <i class="bi bi-person-circle me-2"></i>Профиль
+                    </a>
                   </li>
                   <li>
-                    <a class="dropdown-item" href="tg://user?id=<%= u.id %>">Открыть в Telegram</a>
+                    <a class="dropdown-item" href="tg://user?id=<%= u.id %>">
+                      <i class="bi bi-telegram me-2"></i>Открыть в TG
+                    </a>
                   </li>
                   <li><hr class="dropdown-divider"></li>
                   <li>
-                    <form action="/reset-bonus" method="post">
+                    <form action="/reset-bonus" method="post" class="d-inline">
                       <input type="hidden" name="userId" value="<%= u.id %>">
-                      <button type="submit" class="dropdown-item" onclick="return confirm('Сбросить бонус?')">
-                        Сбросить бонус
+                      <button type="submit" 
+                              class="dropdown-item" 
+                              data-confirm="Сбросить бонус для <%= safeName %>?">
+                        <i class="bi bi-gift me-2"></i>Сбросить бонус
                       </button>
                     </form>
                   </li>
                   <li>
-                    <form action="/reset-daily-limit" method="post">
+                    <form action="/reset-daily-limit" method="post" class="d-inline">
                       <input type="hidden" name="userId" value="<%= u.id %>">
-                      <button type="submit" class="dropdown-item" onclick="return confirm('Сбросить дневной лимит?')">
-                        Сбросить дневной лимит
+                      <button type="submit" 
+                              class="dropdown-item" 
+                              data-confirm="Сбросить дневной лимит для <%= safeName %>?">
+                        <i class="bi bi-arrow-counterclockwise me-2"></i>Сбросить лимит
                       </button>
                     </form>
                   </li>
                   <li><hr class="dropdown-divider"></li>
                   <li>
-                    <form action="/user/set-status" method="POST">
+                    <form action="/user/set-status" method="POST" class="d-inline">
                       <input type="hidden" name="userId" value="<%= u.id %>">
                       <% if (u.active) { %>
                         <input type="hidden" name="newStatus" value="false">
-                        <button type="submit" class="dropdown-item text-danger"
-                                onclick="return confirm('Заблокировать <%= u.first_name || u.id %>?')">
-                          Заблокировать
+                        <button type="submit" 
+                                class="dropdown-item text-danger" 
+                                data-confirm="Заблокировать <%= safeName %>?">
+                          <i class="bi bi-ban me-2"></i>Заблокировать
                         </button>
                       <% } else { %>
                         <input type="hidden" name="newStatus" value="true">
-                        <button type="submit" class="dropdown-item text-success">
-                          Разблокировать
+                        <button type="submit" 
+                                class="dropdown-item text-success">
+                          <i class="bi bi-check-circle me-2"></i>Разблокировать
                         </button>
                       <% } %>
                     </form>
@@ -172,68 +268,369 @@
         <% }) %>
       <% } else { %>
         <tr>
-          <td colspan="10" class="text-center text-muted py-4">Пользователи не найдены.</td>
+          <td colspan="10" class="text-center text-muted py-5">
+            <div class="mb-3">
+              <i class="bi bi-inbox" style="font-size: 3rem; opacity: 0.3;"></i>
+            </div>
+            <p class="mb-0">Пользователи не найдены</p>
+            <% if (queryParams?.q) { %>
+              <small class="text-muted">Попробуйте изменить поисковый запрос</small>
+            <% } %>
+          </td>
         </tr>
       <% } %>
     </tbody>
   </table>
 </div>
 
+<%# === PAGINATION === %>
 <% if (totalPages > 1) { 
-     const curr = Number(queryParams?.page || 1);
+  const curr = Number(queryParams?.page || 1);
+  
+  function buildPageUrl(pageNum) {
+    const params = new URLSearchParams();
+    if (queryParams) {
+      Object.keys(queryParams).forEach(k => params.set(k, queryParams[k]));
+    }
+    params.set('page', pageNum);
+    return '/users-table?' + params.toString();
+  }
 %>
-<nav>
-  <ul class="pagination justify-content-center">
+<nav aria-label="Навигация по страницам">
+  <ul class="pagination justify-content-center mt-4">
+    <%# Предыдущая страница %>
     <li class="page-item <%= (curr <= 1) ? 'disabled' : '' %>">
-      <% if (curr > 1) { 
-           const prevParams = new URLSearchParams(queryParams || {}); prevParams.set('page', curr - 1); %>
+      <% if (curr > 1) { %>
         <a class="page-link"
-           href="/users-table?<%= prevParams.toString() %>"
-           hx-get="/users-table?<%= prevParams.toString() %>"
+           href="<%= buildPageUrl(curr - 1) %>"
+           hx-get="<%= buildPageUrl(curr - 1) %>"
            hx-include="#usersFilterForm"
+           <%# views/partials/users-table.ejs (безопасная финальная версия) - ЧАСТЬ 2 (ПРОДОЛЖЕНИЕ) %>
+
            hx-target="#users-table-container"
-        >&laquo;</a>
+           hx-swap="innerHTML"
+           aria-label="Предыдущая">
+          &laquo; Назад
+        </a>
       <% } else { %>
-        <span class="page-link">&laquo;</span>
+        <span class="page-link" aria-hidden="true">&laquo; Назад</span>
       <% } %>
     </li>
 
+    <%# Генерация номеров страниц %>
     <% 
       const maxToShow = 7;
       let start = Math.max(1, curr - 3);
       let end = Math.min(totalPages, start + maxToShow - 1);
-      if (end - start + 1 < maxToShow) start = Math.max(1, end - maxToShow + 1);
+      
+      // Корректируем start если недостаточно страниц
+      if (end - start + 1 < maxToShow) {
+        start = Math.max(1, end - maxToShow + 1);
+      }
 
-      for (let p = start; p <= end; p++) {
-        const pParams = new URLSearchParams(queryParams || {}); pParams.set('page', p);
-    %>
-      <li class="page-item <%= (p === curr) ? 'active' : '' %>">
-        <% if (p === curr) { %>
-          <span class="page-link"><%= p %></span>
-        <% } else { %>
+      // Первая страница (если не попала в диапазон)
+      if (start > 1) { %>
+        <li class="page-item">
           <a class="page-link"
-             href="/users-table?<%= pParams.toString() %>"
-             hx-get="/users-table?<%= pParams.toString() %>"
+             href="<%= buildPageUrl(1) %>"
+             hx-get="<%= buildPageUrl(1) %>"
              hx-include="#usersFilterForm"
              hx-target="#users-table-container"
-          ><%= p %></a>
+             hx-swap="innerHTML">
+            1
+          </a>
+        </li>
+        <% if (start > 2) { %>
+          <li class="page-item disabled"><span class="page-link">...</span></li>
         <% } %>
-      </li>
-    <% } %>
+      <% } %>
 
+      <%# Основной диапазон страниц %>
+      <% for (let p = start; p <= end; p++) { %>
+        <li class="page-item <%= (p === curr) ? 'active' : '' %>" 
+            <%= (p === curr) ? 'aria-current="page"' : '' %>>
+          <% if (p === curr) { %>
+            <span class="page-link"><%= p %></span>
+          <% } else { %>
+            <a class="page-link"
+               href="<%= buildPageUrl(p) %>"
+               hx-get="<%= buildPageUrl(p) %>"
+               hx-include="#usersFilterForm"
+               hx-target="#users-table-container"
+               hx-swap="innerHTML">
+              <%= p %>
+            </a>
+          <% } %>
+        </li>
+      <% } %>
+
+      <%# Последняя страница (если не попала в диапазон) %>
+      <% if (end < totalPages) { %>
+        <% if (end < totalPages - 1) { %>
+          <li class="page-item disabled"><span class="page-link">...</span></li>
+        <% } %>
+        <li class="page-item">
+          <a class="page-link"
+             href="<%= buildPageUrl(totalPages) %>"
+             hx-get="<%= buildPageUrl(totalPages) %>"
+             hx-include="#usersFilterForm"
+             hx-target="#users-table-container"
+             hx-swap="innerHTML">
+            <%= totalPages %>
+          </a>
+        </li>
+      <% } %>
+    
+    <%# Следующая страница %>
     <li class="page-item <%= (curr >= totalPages) ? 'disabled' : '' %>">
-      <% if (curr < totalPages) { 
-           const nextParams = new URLSearchParams(queryParams || {}); nextParams.set('page', curr + 1); %>
+      <% if (curr < totalPages) { %>
         <a class="page-link"
-           href="/users-table?<%= nextParams.toString() %>"
-           hx-get="/users-table?<%= nextParams.toString() %>"
+           href="<%= buildPageUrl(curr + 1) %>"
+           hx-get="<%= buildPageUrl(curr + 1) %>"
            hx-include="#usersFilterForm"
            hx-target="#users-table-container"
-        >&raquo;</a>
+           hx-swap="innerHTML"
+           aria-label="Следующая">
+          Вперёд &raquo;
+        </a>
       <% } else { %>
-        <span class="page-link">&raquo;</span>
+        <span class="page-link" aria-hidden="true">Вперёд &raquo;</span>
       <% } %>
     </li>
   </ul>
+  
+  <%# Информация о текущей странице %>
+  <div class="text-center text-muted small mt-2">
+    Страница <%= curr %> из <%= totalPages %> 
+    <% if (totalUsers) { %>
+      (всего пользователей: <%= totalUsers.toLocaleString('ru-RU') %>)
+    <% } %>
+  </div>
 </nav>
 <% } %>
+
+<%# === ДОПОЛНИТЕЛЬНЫЕ СТИЛИ ДЛЯ АДАПТИВНОСТИ === %>
+<style>
+/* Адаптивная таблица для мобильных */
+@media (max-width: 768px) {
+  .table thead {
+    display: none;
+  }
+  
+  .table tbody tr {
+    display: block;
+    margin-bottom: 1.5rem;
+    border: 1px solid var(--bs-border-color);
+    border-radius: 8px;
+    padding: 12px;
+    background-color: var(--bs-card-bg);
+  }
+  
+  .table tbody td {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 4px;
+    border: none;
+    border-bottom: 1px solid var(--bs-border-color);
+  }
+  
+  .table tbody td:last-child {
+    border-bottom: none;
+  }
+  
+  .table tbody td::before {
+    content: attr(data-label);
+    font-weight: 600;
+    margin-right: 10px;
+    flex-shrink: 0;
+  }
+  
+  .table tbody td > * {
+    text-align: right;
+  }
+  
+  /* Форма смены тарифа на мобильном */
+  .tariff-form {
+    width: 100%;
+    flex-direction: column;
+  }
+  
+  .tariff-form select,
+  .tariff-form input {
+    width: 100% !important;
+  }
+  
+  /* Кнопка действий */
+  .btn-group {
+    width: 100%;
+  }
+  
+  .btn-group .dropdown-toggle {
+    width: 100%;
+  }
+}
+
+/* Анимация загрузки HTMX */
+.htmx-swapping {
+  opacity: 0;
+  transition: opacity 0.2s ease-out;
+}
+
+/* Индикатор загрузки */
+.htmx-request .spinner-border {
+  display: inline-block;
+}
+
+/* Стили для бейджей */
+.badge {
+  font-size: 0.8rem;
+  padding: 4px 10px;
+  font-weight: 600;
+}
+
+/* Улучшение dropdown меню */
+.dropdown-menu {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  border: 1px solid var(--bs-border-color);
+  border-radius: 8px;
+}
+
+.dropdown-item {
+  padding: 10px 16px;
+  transition: background-color 0.15s ease;
+}
+
+.dropdown-item:hover {
+  background-color: var(--table-row-hover);
+}
+
+.dropdown-item i {
+  width: 18px;
+  display: inline-block;
+}
+
+/* Форма смены тарифа */
+.tariff-form {
+  gap: 8px;
+}
+
+.tariff-form .form-select,
+.tariff-form .form-control {
+  font-size: 0.85rem;
+}
+
+/* Сортируемые заголовки */
+thead th a {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+thead th a:hover {
+  color: var(--bs-primary-color) !important;
+}
+
+/* Пагинация */
+.pagination {
+  margin-top: 1.5rem;
+  margin-bottom: 1rem;
+}
+
+.page-link {
+  color: var(--bs-body-color);
+  background-color: var(--bs-card-bg);
+  border-color: var(--bs-border-color);
+  transition: all 0.2s ease;
+}
+
+.page-link:hover {
+  color: #ffffff;
+  background-color: var(--bs-primary-color);
+  border-color: var(--bs-primary-color);
+}
+
+.page-item.active .page-link {
+  background-color: var(--bs-primary-color);
+  border-color: var(--bs-primary-color);
+}
+
+.page-item.disabled .page-link {
+  background-color: var(--bs-card-bg);
+  border-color: var(--bs-border-color);
+  opacity: 0.5;
+}
+</style>
+
+<%# === СКРИПТ ДЛЯ УЛУЧШЕНИЯ UX === %>
+<script>
+// Подтверждение действий (если admin.js не подключен)
+if (typeof window.adminScriptLoaded === 'undefined') {
+  document.addEventListener('DOMContentLoaded', () => {
+    document.querySelectorAll('[data-confirm]').forEach(el => {
+      el.addEventListener('click', (e) => {
+        const message = el.dataset.confirm || 'Вы уверены?';
+        if (!confirm(message)) {
+          e.preventDefault();
+        }
+      });
+    });
+  });
+}
+
+// Индикатор загрузки HTMX
+document.body.addEventListener('htmx:beforeRequest', () => {
+  const container = document.getElementById('users-table-container');
+  if (container) {
+    container.style.opacity = '0.6';
+    container.style.pointerEvents = 'none';
+  }
+});
+
+document.body.addEventListener('htmx:afterRequest', () => {
+  const container = document.getElementById('users-table-container');
+  if (container) {
+    container.style.opacity = '1';
+    container.style.pointerEvents = 'auto';
+  }
+});
+
+// Автосохранение позиции скролла
+document.body.addEventListener('htmx:beforeSwap', () => {
+  sessionStorage.setItem('usersTableScroll', window.scrollY);
+});
+
+document.body.addEventListener('htmx:afterSettle', () => {
+  const scrollPos = sessionStorage.getItem('usersTableScroll');
+  if (scrollPos) {
+    window.scrollTo(0, parseInt(scrollPos, 10));
+  }
+});
+
+// Валидация формы тарифа
+document.addEventListener('submit', (e) => {
+  if (e.target.classList.contains('tariff-form')) {
+    const daysInput = e.target.querySelector('input[name="days"]');
+    const days = parseInt(daysInput.value, 10);
+    
+    if (isNaN(days) || days < 1 || days > 365) {
+      e.preventDefault();
+      alert('Количество дней должно быть от 1 до 365');
+      daysInput.focus();
+    }
+  }
+});
+
+// Highlight только что обновлённой строки
+if (window.location.hash) {
+  const userId = window.location.hash.slice(1);
+  const row = document.querySelector(`a[href="/user/${userId}"]`)?.closest('tr');
+  if (row) {
+    row.style.backgroundColor = 'var(--bs-warning)';
+    row.style.transition = 'background-color 2s ease';
+    setTimeout(() => {
+      row.style.backgroundColor = '';
+    }, 2000);
+  }
+}
+</script>
