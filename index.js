@@ -48,7 +48,7 @@ import {
 } from './db.js';
 import { initializeWorkers } from './services/workerManager.js';
 import { runBroadcastBatch } from './services/broadcastManager.js';
-import { setMaintenanceMode } from './services/appState.js';
+import { isShuttingDown, setShuttingDown } from './services/appState.js';
 import { bot } from './bot.js';
 import redisService from './services/redisClient.js';
 import {
