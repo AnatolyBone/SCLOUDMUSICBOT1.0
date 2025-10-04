@@ -365,8 +365,15 @@
 <script src="https://cdn.jsdelivr.net/npm/litepicker/dist/litepicker.js" integrity="sha256-0G4+2/h/7Q2nFmgjY/5zY8RWfT/D323Q/i3I0oQue2g=" crossorigin="anonymous" defer></script>
 
 <script>
-  document.addEventListener('DOMContentLoaded', () => {
+  // ✅ Используем 'load' вместо 'DOMContentLoaded' для скриптов с defer
+  window.addEventListener('load', () => {
     // Безопасная инициализация
+    if (typeof bootstrap?.Tooltip !== 'function') {
+      console.warn('Bootstrap Tooltip not found');
+    } else {
+      new bootstrap.Tooltip(document.body, { selector: "[data-bs-toggle='tooltip']" });
+    }
+
     if (typeof Chart === 'undefined' || typeof Litepicker === 'undefined') {
       console.error('Chart.js or Litepicker not loaded!');
       document.body.insertAdjacentHTML('afterbegin', '<div class="alert alert-danger">Ошибка загрузки библиотек. Графики не будут отображаться.</div>');
@@ -432,7 +439,11 @@
         if (Chart.getChart(canvas)) {
           Chart.getChart(canvas).destroy();
         }
-        new Chart(canvas.getContext('2d'), { type: chartType, data: chartData, options });
+        new Chart(canvas.getContext('2d'), { 
+          type: chartType, 
+          data: chartData, 
+          options 
+        });
       } catch (e) {
         console.error(`Ошибка при построении графика ${canvasId}:`, e);
         container.innerHTML = `<div class="d-flex justify-content-center align-items-center h-100 text-danger p-4">Ошибка при построении графика.</div>`;
