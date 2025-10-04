@@ -756,16 +756,26 @@ res.redirect('/dashboard?resetExpired=err');
   });
 
   app.post('/texts/update', requireAuth, async (req, res) => {
-    try {
-      const { key, value } = req.body;
-      await setText(key, value);
-      res.redirect('/texts?success=true');
-    } catch (error) {
-      console.error('Ошибка при обновлении текста:', error);
-      res.status(500).send('Ошибка сервера');
+  try {
+    const { key, value } = req.body;
+    
+    // Простая валидация: ключ и значение не должны быть пустыми
+    if (!key || !value.trim()) {
+      throw new Error('Ключ или значение не могут быть пустыми.');
     }
-  });
-
+    
+    await setText(key, value);
+    
+    // Перенаправляем с хешем, чтобы аккордеон остался открытым
+    res.redirect(`/texts?success=true#collapse-${encodeURIComponent(key)}`);
+    
+  } catch (error) {
+    console.error('Ошибка при обновлении текста:', error);
+    
+    // Перенаправляем на ту же страницу, но с сообщением об ошибке
+    res.redirect(`/texts?error=${encodeURIComponent(error.message)}`);
+  }
+});
   app.get('/expiring-users', requireAuth, async (req, res) => {
     try {
       const users = await getExpiringUsers();
