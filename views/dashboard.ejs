@@ -61,23 +61,13 @@
 
 <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
   <h1 class="h2">📊 Дашборд</h1>
-  <div class="btn-toolbar mb-2 mb-md-0">
-    <form id="periodForm" class="d-flex align-items-center flex-wrap gap-2">
-      <input type="hidden" name="startDate" id="startDateInput">
-      <input type="hidden" name="endDate" id="endDateInput">
-      
-      <div class="btn-group btn-group-sm" role="group" id="periodButtons">
-        <a href="#" class="btn btn-outline-secondary" data-days="7">7 дней</a>
-        <a href="#" class="btn btn-outline-secondary active" data-days="30">30 дней</a>
-        <a href="#" class="btn btn-outline-secondary" data-days="90">90 дней</a>
-      </div>
-      
-      <input type="text" id="date-range-picker" class="form-control form-control-sm" style="width: 220px; text-align: center;">
-      <button type="submit" class="btn btn-sm btn-primary">
-        <i class="bi bi-arrow-clockwise"></i> Обновить
-      </button>
-    </form>
-  </div>
+  <form id="periodForm" class="d-flex align-items-center flex-wrap gap-2">
+    <input type="hidden" name="startDate" id="startDateInput">
+    <input type="hidden" name="endDate" id="endDateInput">
+    <div class="btn-group btn-group-sm" role="group"><a href="#" class="btn btn-outline-secondary" data-days="7">7 дней</a><a href="#" class="btn btn-outline-secondary active" data-days="30">30 дней</a><a href="#" class="btn btn-outline-secondary" data-days="90">90 дней</a></div>
+    <input type="text" id="date-range-picker" class="form-control form-control-sm" style="width: 220px; text-align: center;">
+    <button type="submit" class="btn btn-sm btn-primary"><i class="bi bi-arrow-clockwise"></i> Обновить</button>
+  </form>
 </div>
 
 <%# === Уведомления === %>
@@ -98,8 +88,7 @@
 %>
 <% alerts.forEach(alert => { %>
   <div class="alert alert-<%= alert.type %> alert-dismissible fade show" role="alert" data-autohide="5000">
-    <%- alert.message %>
-    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    <%- alert.message %><button type="button" class="btn-close" data-bs-dismiss="alert"></button>
   </div>
 <% }); %>
 
@@ -361,21 +350,19 @@
 
 <%# === Скрипты, специфичные для дашборда === %>
 <%- contentFor('scripts') %>
+
+<%# 1. Подключаем библиотеки с defer %>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" integrity="sha256-8PzlfscBtTzIlQG6U7a2Yit2V32QxJ33cM3C+zBw8wA=" crossorigin="anonymous" defer></script>
 <script src="https://cdn.jsdelivr.net/npm/litepicker/dist/litepicker.js" integrity="sha256-0G4+2/h/7Q2nFmgjY/5zY8RWfT/D323Q/i3I0oQue2g=" crossorigin="anonymous" defer></script>
 
+<%# 2. Определяем функцию инициализации, которую вызовет layout.ejs %>
 <script>
-  // ✅ Используем 'load' вместо 'DOMContentLoaded' для скриптов с defer
-  window.addEventListener('load', () => {
-    // Безопасная инициализация
-    if (typeof bootstrap?.Tooltip !== 'function') {
-      console.warn('Bootstrap Tooltip not found');
-    } else {
-      new bootstrap.Tooltip(document.body, { selector: "[data-bs-toggle='tooltip']" });
-    }
+  window.initializePage = function() {
+    console.log('[Dashboard] Инициализация графиков и календаря...');
 
+    // Безопасная проверка, что библиотеки загружены
     if (typeof Chart === 'undefined' || typeof Litepicker === 'undefined') {
-      console.error('Chart.js or Litepicker not loaded!');
+      console.error('КРИТИЧЕСКАЯ ОШИБКА: Chart.js или Litepicker не загрузились вовремя!');
       document.body.insertAdjacentHTML('afterbegin', '<div class="alert alert-danger">Ошибка загрузки библиотек. Графики не будут отображаться.</div>');
       return;
     }
@@ -390,8 +377,8 @@
       element: dateRangePickerElement,
       singleMode: false,
       format: 'DD.MM.YYYY',
-      startDate: new Date('<%- startDate || new Date(new Date().setDate(new Date().getDate() - 29)).toISOString().slice(0, 10) %>'),
-      endDate: new Date('<%- endDate || new Date().toISOString().slice(0, 10) %>'),
+      startDate: new Date('<%- locals.startDate || new Date(new Date().setDate(new Date().getDate() - 29)).toISOString().slice(0, 10) %>'),
+      endDate: new Date('<%- locals.endDate || new Date().toISOString().slice(0, 10) %>'),
       setup: (picker) => {
         picker.on('selected', (date1, date2) => {
           if (date1 && date2) {
@@ -401,94 +388,93 @@
         });
       }
     });
-
+    
     form.querySelectorAll('.btn-group .btn').forEach(button => {
-      button.addEventListener('click', (event) => {
-        event.preventDefault();
-        const days = parseInt(event.target.dataset.days, 10);
-        const endDate = new Date();
-        const startDate = new Date();
-        startDate.setDate(endDate.getDate() - (days - 1));
-        
-        startDateInput.value = startDate.toISOString().slice(0, 10);
-        endDateInput.value = endDate.toISOString().slice(0, 10);
-        form.submit();
-      });
+        button.addEventListener('click', (event) => {
+            event.preventDefault();
+            const days = parseInt(event.target.dataset.days, 10);
+            const endDate = new Date();
+            const startDate = new Date();
+            startDate.setDate(endDate.getDate() - (days - 1));
+            
+            startDateInput.value = startDate.toISOString().slice(0, 10);
+            endDateInput.value = endDate.toISOString().slice(0, 10);
+            form.submit();
+        });
     });
 
     if (picker.getStartDate() && picker.getEndDate()) {
-      startDateInput.value = picker.getStartDate().format('YYYY-MM-DD');
-      endDateInput.value = picker.getEndDate().format('YYYY-MM-DD');
+        startDateInput.value = picker.getStartDate().format('YYYY-MM-DD');
+        endDateInput.value = picker.getEndDate().format('YYYY-MM-DD');
     }
 
     // --- Chart Drawing ---
     function drawChart(canvasId, chartData, chartType, options = {}) {
-      const canvas = document.getElementById(canvasId);
-      if (!canvas) return;
-      const container = canvas.parentElement;
-      const spinner = document.getElementById(`${canvasId}Spinner`);
-
-      if (spinner) spinner.classList.add('d-none');
-      
-      if (!chartData?.labels?.length > 0) {
-        container.innerHTML = `<div class="d-flex justify-content-center align-items-center h-100 text-muted p-4">Нет данных для отображения.</div>`;
-        return;
-      }
-
-      try {
-        if (Chart.getChart(canvas)) {
-          Chart.getChart(canvas).destroy();
+        const canvas = document.getElementById(canvasId);
+        if (!canvas) return;
+        const container = canvas.parentElement;
+        
+        if (!chartData?.labels?.length > 0) {
+            container.innerHTML = `<div class="d-flex justify-content-center align-items-center h-100 text-muted p-4">Нет данных для отображения.</div>`;
+            return;
         }
-        new Chart(canvas.getContext('2d'), { 
-          type: chartType, 
-          data: chartData, 
-          options 
-        });
-      } catch (e) {
-        console.error(`Ошибка при построении графика ${canvasId}:`, e);
-        container.innerHTML = `<div class="d-flex justify-content-center align-items-center h-100 text-danger p-4">Ошибка при построении графика.</div>`;
-      }
+
+        try {
+            if (Chart.getChart(canvas)) {
+              Chart.getChart(canvas).destroy();
+            }
+            new Chart(canvas.getContext('2d'), { 
+              type: chartType, 
+              data: chartData, 
+              options 
+            });
+        } catch (e) {
+            console.error(`Ошибка при построении графика ${canvasId}:`, e);
+            container.innerHTML = `<div class="d-flex justify-content-center align-items-center h-100 text-danger p-4">Ошибка при построении графика.</div>`;
+        }
     }
 
     const commonLineBarOptions = { 
-      responsive: true, 
-      maintainAspectRatio: false, 
-      scales: { 
-        y: { 
-          beginAtZero: true,
-          ticks: { 
-            callback: (value) => window.formatNumber ? window.formatNumber(value) : value 
-          }
-        } 
-      },
-      plugins: {
-        tooltip: {
-          callbacks: {
-            label: (context) => `${context.dataset.label}: ${window.formatNumber ? window.formatNumber(context.raw) : context.raw}`
-          }
+        responsive: true, 
+        maintainAspectRatio: false, 
+        scales: { 
+            y: { 
+              beginAtZero: true,
+              ticks: { 
+                  callback: (value) => window.formatNumber ? window.formatNumber(value) : value 
+              }
+            } 
+        },
+        plugins: {
+            tooltip: {
+              callbacks: {
+                  label: (context) => `${context.dataset.label}: ${window.formatNumber ? window.formatNumber(context.raw) : context.raw}`
+              }
+            }
         }
-      }
     };
 
-    drawChart('mainChart', <%- JSON.stringify(chartDataCombined || {}) %>, 'line', commonLineBarOptions);
-    drawChart('tariffsChart', <%- JSON.stringify(chartDataTariffs || {}) %>, 'doughnut', { 
-      responsive: true, 
-      maintainAspectRatio: false, 
-      plugins: { legend: { position: 'right' } } 
+    drawChart('mainChart', <%- JSON.stringify(locals.chartDataCombined || {}) %>, 'line', commonLineBarOptions);
+    drawChart('tariffsChart', <%- JSON.stringify(locals.chartDataTariffs || {}) %>, 'doughnut', { 
+        responsive: true, 
+        maintainAspectRatio: false, 
+        plugins: { legend: { position: 'right' } } 
     });
-    drawChart('weekdayChart', <%- JSON.stringify(chartDataWeekday || {}) %>, 'bar', { 
+    drawChart('weekdayChart', <%- JSON.stringify(locals.chartDataWeekday || {}) %>, 'bar', { 
       ...commonLineBarOptions, 
       plugins: { 
-        ...commonLineBarOptions.plugins,
-        legend: { display: false } 
+          ...commonLineBarOptions.plugins,
+          legend: { display: false } 
       } 
     });
-    drawChart('hourlyChart', <%- JSON.stringify(chartDataHourly || {}) %>, 'bar', { 
+    drawChart('hourlyChart', <%- JSON.stringify(locals.chartDataHourly || {}) %>, 'bar', { 
       ...commonLineBarOptions, 
       plugins: { 
-        ...commonLineBarOptions.plugins,
-        legend: { display: false } 
+          ...commonLineBarOptions.plugins,
+          legend: { display: false } 
       }
     });
-  });
+
+    console.log('[Dashboard] Инициализация завершена');
+  };
 </script>
