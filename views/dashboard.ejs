@@ -1,114 +1,136 @@
-<% // views/dashboard.ejs %>
+<%# views/dashboard.ejs (безопасная финальная версия) %>
 
+<%# === Хелперы и функции === %>
+<% 
+  const escapeHtml = (str) => {
+    if (!str) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  };
+
+  const formatNumber = (num) => {
+    if (!num) return '0';
+    return Number(num).toLocaleString('ru-RU');
+  };
+%>
+
+<%# === Стили === %>
 <%- contentFor('styles') %>
 <style>
-  .card-metric { transition: transform 0.2s; }
-  .card-metric:hover { transform: translateY(-5px); }
-  .chart-container { position: relative; width: 100%; }
-  .bg-light-warning { background-color: #fff3cd !important; }
-  .bg-light-success { background-color: #d1e7dd !important; }
-  /* немного компактнее список тарифов */
-  .card-tariffs .list-group-item { padding: .35rem 0; }
-  .card-tariffs .btn { padding: .25rem .5rem; font-size: .875rem; }
+  .stats-grid .card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 8px 16px rgba(0, 0, 0, 0.1);
+  }
+  
+  .chart-container {
+    position: relative;
+    width: 100%;
+    min-height: 300px;
+  }
+  
+  .bg-light-warning { background-color: rgba(255, 193, 7, 0.15) !important; }
+  .bg-light-success { background-color: rgba(25, 135, 84, 0.1) !important; }
+  .bg-light-danger { background-color: rgba(220, 53, 69, 0.1) !important; }
+
+  .list-group-flush .list-group-item {
+    padding: .5rem 0;
+  }
+  
+  .top-list .badge {
+    min-width: 40px;
+    text-align: center;
+  }
 </style>
 
+<%# === Основной контент === %>
 <%- contentFor('body') %>
 
 <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
-  <h1 class="h2">Дашборд</h1>
+  <h1 class="h2">📊 Дашборд</h1>
   <div class="btn-toolbar mb-2 mb-md-0">
     <form id="periodForm" class="d-flex align-items-center flex-wrap gap-2">
       <input type="hidden" name="startDate" id="startDateInput">
       <input type="hidden" name="endDate" id="endDateInput">
-      <div class="btn-group btn-group-sm">
+      
+      <div class="btn-group btn-group-sm" role="group">
         <a href="#" class="btn btn-outline-secondary" data-days="7">7 дней</a>
-        <a href="#" class="btn btn-outline-secondary" data-days="30">30 дней</a>
+        <a href="#" class="btn btn-outline-secondary active" data-days="30">30 дней</a>
         <a href="#" class="btn btn-outline-secondary" data-days="90">90 дней</a>
       </div>
+      
       <input type="text" id="date-range-picker" class="form-control form-control-sm" style="width: 220px; text-align: center;">
-      <button type="submit" class="btn btn-sm btn-primary">Применить</button>
+      <button type="submit" class="btn btn-sm btn-primary">
+        <i class="bi bi-arrow-clockwise"></i> Обновить
+      </button>
     </form>
   </div>
 </div>
 
-<% if (typeof resetOthers !== 'undefined' && resetOthers !== null) { %>
-  <% if (resetOthers === 'err') { %>
-    <div class="alert alert-danger mt-2">Не удалось сбросить «Другие (старые)».</div>
-  <% } else { %>
-    <div class="alert alert-success mt-2">Сброшено пользователей: <b><%= resetOthers %></b>.</div>
-  <% } %>
-<% } %>
+<%# === Уведомления === %>
+<% 
+  const alerts = [];
+  if (resetOthers) alerts.push({ type: resetOthers === 'err' ? 'danger' : 'success', message: `Сброшено "Других (старых)": <b>${resetOthers}</b>` });
+  if (resetExpired) alerts.push({ type: resetExpired === 'err' ? 'danger' : 'success', message: `Сброшено истёкших: <b>${resetExpired}</b>` });
+%>
+<% alerts.forEach(alert => { %>
+  <div class="alert alert-<%= alert.type %> alert-dismissible fade show" role="alert" data-autohide="5000">
+    <%- alert.message %>
+    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+  </div>
+<% }); %>
 
-<% if (typeof resetExpired !== 'undefined' && resetExpired !== null) { %>
-  <% if (resetExpired === 'err') { %>
-    <div class="alert alert-danger mt-2">Не удалось сбросить истёкшие подписки.</div>
-  <% } else { %>
-    <div class="alert alert-success mt-2">Сброшено истёкших подписок: <b><%= resetExpired %></b>.</div>
-  <% } %>
-<% } %>
-
-<!-- Верхние метрики -->
-<div class="row row-cols-1 row-cols-md-3 row-cols-lg-5 g-4 mb-4">
-  <div class="col">
-    <div class="card card-metric shadow-sm text-center h-100">
-      <div class="card-body">
-        <h5 class="card-title text-muted">Всего юзеров</h5>
-        <p class="h2 mb-0"><%= stats.total_users || '0' %></p>
+<%# === Верхние метрики === %>
+<div class="row row-cols-1 row-cols-sm-2 row-cols-md-3 row-cols-xl-5 g-4 mb-4 stats-grid">
+  <% 
+    const metrics = [
+      { label: 'Всего юзеров', value: stats.total_users, icon: 'bi-people-fill' },
+      { label: 'Активных сегодня', value: stats.active_today, icon: 'bi-activity' },
+      { label: 'Загрузок (всего)', value: stats.total_downloads, icon: 'bi-download' },
+      { label: 'Пришли по ссылке', value: stats.totalReferred, icon: 'bi-share-fill', bg: 'bg-light-success' },
+      { label: 'Треков в кэше', value: stats.cachedTracksCount, icon: 'bi-hdd-stack-fill' }
+    ];
+  %>
+  <% metrics.forEach(m => { %>
+    <div class="col">
+      <div class="card card-metric shadow-sm text-center h-100 <%= m.bg || '' %>">
+        <div class="card-body">
+          <i class="bi <%= m.icon %> h3 text-muted mb-2"></i>
+          <p class="h2 mb-0"><%= formatNumber(m.value) %></p>
+          <h5 class="card-title text-muted small mt-1"><%= m.label %></h5>
+        </div>
       </div>
     </div>
-  </div>
-  <div class="col">
-    <div class="card card-metric shadow-sm text-center h-100">
-      <div class="card-body">
-        <h5 class="card-title text-muted">Активных сегодня</h5>
-        <p class="h2 mb-0"><%= stats.active_today || '0' %></p>
-      </div>
-    </div>
-  </div>
-  <div class="col">
-    <div class="card card-metric shadow-sm text-center h-100">
-      <div class="card-body">
-        <h5 class="card-title text-muted">Загрузок (всего)</h5>
-        <p class="h2 mb-0"><%= stats.total_downloads || '0' %></p>
-      </div>
-    </div>
-  </div>
-  <div class="col">
-    <div class="card card-metric shadow-sm text-center h-100 bg-light-success">
-      <div class="card-body">
-        <h5 class="card-title text-muted">Пришли по ссылке</h5>
-        <p class="h2 mb-0"><%= stats.totalReferred || '0' %></p>
-      </div>
-    </div>
-  </div>
-  <div class="col">
-    <div class="card card-metric shadow-sm text-center h-100">
-      <div class="card-body">
-        <h5 class="card-title text-muted">Треков в кэше</h5>
-        <p class="h2 mb-0"><%= stats.cachedTracksCount || '0' %></p>
-      </div>
-    </div>
-  </div>
+  <% }); %>
 </div>
 
-<!-- Информационные блоки -->
+<%# === Информационные блоки === %>
 <div class="row g-4 mb-4">
-  <!-- Статус систем -->
+  <%# Статус систем %>
   <div class="col-lg-4">
     <div class="card shadow-sm h-100">
-      <div class="card-header">Статус систем</div>
+      <div class="card-header fw-semibold"><i class="bi bi-hdd-network me-2"></i>Статус систем</div>
       <div class="card-body">
         <ul class="list-group list-group-flush">
           <li class="list-group-item d-flex justify-content-between align-items-center px-0">
             <span>Очередь загрузок</span>
-            <span class="badge bg-primary rounded-pill"><%= stats.queueWaiting || 0 %> в ож. / <%= stats.queueActive || 0 %> в раб.</span>
+            <span class="badge bg-primary rounded-pill">
+              <%= formatNumber(stats.queueWaiting) %> / <%= formatNumber(stats.queueActive) %>
+            </span>
           </li>
           <li class="list-group-item d-flex justify-content-between align-items-center px-0">
             <span>Канал-хранилище</span>
-            <% if (locals.storageStatus && storageStatus.available) { %>
-              <span class="badge bg-success">Доступен</span>
+            <% if (storageStatus?.available) { %>
+              <span class="badge bg-success">✓ Доступен</span>
             <% } else { %>
-              <span class="badge bg-danger" data-bs-toggle="tooltip" title="<%= (locals.storageStatus && storageStatus.error) ? storageStatus.error : 'ID не указан' %>">Ошибка</span>
+              <span class="badge bg-danger" 
+                    data-bs-toggle="tooltip" 
+                    title="<%= escapeHtml(storageStatus?.error || 'ID не указан') %>">
+                ✗ Ошибка
+              </span>
             <% } %>
           </li>
         </ul>
@@ -116,108 +138,113 @@
     </div>
   </div>
 
-<!-- Пользователи по тарифам -->
-<div class="col-lg-4">
-  <div class="card shadow-sm h-100 card-tariffs">
-    <div class="card-header">Пользователи по тарифам</div>
-    <div class="card-body">
-      <% const othersCount = Number(stats?.usersByTariff?.Other ?? 0); %>
-      <% const expiredCountSafe = Number(locals.expiredCount ?? 0); %>
-
-      <ul class="list-group list-group-flush">
-        <li class="list-group-item d-flex justify-content-between align-items-center px-0">
-          <span>🆓 Free</span>
-          <span class="fw-bold"><%= stats.usersByTariff?.Free ?? 0 %></span>
-        </li>
-        <li class="list-group-item d-flex justify-content-between align-items-center px-0">
-          <span>🎯 Plus</span>
-          <span class="fw-bold"><%= stats.usersByTariff?.Plus ?? 0 %></span>
-        </li>
-        <li class="list-group-item d-flex justify-content-between align-items-center px-0">
-          <span>💪 Pro</span>
-          <span class="fw-bold"><%= stats.usersByTariff?.Pro ?? 0 %></span>
-        </li>
-        <li class="list-group-item d-flex justify-content-between align-items-center px-0">
-          <span>💎 Unlimited</span>
-          <span class="fw-bold"><%= stats.usersByTariff?.Unlimited ?? 0 %></span>
-        </li>
-
-        <!-- ВСЕГДА показываем строку “Другие (старые)” -->
-        <li class="list-group-item d-flex justify-content-between align-items-center px-0 <%= othersCount > 0 ? 'bg-light-warning' : '' %>">
-          <span class="fw-bold">⚙️ Другие (старые)</span>
-          <span class="fw-bold"><%= othersCount %></span>
-        </li>
-
-        <!-- ВСЕГДА показываем “Истёкшие (не Free)” -->
-        <li class="list-group-item d-flex justify-content-between align-items-center px-0">
-          <span>⌛ Истёкшие (не Free)</span>
-          <span class="fw-bold"><%= expiredCountSafe %></span>
-        </li>
-      </ul>
-
-      <!-- Кнопка “Другие” — только если > 0 -->
-      <% if (othersCount > 0) { %>
-        <form method="post" action="/tariffs/reset-others" class="mt-2">
-          <button type="submit" class="btn btn-sm btn-warning">
-            Сбросить «Другие (старые)» до Free (5)
-          </button>
-        </form>
-      <% } %>
-
-      <!-- Кнопка “Истёкшие” -->
-      <form method="post" action="/tariffs/reset-expired" class="mt-2"
-            onsubmit="return confirm('Сбросить все истёкшие подписки до Free (5/день)?');">
-        <button type="submit" class="btn btn-sm btn-outline-danger">
-          Сбросить истёкшие до Free
-        </button>
-      </form>
-    </div>
-  </div>
-</div>
-
-  <!-- Топ-5 источников трафика -->
+  <%# Пользователи по тарифам %>
   <div class="col-lg-4">
     <div class="card shadow-sm h-100">
-      <div class="card-header">Топ-5 источников трафика</div>
+      <div class="card-header fw-semibold"><i class="bi bi-pie-chart-fill me-2"></i>Тарифы</div>
       <div class="card-body">
-        <% if (stats.topSources && stats.topSources.length > 0) { %>
+        <% 
+          const tariffs = [
+            { label: '🆓 Free', value: stats.usersByTariff?.Free },
+            { label: '🎯 Plus', value: stats.usersByTariff?.Plus },
+            { label: '💪 Pro', value: stats.usersByTariff?.Pro },
+            { label: '💎 Unlimited', value: stats.usersByTariff?.Unlimited }
+          ];
+          const othersCount = Number(stats?.usersByTariff?.Other ?? 0);
+          const expiredCountSafe = Number(expiredCount ?? 0);
+        %>
+        <ul class="list-group list-group-flush">
+          <% tariffs.forEach(t => { %>
+            <li class="list-group-item d-flex justify-content-between align-items-center px-0">
+              <span><%- t.label %></span>
+              <span class="fw-bold"><%= formatNumber(t.value) %></span>
+            </li>
+          <% }); %>
+          
+          <li class="list-group-item d-flex justify-content-between align-items-center px-0 <%= othersCount > 0 ? 'bg-light-warning' : '' %>">
+            <span class="fw-semibold">⚙️ Другие (старые)</span>
+            <span class="fw-bold"><%= formatNumber(othersCount) %></span>
+          </li>
+          
+          <li class="list-group-item d-flex justify-content-between align-items-center px-0 <%= expiredCountSafe > 0 ? 'bg-light-danger' : '' %>">
+            <span class="fw-semibold">⌛ Истёкшие (не Free)</span>
+            <span class="fw-bold"><%= formatNumber(expiredCountSafe) %></span>
+          </li>
+        </ul>
+
+        <div class="d-flex flex-column gap-2 mt-3">
+          <% if (othersCount > 0) { %>
+            <form method="post" action="/tariffs/reset-others">
+              <button type="submit" 
+                      class="btn btn-sm btn-warning w-100" 
+                      data-confirm="Сбросить все 'Другие' тарифы до Free?">
+                Сбросить «Другие»
+              </button>
+            </form>
+          <% } %>
+          
+          <% if (expiredCountSafe > 0) { %>
+            <form method="post" action="/tariffs/reset-expired">
+              <button type="submit" 
+                      class="btn btn-sm btn-outline-danger w-100" 
+                      data-confirm="Сбросить все истёкшие подписки до Free?">
+                Сбросить истёкшие
+              </button>
+            </form>
+          <% } %>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <%# Топ-5 источников трафика %>
+  <div class="col-lg-4">
+    <div class="card shadow-sm h-100 top-list">
+      <div class="card-header fw-semibold"><i class="bi bi-signpost-split-fill me-2"></i>Источники трафика</div>
+      <div class="card-body">
+        <% if (stats.topSources?.length > 0) { %>
           <ul class="list-group list-group-flush">
             <% stats.topSources.forEach(source => { %>
               <li class="list-group-item d-flex justify-content-between align-items-center px-0">
-                <span class="text-truncate" title="<%= source.referral_source %>"><%= source.referral_source %></span>
-                <span class="badge bg-secondary rounded-pill"><%= source.count %></span>
+                <span class="text-truncate" title="<%- escapeHtml(source.referral_source) %>">
+                  <%- escapeHtml(source.referral_source) %>
+                </span>
+                <span class="badge bg-secondary rounded-pill"><%= formatNumber(source.count) %></span>
               </li>
             <% }) %>
           </ul>
         <% } else { %>
-          <p class="text-muted text-center my-4">Нет данных по источникам.</p>
+          <div class="text-muted text-center my-4">
+            <i class="bi bi-inbox fs-3 opacity-25"></i>
+            <p class="mt-2">Нет данных</p>
+          </div>
         <% } %>
       </div>
     </div>
   </div>
 </div>
 
-<!-- ГРАФИКИ -->
+<%# === ГРАФИКИ === %>
 <div class="card shadow-sm mb-4">
-  <div class="card-header">Динамика метрик</div>
-  <div class="card-body chart-container" style="height: 350px;">
+  <div class="card-header fw-semibold"><i class="bi bi-graph-up me-2"></i>Динамика метрик</div>
+  <div class="card-body chart-container">
     <canvas id="mainChart"></canvas>
   </div>
 </div>
 
-<div class="row g-4">
+<div class="row g-4 mb-4">
   <div class="col-lg-4">
-    <div class="card shadow-sm">
-      <div class="card-header">Распределение по тарифам</div>
-      <div class="card-body d-flex justify-content-center align-items-center" style="height: 300px;">
+    <div class="card shadow-sm h-100">
+      <div class="card-header fw-semibold"><i class="bi bi-pie-chart-fill me-2"></i>Тарифы</div>
+      <div class="card-body d-flex justify-content-center align-items-center chart-container">
         <canvas id="tariffsChart"></canvas>
       </div>
     </div>
   </div>
   <div class="col-lg-8">
-    <div class="card shadow-sm">
-      <div class="card-header">Активность по дням недели</div>
-      <div class="card-body chart-container" style="height: 300px;">
+    <div class="card shadow-sm h-100">
+      <div class="card-header fw-semibold"><i class="bi bi-bar-chart-line-fill me-2"></i>Активность по дням недели</div>
+      <div class="card-body chart-container">
         <canvas id="weekdayChart"></canvas>
       </div>
     </div>
@@ -225,160 +252,216 @@
 </div>
 
 <div class="card shadow-sm my-4">
-  <div class="card-header">Активность по часам (за последние 7 дней)</div>
-  <div class="card-body chart-container" style="height: 300px;">
+  <div class="card-header fw-semibold"><i class="bi bi-clock-history me-2"></i>Активность по часам (за 7 дней)</div>
+  <div class="card-body chart-container">
     <canvas id="hourlyChart"></canvas>
   </div>
 </div>
 
-<!-- Дополнительная аналитика -->
+<%# === Дополнительная аналитика === %>
 <div class="row g-4 mb-4">
   <div class="col-lg-4">
-    <div class="card shadow-sm h-100">
-      <div class="card-header">🎵 Топ-10 популярных треков</div>
+    <div class="card shadow-sm h-100 top-list">
+      <div class="card-header fw-semibold"><i class="bi bi-music-note-list me-2"></i>Топ-10 треков</div>
       <div class="card-body">
-        <% if (topTracks && topTracks.length > 0) { %>
+        <% if (topTracks?.length > 0) { %>
           <ul class="list-group list-group-flush">
             <% topTracks.forEach((track, index) => { %>
               <li class="list-group-item d-flex justify-content-between align-items-center px-0">
                 <div class="text-truncate">
-                  <span class="text-muted"><%= index + 1 %>.</span> <%= track.track_title %>
+                  <span class="text-muted"><%= index + 1 %>.</span> <%- escapeHtml(track.track_title) %>
                 </div>
-                <span class="badge bg-primary rounded-pill"><%= track.count %></span>
+                <span class="badge bg-primary rounded-pill"><%= formatNumber(track.count) %></span>
               </li>
             <% }) %>
           </ul>
         <% } else { %>
-          <p class="text-muted text-center my-4">Недостаточно данных.</p>
+          <div class="text-muted text-center my-4">Нет данных</div>
         <% } %>
       </div>
     </div>
   </div>
 
   <div class="col-lg-4">
-    <div class="card shadow-sm h-100">
-      <div class="card-header">🏆 Топ-10 активных пользователей</div>
+    <div class="card shadow-sm h-100 top-list">
+      <div class="card-header fw-semibold"><i class="bi bi-trophy-fill me-2"></i>Топ-10 пользователей</div>
       <div class="card-body">
-        <% if (topUsers && topUsers.length > 0) { %>
+        <% if (topUsers?.length > 0) { %>
           <ul class="list-group list-group-flush">
             <% topUsers.forEach((user, index) => { %>
               <li class="list-group-item d-flex justify-content-between align-items-center px-0">
                 <div class="text-truncate">
                   <span class="text-muted"><%= index + 1 %>.</span>
-                  <a href="/user/<%= user.id %>" class="text-decoration-none"><%= user.first_name || 'ID: ' + user.id %></a>
-                  <% if (user.username) { %><small class="text-muted">@<%= user.username %></small><% } %>
+                  <a href="/user/<%= user.id %>" class="text-decoration-none">
+                    <%- escapeHtml(user.first_name) || `ID: ${user.id}` %>
+                  </a>
+                  <% if (user.username) { %>
+                    <small class="text-muted">@<%- escapeHtml(user.username) %></small>
+                  <% } %>
                 </div>
-                <span class="badge bg-success rounded-pill"><%= user.total_downloads %></span>
+                <span class="badge bg-success rounded-pill"><%= formatNumber(user.total_downloads) %></span>
               </li>
             <% }) %>
           </ul>
         <% } else { %>
-          <p class="text-muted text-center my-4">Недостаточно данных.</p>
+          <div class="text-muted text-center my-4">Нет данных</div>
         <% } %>
       </div>
     </div>
   </div>
 
-  <!-- Топ рефоводов -->
   <div class="col-lg-4">
-    <div class="card shadow-sm h-100">
-      <div class="card-header">🙋‍♂️ Топ-5 рефоводов</div>
+    <div class="card shadow-sm h-100 top-list">
+      <div class="card-header fw-semibold"><i class="bi bi-person-plus-fill me-2"></i>Топ-5 рефоводов</div>
       <div class="card-body">
-        <% if (stats.topReferrers && stats.topReferrers.length > 0) { %>
+        <% if (stats.topReferrers?.length > 0) { %>
           <ul class="list-group list-group-flush">
             <% stats.topReferrers.forEach((user, index) => { %>
               <li class="list-group-item d-flex justify-content-between align-items-center px-0">
                 <div class="text-truncate">
                   <span class="text-muted"><%= index + 1 %>.</span>
-                  <a href="/user/<%= user.referrer_id %>" class="text-decoration-none"><%= user.first_name || 'ID: ' + user.referrer_id %></a>
+                  <a href="/user/<%= user.referrer_id %>" class="text-decoration-none">
+                    <%- escapeHtml(user.first_name) || `ID: ${user.referrer_id}` %>
+                  </a>
                 </div>
-                <span class="badge bg-info rounded-pill"><%= user.referral_count %> приглашений</span>
+                <span class="badge bg-info text-dark rounded-pill">
+                  <%= formatNumber(user.referral_count) %> <%= user.referral_count === 1 ? 'приглашение' : 'приглашений' %>
+                </span>
               </li>
             <% }) %>
           </ul>
         <% } else { %>
-          <p class="text-muted text-center my-4">Пока никто никого не пригласил.</p>
+          <div class="text-muted text-center my-4">Нет данных</div>
         <% } %>
       </div>
     </div>
   </div>
 </div>
 
+<%# === Скрипты === %>
 <%- contentFor('scripts') %>
 <script>
-  window.addEventListener('load', function() {
-    setTimeout(() => {
-      try { new bootstrap.Tooltip(document.body, { selector: "[data-bs-toggle='tooltip']" }); } catch(e) {}
+  document.addEventListener('DOMContentLoaded', () => {
+    // Безопасная инициализация
+    if (typeof bootstrap?.Tooltip !== 'function') {
+      console.warn('Bootstrap Tooltip not found');
+    } else {
+      new bootstrap.Tooltip(document.body, { selector: "[data-bs-toggle='tooltip']" });
+    }
 
-      if (typeof Chart === 'undefined' || typeof Litepicker === 'undefined') {
-        console.error('Необходимые библиотеки (Chart.js или Litepicker) не загружены!');
+    if (typeof Chart === 'undefined' || typeof Litepicker === 'undefined') {
+      console.error('Chart.js or Litepicker not loaded!');
+      return;
+    }
+
+    // --- Date Picker ---
+    const form = document.getElementById('periodForm');
+    const startDateInput = document.getElementById('startDateInput');
+    const endDateInput = document.getElementById('endDateInput');
+    const dateRangePickerElement = document.getElementById('date-range-picker');
+
+    const picker = new Litepicker({
+      element: dateRangePickerElement,
+      singleMode: false,
+      format: 'DD.MM.YYYY',
+      startDate: new Date('<%= startDate || new Date(new Date().setDate(new Date().getDate() - 29)).toISOString().slice(0, 10) %>'),
+      endDate: new Date('<%= endDate || new Date().toISOString().slice(0, 10) %>'),
+      setup: (picker) => {
+        picker.on('selected', (date1, date2) => {
+          if (date1 && date2) {
+            startDateInput.value = date1.format('YYYY-MM-DD');
+            endDateInput.value = date2.format('YYYY-MM-DD');
+          }
+        });
+      }
+    });
+
+    form.querySelectorAll('.btn-group .btn').forEach(button => {
+      button.addEventListener('click', (event) => {
+        event.preventDefault();
+        const days = parseInt(event.target.dataset.days, 10);
+        const endDate = new Date();
+        const startDate = new Date();
+        startDate.setDate(endDate.getDate() - (days - 1));
+        
+        startDateInput.value = startDate.toISOString().slice(0, 10);
+        endDateInput.value = endDate.toISOString().slice(0, 10);
+        form.submit();
+      });
+    });
+
+    // Установка начальных значений
+    if (picker.getStartDate() && picker.getEndDate()) {
+      startDateInput.value = picker.getStartDate().format('YYYY-MM-DD');
+      endDateInput.value = picker.getEndDate().format('YYYY-MM-DD');
+    }
+
+    // --- Chart Drawing ---
+    function drawChart(canvasId, chartData, chartType, options = {}) {
+      const canvas = document.getElementById(canvasId);
+      if (!canvas) return;
+      const container = canvas.parentElement;
+
+      // Если нет данных - показываем заглушку
+      if (!chartData?.labels?.length > 0) {
+        container.innerHTML = `<div class="d-flex justify-content-center align-items-center h-100 text-muted p-4">Нет данных для отображения.</div>`;
         return;
       }
 
-      const form = document.getElementById('periodForm');
-      const startDateInput = document.getElementById('startDateInput');
-      const endDateInput = document.getElementById('endDateInput');
-      const dateRangePickerElement = document.getElementById('date-range-picker');
-
-      const picker = new Litepicker({
-        element: dateRangePickerElement,
-        singleMode: false,
-        format: 'DD.MM.YYYY',
-        startDate: '<%= startDate || new Date(new Date().setDate(new Date().getDate() - 29)).toISOString().slice(0, 10) %>',
-        endDate: '<%= endDate || new Date().toISOString().slice(0, 10) %>',
-        setup: (picker) => {
-          picker.on('selected', (date1, date2) => {
-            if (date1 && date2) {
-              startDateInput.value = date1.format('YYYY-MM-DD');
-              endDateInput.value = date2.format('YYYY-MM-DD');
-            }
-          });
+      try {
+        if (Chart.getChart(canvas)) {
+          Chart.getChart(canvas).destroy();
         }
-      });
-
-      form.querySelectorAll('.btn-group .btn').forEach(button => {
-        button.addEventListener('click', (event) => {
-          event.preventDefault();
-          const days = parseInt(event.target.dataset.days, 10);
-          const endDate = new Date();
-          const startDate = new Date();
-          startDate.setDate(endDate.getDate() - (days - 1));
-          picker.setDateRange(startDate, endDate, true);
-          startDateInput.value = startDate.toISOString().slice(0, 10);
-          endDateInput.value = endDate.toISOString().slice(0, 10);
-          form.submit();
+        new Chart(canvas.getContext('2d'), { 
+          type: chartType, 
+          data: chartData, 
+          options 
         });
-      });
-
-      if (picker.getStartDate() && picker.getEndDate()) {
-        startDateInput.value = picker.getStartDate().format('YYYY-MM-DD');
-        endDateInput.value = picker.getEndDate().format('YYYY-MM-DD');
+      } catch (e) {
+        console.error(`Ошибка при построении графика ${canvasId}:`, e);
+        container.innerHTML = `<div class="d-flex justify-content-center align-items-center h-100 text-danger p-4">Ошибка при построении графика.</div>`;
       }
+    }
 
-      function drawChart(canvasId, chartData, chartType, options = {}) {
-        const canvas = document.getElementById(canvasId);
-        if (!canvas) return;
-
-        if (chartData && chartData.labels && chartData.labels.length > 0 && chartData.datasets) {
-          try {
-            if (Chart.getChart(canvas)) {
-              Chart.getChart(canvas).destroy();
-            }
-            new Chart(canvas.getContext('2d'), { type: chartType, data: chartData, options: options });
-          } catch(e) {
-            canvas.parentElement.innerHTML = `<div class="d-flex justify-content-center align-items-center h-100 text-danger">Ошибка при построении графика.</div>`;
+    const commonLineBarOptions = { 
+      responsive: true, 
+      maintainAspectRatio: false, 
+      scales: { 
+        y: { 
+          beginAtZero: true,
+          ticks: { 
+            callback: (value) => window.formatNumber ? window.formatNumber(value) : value 
           }
-        } else {
-          canvas.parentElement.innerHTML = `<div class="d-flex justify-content-center align-items-center h-100 text-muted">Нет данных для отображения.</div>`;
+        } 
+      },
+      plugins: {
+        tooltip: {
+          callbacks: {
+            label: (context) => `${context.dataset.label}: ${window.formatNumber ? window.formatNumber(context.raw) : context.raw}`
+          }
         }
       }
+    };
 
-      const commonLineBarOptions = { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true } } };
-
-      drawChart('mainChart', <%- JSON.stringify(chartDataCombined) %>, 'line', commonLineBarOptions);
-      drawChart('tariffsChart', <%- JSON.stringify(chartDataTariffs) %>, 'doughnut', { responsive: true, maintainAspectRatio: true, plugins: { legend: { position: 'top' } } });
-      drawChart('weekdayChart', <%- JSON.stringify(chartDataWeekday) %>, 'bar', { ...commonLineBarOptions, plugins: { legend: { display: false } } });
-      drawChart('hourlyChart', <%- JSON.stringify(chartDataHourly) %>, 'bar', { ...commonLineBarOptions, plugins: { legend: { display: false } } });
-    }, 100);
+    drawChart('mainChart', <%- JSON.stringify(chartDataCombined) %>, 'line', commonLineBarOptions);
+    drawChart('tariffsChart', <%- JSON.stringify(chartDataTariffs) %>, 'doughnut', { 
+      responsive: true, 
+      maintainAspectRatio: false, 
+      plugins: { legend: { position: 'right' } } 
+    });
+    drawChart('weekdayChart', <%- JSON.stringify(chartDataWeekday) %>, 'bar', { 
+      ...commonLineBarOptions, 
+      plugins: { 
+        ...commonLineBarOptions.plugins,
+        legend: { display: false } 
+      } 
+    });
+    drawChart('hourlyChart', <%- JSON.stringify(chartDataHourly) %>, 'bar', { 
+      ...commonLineBarOptions, 
+      plugins: { 
+        ...commonLineBarOptions.plugins,
+        legend: { display: false } 
+      }
+    });
   });
 </script>
