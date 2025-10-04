@@ -2,8 +2,9 @@
 
 <%# === Хелперы и функции === %>
 <% 
+  // Функция для экранирования HTML (защита от XSS)
   const escapeHtml = (str) => {
-    if (!str) return '';
+    if (str === undefined || str === null) return '';
     return String(str)
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
@@ -12,15 +13,20 @@
       .replace(/'/g, '&#039;');
   };
 
+  // Функция для форматирования чисел (1234 -> "1 234")
   const formatNumber = (num) => {
-    if (!num) return '0';
+    if (num === undefined || num === null) return '0';
     return Number(num).toLocaleString('ru-RU');
   };
 %>
 
-<%# === Стили === %>
+<%# === Стили, специфичные для дашборда === %>
 <%- contentFor('styles') %>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/litepicker/dist/css/litepicker.css" integrity="sha256-vT2a22r2ouAL2ltm6mBa7s1j4NOsE12WkQ2xP29S/4o=" crossorigin="anonymous"/>
 <style>
+  .stats-grid .card {
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+  }
   .stats-grid .card:hover {
     transform: translateY(-5px);
     box-shadow: 0 8px 16px rgba(0, 0, 0, 0.1);
@@ -32,14 +38,18 @@
     min-height: 300px;
   }
   
-  .bg-light-warning { background-color: rgba(255, 193, 7, 0.15) !important; }
+  /* Цветовые акценты для карточек */
   .bg-light-success { background-color: rgba(25, 135, 84, 0.1) !important; }
+  .bg-light-warning { background-color: rgba(255, 193, 7, 0.15) !important; }
   .bg-light-danger { background-color: rgba(220, 53, 69, 0.1) !important; }
 
-  .list-group-flush .list-group-item {
-    padding: .5rem 0;
+  /* Список тарифов */
+  .card-tariffs .list-group-item {
+    padding-left: 0;
+    padding-right: 0;
   }
-  
+
+  /* Списки "топов" */
   .top-list .badge {
     min-width: 40px;
     text-align: center;
@@ -56,7 +66,7 @@
       <input type="hidden" name="startDate" id="startDateInput">
       <input type="hidden" name="endDate" id="endDateInput">
       
-      <div class="btn-group btn-group-sm" role="group">
+      <div class="btn-group btn-group-sm" role="group" id="periodButtons">
         <a href="#" class="btn btn-outline-secondary" data-days="7">7 дней</a>
         <a href="#" class="btn btn-outline-secondary active" data-days="30">30 дней</a>
         <a href="#" class="btn btn-outline-secondary" data-days="90">90 дней</a>
@@ -73,8 +83,18 @@
 <%# === Уведомления === %>
 <% 
   const alerts = [];
-  if (resetOthers) alerts.push({ type: resetOthers === 'err' ? 'danger' : 'success', message: `Сброшено "Других (старых)": <b>${resetOthers}</b>` });
-  if (resetExpired) alerts.push({ type: resetExpired === 'err' ? 'danger' : 'success', message: `Сброшено истёкших: <b>${resetExpired}</b>` });
+  if (locals.resetOthers) {
+    const message = locals.resetOthers === 'err' 
+      ? 'Не удалось сбросить "Другие" тарифы' 
+      : `Сброшено "Других" тарифов: <b>${escapeHtml(locals.resetOthers)}</b>`;
+    alerts.push({ type: locals.resetOthers === 'err' ? 'danger' : 'success', message });
+  }
+  if (locals.resetExpired) {
+    const message = locals.resetExpired === 'err' 
+      ? 'Не удалось сбросить истёкшие подписки' 
+      : `Сброшено истёкших подписок: <b>${escapeHtml(locals.resetExpired)}</b>`;
+    alerts.push({ type: locals.resetExpired === 'err' ? 'danger' : 'success', message });
+  }
 %>
 <% alerts.forEach(alert => { %>
   <div class="alert alert-<%= alert.type %> alert-dismissible fade show" role="alert" data-autohide="5000">
@@ -96,7 +116,7 @@
   %>
   <% metrics.forEach(m => { %>
     <div class="col">
-      <div class="card card-metric shadow-sm text-center h-100 <%= m.bg || '' %>">
+      <div class="card shadow-sm text-center h-100 <%= m.bg || '' %>">
         <div class="card-body">
           <i class="bi <%= m.icon %> h3 text-muted mb-2"></i>
           <p class="h2 mb-0"><%= formatNumber(m.value) %></p>
@@ -117,7 +137,7 @@
         <ul class="list-group list-group-flush">
           <li class="list-group-item d-flex justify-content-between align-items-center px-0">
             <span>Очередь загрузок</span>
-            <span class="badge bg-primary rounded-pill">
+            <span class="badge bg-primary rounded-pill" data-bs-toggle="tooltip" title="В ожидании / В работе">
               <%= formatNumber(stats.queueWaiting) %> / <%= formatNumber(stats.queueActive) %>
             </span>
           </li>
@@ -140,7 +160,7 @@
 
   <%# Пользователи по тарифам %>
   <div class="col-lg-4">
-    <div class="card shadow-sm h-100">
+    <div class="card shadow-sm h-100 card-tariffs">
       <div class="card-header fw-semibold"><i class="bi bi-pie-chart-fill me-2"></i>Тарифы</div>
       <div class="card-body">
         <% 
@@ -155,18 +175,18 @@
         %>
         <ul class="list-group list-group-flush">
           <% tariffs.forEach(t => { %>
-            <li class="list-group-item d-flex justify-content-between align-items-center px-0">
+            <li class="list-group-item d-flex justify-content-between align-items-center">
               <span><%- t.label %></span>
               <span class="fw-bold"><%= formatNumber(t.value) %></span>
             </li>
           <% }); %>
           
-          <li class="list-group-item d-flex justify-content-between align-items-center px-0 <%= othersCount > 0 ? 'bg-light-warning' : '' %>">
+          <li class="list-group-item d-flex justify-content-between align-items-center <%= othersCount > 0 ? 'bg-light-warning' : '' %>">
             <span class="fw-semibold">⚙️ Другие (старые)</span>
             <span class="fw-bold"><%= formatNumber(othersCount) %></span>
           </li>
           
-          <li class="list-group-item d-flex justify-content-between align-items-center px-0 <%= expiredCountSafe > 0 ? 'bg-light-danger' : '' %>">
+          <li class="list-group-item d-flex justify-content-between align-items-center <%= expiredCountSafe > 0 ? 'bg-light-danger' : '' %>">
             <span class="fw-semibold">⌛ Истёкшие (не Free)</span>
             <span class="fw-bold"><%= formatNumber(expiredCountSafe) %></span>
           </li>
@@ -205,7 +225,7 @@
         <% if (stats.topSources?.length > 0) { %>
           <ul class="list-group list-group-flush">
             <% stats.topSources.forEach(source => { %>
-              <li class="list-group-item d-flex justify-content-between align-items-center px-0">
+              <li class="list-group-item d-flex justify-content-between align-items-center">
                 <span class="text-truncate" title="<%- escapeHtml(source.referral_source) %>">
                   <%- escapeHtml(source.referral_source) %>
                 </span>
@@ -228,6 +248,7 @@
 <div class="card shadow-sm mb-4">
   <div class="card-header fw-semibold"><i class="bi bi-graph-up me-2"></i>Динамика метрик</div>
   <div class="card-body chart-container">
+    <div class="spinner d-none" id="mainChartSpinner"></div>
     <canvas id="mainChart"></canvas>
   </div>
 </div>
@@ -267,7 +288,7 @@
         <% if (topTracks?.length > 0) { %>
           <ul class="list-group list-group-flush">
             <% topTracks.forEach((track, index) => { %>
-              <li class="list-group-item d-flex justify-content-between align-items-center px-0">
+              <li class="list-group-item d-flex justify-content-between align-items-center">
                 <div class="text-truncate">
                   <span class="text-muted"><%= index + 1 %>.</span> <%- escapeHtml(track.track_title) %>
                 </div>
@@ -289,7 +310,7 @@
         <% if (topUsers?.length > 0) { %>
           <ul class="list-group list-group-flush">
             <% topUsers.forEach((user, index) => { %>
-              <li class="list-group-item d-flex justify-content-between align-items-center px-0">
+              <li class="list-group-item d-flex justify-content-between align-items-center">
                 <div class="text-truncate">
                   <span class="text-muted"><%= index + 1 %>.</span>
                   <a href="/user/<%= user.id %>" class="text-decoration-none">
@@ -317,7 +338,7 @@
         <% if (stats.topReferrers?.length > 0) { %>
           <ul class="list-group list-group-flush">
             <% stats.topReferrers.forEach((user, index) => { %>
-              <li class="list-group-item d-flex justify-content-between align-items-center px-0">
+              <li class="list-group-item d-flex justify-content-between align-items-center">
                 <div class="text-truncate">
                   <span class="text-muted"><%= index + 1 %>.</span>
                   <a href="/user/<%= user.referrer_id %>" class="text-decoration-none">
@@ -338,19 +359,17 @@
   </div>
 </div>
 
-<%# === Скрипты === %>
+<%# === Скрипты, специфичные для дашборда === %>
 <%- contentFor('scripts') %>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" integrity="sha256-8PzlfscBtTzIlQG6U7a2Yit2V32QxJ33cM3C+zBw8wA=" crossorigin="anonymous" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/litepicker/dist/litepicker.js" integrity="sha256-0G4+2/h/7Q2nFmgjY/5zY8RWfT/D323Q/i3I0oQue2g=" crossorigin="anonymous" defer></script>
+
 <script>
   document.addEventListener('DOMContentLoaded', () => {
     // Безопасная инициализация
-    if (typeof bootstrap?.Tooltip !== 'function') {
-      console.warn('Bootstrap Tooltip not found');
-    } else {
-      new bootstrap.Tooltip(document.body, { selector: "[data-bs-toggle='tooltip']" });
-    }
-
     if (typeof Chart === 'undefined' || typeof Litepicker === 'undefined') {
       console.error('Chart.js or Litepicker not loaded!');
+      document.body.insertAdjacentHTML('afterbegin', '<div class="alert alert-danger">Ошибка загрузки библиотек. Графики не будут отображаться.</div>');
       return;
     }
 
@@ -364,8 +383,8 @@
       element: dateRangePickerElement,
       singleMode: false,
       format: 'DD.MM.YYYY',
-      startDate: new Date('<%= startDate || new Date(new Date().setDate(new Date().getDate() - 29)).toISOString().slice(0, 10) %>'),
-      endDate: new Date('<%= endDate || new Date().toISOString().slice(0, 10) %>'),
+      startDate: new Date('<%- startDate || new Date(new Date().setDate(new Date().getDate() - 29)).toISOString().slice(0, 10) %>'),
+      endDate: new Date('<%- endDate || new Date().toISOString().slice(0, 10) %>'),
       setup: (picker) => {
         picker.on('selected', (date1, date2) => {
           if (date1 && date2) {
@@ -390,7 +409,6 @@
       });
     });
 
-    // Установка начальных значений
     if (picker.getStartDate() && picker.getEndDate()) {
       startDateInput.value = picker.getStartDate().format('YYYY-MM-DD');
       endDateInput.value = picker.getEndDate().format('YYYY-MM-DD');
@@ -401,8 +419,10 @@
       const canvas = document.getElementById(canvasId);
       if (!canvas) return;
       const container = canvas.parentElement;
+      const spinner = document.getElementById(`${canvasId}Spinner`);
 
-      // Если нет данных - показываем заглушку
+      if (spinner) spinner.classList.add('d-none');
+      
       if (!chartData?.labels?.length > 0) {
         container.innerHTML = `<div class="d-flex justify-content-center align-items-center h-100 text-muted p-4">Нет данных для отображения.</div>`;
         return;
@@ -412,11 +432,7 @@
         if (Chart.getChart(canvas)) {
           Chart.getChart(canvas).destroy();
         }
-        new Chart(canvas.getContext('2d'), { 
-          type: chartType, 
-          data: chartData, 
-          options 
-        });
+        new Chart(canvas.getContext('2d'), { type: chartType, data: chartData, options });
       } catch (e) {
         console.error(`Ошибка при построении графика ${canvasId}:`, e);
         container.innerHTML = `<div class="d-flex justify-content-center align-items-center h-100 text-danger p-4">Ошибка при построении графика.</div>`;
@@ -443,20 +459,20 @@
       }
     };
 
-    drawChart('mainChart', <%- JSON.stringify(chartDataCombined) %>, 'line', commonLineBarOptions);
-    drawChart('tariffsChart', <%- JSON.stringify(chartDataTariffs) %>, 'doughnut', { 
+    drawChart('mainChart', <%- JSON.stringify(chartDataCombined || {}) %>, 'line', commonLineBarOptions);
+    drawChart('tariffsChart', <%- JSON.stringify(chartDataTariffs || {}) %>, 'doughnut', { 
       responsive: true, 
       maintainAspectRatio: false, 
       plugins: { legend: { position: 'right' } } 
     });
-    drawChart('weekdayChart', <%- JSON.stringify(chartDataWeekday) %>, 'bar', { 
+    drawChart('weekdayChart', <%- JSON.stringify(chartDataWeekday || {}) %>, 'bar', { 
       ...commonLineBarOptions, 
       plugins: { 
         ...commonLineBarOptions.plugins,
         legend: { display: false } 
       } 
     });
-    drawChart('hourlyChart', <%- JSON.stringify(chartDataHourly) %>, 'bar', { 
+    drawChart('hourlyChart', <%- JSON.stringify(chartDataHourly || {}) %>, 'bar', { 
       ...commonLineBarOptions, 
       plugins: { 
         ...commonLineBarOptions.plugins,
