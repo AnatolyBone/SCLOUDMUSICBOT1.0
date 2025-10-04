@@ -1,50 +1,178 @@
-<% // views/broadcasts.ejs %>
+<%# views/broadcasts.ejs (безопасная финальная версия с московским временем) %>
+
+<%# === Хелперы и функции === %>
+<% 
+  // Функция для экранирования HTML (ЗАЩИТА ОТ XSS)
+  const escapeHtml = (str) => {
+    if (str === undefined || str === null) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  };
+
+  // Функция для форматирования даты по МСК
+  const formatMoscowTime = (dateStr) => {
+    if (!dateStr) return '—';
+    try {
+      const date = new Date(dateStr);
+      // Проверяем, что дата валидна
+      if (isNaN(date.getTime())) return 'Некорректная дата';
+      
+      return date.toLocaleString('ru-RU', {
+        timeZone: 'Europe/Moscow',
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+    } catch (e) {
+      console.error('Ошибка форматирования даты:', e);
+      return 'Ошибка даты';
+    }
+  };
+%>
+
+<%- contentFor('styles') %>
+<style>
+  .table-responsive .table {
+    min-width: 800px;
+  }
+  .preview-cell {
+    max-width: 350px;
+  }
+  .table .badge {
+    min-width: 85px;
+    text-align: center;
+  }
+</style>
+
 <%- contentFor('body') %>
+
 <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
-  <h1 class="h2">Управление рассылками</h1>
-  <a href="/broadcast/new" class="btn btn-sm btn-primary"><i class="bi bi-plus-circle"></i> Создать</a>
+  <h1 class="h2"><i class="bi bi-broadcast me-2"></i>Управление рассылками</h1>
+  <a href="/broadcast/new" class="btn btn-sm btn-primary">
+    <i class="bi bi-plus-circle me-1"></i>Создать новую
+  </a>
 </div>
+
 <div class="table-responsive">
   <table class="table table-hover align-middle">
-    <thead>
+    <thead class="table-light">
       <tr>
-        <th>ID</th>
-        <th>Статус</th>
-        <th>Аудитория</th>
-        <th>Сообщение</th>
-        <th>Запланировано на (ваше время)</th>
-        <th>Действия</th>
+        <th scope="col">ID</th>
+        <th scope="col">Статус</th>
+        <th scope="col">Аудитория</th>
+        <th scope="col">Сообщение</th>
+        <th scope="col">Запланировано на (МСК)</th>
+        <th scope="col" class="text-center">Прогресс</th>
+        <th scope="col" class="text-center">Действия</th>
       </tr>
     </thead>
     <tbody>
-      <% if (tasks && tasks.length > 0) { %>
-        <% tasks.forEach(task => { %>
+      <% if (tasks?.length > 0) { %>
+        <% tasks.forEach(task => { 
+          const safeMessage = escapeHtml(task.message);
+          
+          const statusMap = {
+            pending: { name: 'В ожидании', class: 'bg-warning text-dark' },
+            processing: { name: 'В процессе', class: 'bg-info text-dark' },
+            completed: { name: 'Завершена', class: 'bg-success' },
+            failed: { name: 'Ошибка', class: 'bg-danger' }
+          };
+          const status = statusMap[task.status] || { name: task.status, class: 'bg-secondary' };
+          
+          const audienceMap = {
+            all_users: 'Все пользователи',
+            free_users: 'Free пользователи',
+            premium_users: 'Premium пользователи'
+          };
+          const audience = audienceMap[task.target_audience] || task.target_audience.replace('_', ' ');
+        %>
           <tr>
-            <td><%= task.id %></td>
+            <td class="fw-semibold">#<%= task.id %></td>
             <td>
-              <% if (task.status === 'pending') { %><span class="badge bg-warning text-dark">В ожидании</span><% } %>
-              <% if (task.status === 'processing') { %><span class="badge bg-info text-dark">В процессе</span><% } %>
-              <% if (task.status === 'completed') { %><span class="badge bg-success">Завершена</span><% } %>
-              <% if (task.status === 'failed') { %><span class="badge bg-danger">Ошибка</span><% } %>
+              <span class="badge <%= status.class %>"><%- status.name %></span>
             </td>
-            <td><%= task.target_audience.replace('_', ' ') %></td>
-            <td class="text-truncate" style="max-width: 300px;" title="<%= task.message %>"><%= task.message %></td>
-            <td><%= new Date(task.scheduled_at).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', dateStyle: 'short', timeStyle: 'short' }) %></td>
-            <td>
+            <td><%= audience %></td>
+            <td class="text-truncate preview-cell" 
+                data-bs-toggle="tooltip"
+                title="<%- safeMessage || '(только медиафайл)' %>">
+              <% if (task.file_id) { %>
+                <i class="bi bi-paperclip text-muted me-1"></i>
+              <% } %>
+              <%- safeMessage || '<i>(только медиафайл)</i>' %>
+            </td>
+            
+            <%# --- Время по МСК --- %>
+            <td data-bs-toggle="tooltip" title="Время указано по МСК (UTC+3)">
+              <%= formatMoscowTime(task.scheduled_at) %>
+            </td>
+            
+            <td class="text-center">
+              <% if (task.status === 'processing' || task.status === 'completed') { 
+                const sent = task.sent_count || 0;
+                const total = task.total_count || 0;
+                const progress = total > 0 ? Math.round((sent / total) * 100) : 0;
+              %>
+                <div class="progress" 
+                     style="height: 22px; font-size: 0.8rem;" 
+                     data-bs-toggle="tooltip" 
+                     title="Отправлено: <%= sent %> из <%= total %>">
+                  <div class="progress-bar progress-bar-striped progress-bar-animated" 
+                       role="progressbar" 
+                       style="width: <%= progress %>%;" 
+                       aria-valuenow="<%= progress %>" 
+                       aria-valuemin="0" 
+                       aria-valuemax="100">
+                    <%= progress %>%
+                  </div>
+                </div>
+              <% } else if (task.status === 'failed' && task.report?.error) { %>
+                <i class="bi bi-exclamation-triangle-fill text-danger fs-5" 
+                   data-bs-toggle="tooltip" 
+                   title="<%- escapeHtml(task.report.error) %>"></i>
+              <% } else { %>
+                <span class="text-muted">—</span>
+              <% } %>
+            </td>
+            <td class="text-center">
               <% if (task.status === 'pending') { %>
-                <div class="d-flex gap-2">
-                  <a href="/broadcast/edit/<%= task.id %>" class="btn btn-sm btn-outline-primary">Ред.</a>
-                  <form method="POST" action="/broadcast/delete" onsubmit="return confirm('Удалить эту рассылку?')">
+                <div class="btn-group btn-group-sm">
+                  <a href="/broadcast/edit/<%= task.id %>" 
+                     class="btn btn-outline-primary"
+                     title="Редактировать">
+                    <i class="bi bi-pencil-fill"></i>
+                  </a>
+                  <form method="POST" action="/broadcast/delete">
                     <input type="hidden" name="taskId" value="<%= task.id %>">
-                    <button type="submit" class="btn btn-sm btn-outline-danger">Удалить</button>
+                    <button type="submit" 
+                            class="btn btn-outline-danger"
+                            title="Удалить"
+                            data-confirm="Удалить эту рассылку? Действие необратимо.">
+                      <i class="bi bi-trash-fill"></i>
+                    </button>
                   </form>
                 </div>
-              <% } else { %> <span class="text-muted">—</span> <% } %>
+              <% } else { %>
+                <span class="text-muted">—</span>
+              <% } %>
             </td>
           </tr>
         <% }) %>
       <% } else { %>
-        <tr><td colspan="6" class="text-center text-muted py-4">Нет запланированных рассылок.</td></tr>
+        <tr>
+          <td colspan="7" class="text-center text-muted py-5">
+            <div class="mb-3">
+              <i class="bi bi-inbox" style="font-size: 3rem; opacity: 0.3;"></i>
+            </div>
+            <p class="mb-0">Нет запланированных рассылок</p>
+            <p><a href="/broadcast/new">Создать первую рассылку</a></p>
+          </td>
+        </tr>
       <% } %>
     </tbody>
   </table>
