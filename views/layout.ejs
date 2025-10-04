@@ -5,14 +5,18 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title><%- title ? `${title} · ` : '' %>Админка</title>
+  <title><%- locals.title ? `${locals.title} · ` : '' %>Админка</title>
 
-  <%# === 1. ✅ UX: Блокировщик "мигания" темы === %>
+  <%# === 1. ✅ UX: Блокировщик "мигания" темы (устанавливается до рендеринга) === %>
   <script>
     (function() {
-      const root = document.documentElement;
-      const theme = localStorage.getItem('theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
-      root.setAttribute('data-theme', theme);
+      try {
+        const root = document.documentElement;
+        const theme = localStorage.getItem('theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+        root.setAttribute('data-theme', theme);
+      } catch (e) {
+        console.error('Ошибка установки темы:', e);
+      }
     })();
   </script>
   
@@ -23,8 +27,8 @@
   <%# === 3. ✅ БЕЗОПАСНОСТЬ: Добавлены integrity и crossorigin === %>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
   
-  <%# Стили для календаря (только если они нужны на этой странице) %>
-  <% if (typeof styles !== 'undefined') { %><%- styles %><% } %>
+  <%# Стили, специфичные для страницы (например, для календаря) %>
+  <% if (locals.styles) { %><%- locals.styles %><% } %>
 
   <link href="/static/admin.css" rel="stylesheet">
 </head>
@@ -41,11 +45,11 @@
       
       <div class="collapse navbar-collapse" id="nav">
         <ul class="navbar-nav me-auto mb-2 mb-lg-0">
-          <li class="nav-item"><a class="nav-link <%= page === 'dashboard' ? 'active fw-semibold' : '' %>" href="/dashboard"><i class="bi bi-grid-1x2-fill me-1"></i>Дашборд</a></li>
-          <li class="nav-item"><a class="nav-link <%= page === 'users' ? 'active fw-semibold' : '' %>" href="/users"><i class="bi bi-people-fill me-1"></i>Пользователи</a></li>
-          <li class="nav-item"><a class="nav-link <%= page === 'broadcasts' ? 'active fw-semibold' : '' %>" href="/broadcasts"><i class="bi bi-broadcast me-1"></i>Рассылки</a></li>
-          <li class="nav-item"><a class="nav-link <%= page === 'texts' ? 'active fw-semibold' : '' %>" href="/texts"><i class="bi bi-file-text-fill me-1"></i>Тексты</a></li>
-          <li class="nav-item"><a class="nav-link <%= page === 'expiring-users' ? 'active fw-semibold' : '' %>" href="/expiring-users"><i class="bi bi-clock-history me-1"></i>Истекающие</a></li>
+          <li class="nav-item"><a class="nav-link <%= locals.page === 'dashboard' ? 'active fw-semibold' : '' %>" href="/dashboard"><i class="bi bi-grid-1x2-fill me-1"></i>Дашборд</a></li>
+          <li class="nav-item"><a class="nav-link <%= locals.page === 'users' ? 'active fw-semibold' : '' %>" href="/users"><i class="bi bi-people-fill me-1"></i>Пользователи</a></li>
+          <li class="nav-item"><a class="nav-link <%= locals.page === 'broadcasts' ? 'active fw-semibold' : '' %>" href="/broadcasts"><i class="bi bi-broadcast me-1"></i>Рассылки</a></li>
+          <li class="nav-item"><a class="nav-link <%= locals.page === 'texts' ? 'active fw-semibold' : '' %>" href="/texts"><i class="bi bi-file-text-fill me-1"></i>Тексты</a></li>
+          <li class="nav-item"><a class="nav-link <%= locals.page === 'expiring-users' ? 'active fw-semibold' : '' %>" href="/expiring-users"><i class="bi bi-clock-history me-1"></i>Истекающие</a></li>
         </ul>
         
         <div class="d-flex align-items-center gap-2">
@@ -69,15 +73,47 @@
     &copy; <%= new Date().getFullYear() %> SCM Admin Panel
   </footer>
 
-  <%# === 4. ✅ ПРОИЗВОДИТЕЛЬНОСТЬ: Атрибут defer и безопасность === %>
-  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous" defer></script>
-  
-  <%# Кастомные скрипты для админки (defer) %>
-  <script src="/static/admin.js" defer></script>
-  <script>window.adminScriptLoaded = true;</script>
+  <%# === 4. ✅ ЕДИНАЯ ТОЧКА ВХОДА ДЛЯ СКРИПТОВ === %>
 
-  <%# Вставляем скрипты с отдельных страниц (Chart.js, Litepicker и т.д.) %>
-  <% if (typeof scripts !== 'undefined') { %><%- scripts %><% } %>
+  <%# Основные скрипты %>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous" defer></script>
+  <script src="/static/admin.js" defer></script>
+
+  <%# Скрипты, специфичные для страницы (Chart.js, Litepicker и т.д.) %>
+  <% if (locals.scripts) { %><%- locals.scripts %><% } %>
+
+  <%# Единая точка входа для всех скриптов страницы %>
+  <script defer>
+    function onPageReady() {
+      console.log('[PageReady] Все ресурсы загружены, запускаю инициализацию...');
+      
+      // Инициализируем Bootstrap Tooltips (если admin.js не успел)
+      try {
+        if (typeof bootstrap?.Tooltip === 'function') {
+          new bootstrap.Tooltip(document.body, { selector: "[data-bs-toggle='tooltip']" });
+        }
+      } catch (e) {
+        console.warn('Ошибка инициализации Bootstrap Tooltip:', e);
+      }
+      
+      // Вызываем функцию инициализации, если она есть на странице
+      if (typeof window.initializePage === 'function') {
+        try {
+          window.initializePage();
+        } catch (e) {
+          console.error('Ошибка при инициализации страницы:', e);
+        }
+      }
+    }
+
+    // Ждём полной загрузки всех ресурсов, включая defer-скрипты
+    if (document.readyState === 'loading') {
+      window.addEventListener('load', onPageReady);
+    } else {
+      // На случай, если событие 'load' уже произошло
+      onPageReady();
+    }
+  </script>
 
 </body>
 </html>
