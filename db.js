@@ -952,8 +952,42 @@ export async function findAndInterruptActiveBroadcast() {
 }
 
 export async function getAllBroadcastTasks() {
-  const { rows } = await query(`SELECT * FROM broadcast_tasks ORDER BY scheduled_at DESC`);
-  return rows;
+  const { rows } = await query(`
+    SELECT 
+      t.*, 
+      
+      -- Подсчёт уже отправленных сообщений
+      (SELECT COUNT(*) FROM broadcast_log WHERE broadcast_id = t.id)::int AS sent_count,
+      
+      -- Подсчёт всей целевой аудитории (только активные и подписанные на рассылки)
+      (
+        SELECT COUNT(*) 
+        FROM users u 
+        WHERE u.active = TRUE AND u.can_receive_broadcasts = TRUE
+          AND (
+            t.target_audience = 'all_users' OR
+            (t.target_audience = 'free_users' AND u.premium_limit <= 5) OR
+            (t.target_audience = 'premium_users' AND u.premium_limit > 5 AND (u.premium_until IS NULL OR u.premium_until >= NOW()))
+          )
+      )::int AS total_count
+      
+    FROM broadcast_tasks t
+    ORDER BY t.scheduled_at DESC
+  `);
+  
+  // Парсим JSON-поле report (если оно есть)
+  return rows.map(row => {
+    if (typeof row.report === 'string') {
+      try {
+        row.report = JSON.parse(row.report);
+      } catch (e) {
+        // Если невалидный JSON, оставляем как есть или обнуляем
+        console.warn(`[DB] Не удалось распарсить report для задачи #${row.id}`);
+        row.report = { error: row.report };
+      }
+    }
+    return row;
+  });
 }
 
 export async function resetStaleBroadcasts() {
