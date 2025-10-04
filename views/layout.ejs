@@ -1,48 +1,35 @@
-<%# views/layout.ejs (безопасная и быстрая версия) %>
+<%# views/layout.ejs (финальная версия с исправлением) %>
 
 <!doctype html>
-<html lang="ru"> <%# data-theme будет установлен скриптом ниже %>
+<html lang="ru">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title><%- locals.title ? `${locals.title} · ` : '' %>Админка</title>
 
-  <%# === 1. ✅ UX: Блокировщик "мигания" темы (устанавливается до рендеринга) === %>
   <script>
     (function() {
       try {
         const root = document.documentElement;
         const theme = localStorage.getItem('theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
         root.setAttribute('data-theme', theme);
-      } catch (e) {
-        console.error('Ошибка установки темы:', e);
-      }
+      } catch (e) {}
     })();
   </script>
   
-  <%# === 2. ✅ ПРОИЗВОДИТЕЛЬНОСТЬ: Асинхронная загрузка иконок === %>
   <link rel="preload" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" as="style" onload="this.onload=null;this.rel='stylesheet'">
   <noscript><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css"></noscript>
-
-  <%# === 3. ✅ БЕЗОПАСНОСТЬ: Добавлены integrity и crossorigin === %>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
   
-  <%# Стили, специфичные для страницы (например, для календаря) %>
   <% if (locals.styles) { %><%- locals.styles %><% } %>
-
   <link href="/static/admin.css" rel="stylesheet">
 </head>
 <body class="bg-body">
 
   <nav class="navbar navbar-expand-lg border-bottom sticky-top bg-body-tertiary shadow-sm">
     <div class="container-fluid">
-      <a class="navbar-brand fw-bold" href="/dashboard">
-        <i class="bi bi-shield-lock-fill text-primary"></i> SCM Admin
-      </a>
-      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#nav" aria-controls="nav" aria-expanded="false" aria-label="Toggle navigation">
-        <span class="navbar-toggler-icon"></span>
-      </button>
-      
+      <a class="navbar-brand fw-bold" href="/dashboard"><i class="bi bi-shield-lock-fill text-primary"></i> SCM Admin</a>
+      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#nav"><span class="navbar-toggler-icon"></span></button>
       <div class="collapse navbar-collapse" id="nav">
         <ul class="navbar-nav me-auto mb-2 mb-lg-0">
           <li class="nav-item"><a class="nav-link <%= locals.page === 'dashboard' ? 'active fw-semibold' : '' %>" href="/dashboard"><i class="bi bi-grid-1x2-fill me-1"></i>Дашборд</a></li>
@@ -51,68 +38,31 @@
           <li class="nav-item"><a class="nav-link <%= locals.page === 'texts' ? 'active fw-semibold' : '' %>" href="/texts"><i class="bi bi-file-text-fill me-1"></i>Тексты</a></li>
           <li class="nav-item"><a class="nav-link <%= locals.page === 'expiring-users' ? 'active fw-semibold' : '' %>" href="/expiring-users"><i class="bi bi-clock-history me-1"></i>Истекающие</a></li>
         </ul>
-        
         <div class="d-flex align-items-center gap-2">
-          <button id="themeToggle" class="btn btn-sm btn-outline-secondary" type="button" title="Переключить тему">
-            <%# Иконка будет установлена скриптом admin.js %>
-            <i class="bi"></i>
-          </button>
-          <a class="btn btn-sm btn-outline-danger" href="/logout">
-            <i class="bi bi-box-arrow-right me-1"></i>Выход
-          </a>
+          <button id="themeToggle" class="btn btn-sm btn-outline-secondary" type="button" title="Переключить тему"><i class="bi"></i></button>
+          <a class="btn btn-sm btn-outline-danger" href="/logout"><i class="bi bi-box-arrow-right me-1"></i>Выход</a>
         </div>
       </div>
     </div>
   </nav>
 
-  <main class="container-fluid my-4">
-    <%- body %>
-  </main>
+  <main class="container-fluid my-4"><%- body %></main>
 
-  <footer class="container-fluid text-center text-muted small py-3 border-top">
-    &copy; <%= new Date().getFullYear() %> SCM Admin Panel
-  </footer>
+  <footer class="container-fluid text-center text-muted small py-3 border-top">&copy; <%= new Date().getFullYear() %> SCM Admin Panel</footer>
 
-  <%# === 4. ✅ ЕДИНАЯ ТОЧКА ВХОДА ДЛЯ СКРИПТОВ === %>
-
-  <%# Основные скрипты %>
-  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous" defer></script>
+  <%# === ✅ УБРАНЫ integrity и crossorigin === %>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" defer></script>
   <script src="/static/admin.js" defer></script>
 
-  <%# Скрипты, специфичные для страницы (Chart.js, Litepicker и т.д.) %>
   <% if (locals.scripts) { %><%- locals.scripts %><% } %>
 
-  <%# Единая точка входа для всех скриптов страницы %>
   <script defer>
     function onPageReady() {
-      console.log('[PageReady] Все ресурсы загружены, запускаю инициализацию...');
-      
-      // Инициализируем Bootstrap Tooltips (если admin.js не успел)
-      try {
-        if (typeof bootstrap?.Tooltip === 'function') {
-          new bootstrap.Tooltip(document.body, { selector: "[data-bs-toggle='tooltip']" });
-        }
-      } catch (e) {
-        console.warn('Ошибка инициализации Bootstrap Tooltip:', e);
-      }
-      
-      // Вызываем функцию инициализации, если она есть на странице
       if (typeof window.initializePage === 'function') {
-        try {
-          window.initializePage();
-        } catch (e) {
-          console.error('Ошибка при инициализации страницы:', e);
-        }
+        try { window.initializePage(); } catch (e) { console.error('Ошибка инициализации страницы:', e); }
       }
     }
-
-    // Ждём полной загрузки всех ресурсов, включая defer-скрипты
-    if (document.readyState === 'loading') {
-      window.addEventListener('load', onPageReady);
-    } else {
-      // На случай, если событие 'load' уже произошло
-      onPageReady();
-    }
+    window.addEventListener('load', onPageReady);
   </script>
 
 </body>
