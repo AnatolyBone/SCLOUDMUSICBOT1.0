@@ -347,6 +347,26 @@ app.get('/health', async (req, res) => {
 
   app.get('/logout', (req, res) => req.session.destroy(() => res.redirect('/admin')));
 
+app.get('/settings', requireAuth, (req, res) => {
+  res.render('settings', {
+    title: 'Настройки',
+    page: 'settings',
+    settings: getAllSettings(),
+    success: req.query.success
+  });
+});
+
+app.post('/settings/update', requireAuth, async (req, res) => {
+  try {
+    for (const [key, value] of Object.entries(req.body)) {
+      await setAppSetting(key, value);
+    }
+    await loadSettings(); // Обновляем кеш
+    res.redirect('/settings?success=true');
+  } catch (e) {
+    res.status(500).send('Ошибка сохранения настроек');
+  }
+});
   // Дашборд — быстрые агрегаты
   app.get('/dashboard', requireAuth, async (req, res) => {
   try {
