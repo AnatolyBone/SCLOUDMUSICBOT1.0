@@ -12,6 +12,7 @@ import fs from 'fs';
 import os from 'os';
 import mime from 'mime-types';
 import { checkAndSendExpirationNotifications, notifyExpiringTodayHourly } from './services/notifier.js';
+import { loadSettings } from './services/settingsManager.js';
 import {
   pool,
   getUserById,
@@ -44,7 +45,8 @@ import {
   resetOtherTariffsToFree,
   resetExpiredPremiumsBulk,
   getUsersTotalsSnapshot,
-  setTariffAdmin
+  setTariffAdmin,
+  setAppSetting
 } from './db.js';
 import { initializeWorkers } from './services/workerManager.js';
 import { runBroadcastBatch } from './services/broadcastManager.js';
@@ -94,6 +96,8 @@ async function startApp() {
     // Остальная инициализация
     await loadTexts(true);
     await redisService.connect();
+await loadSettings();
+    
     initializeDownloadManager(bot);
     
     let lastUpdateTs = Date.now();
