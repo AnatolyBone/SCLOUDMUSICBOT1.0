@@ -77,98 +77,91 @@ const upload = multer({ storage, limits: { fileSize: 49 * 1024 * 1024 } });
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Позволяет принудительно включить polling для диагностики (FORCE_POLLING=1)
-const forcePolling = process.env.FORCE_POLLING === '1';
-
 // index.js -> startApp()
+
 async function startApp() {
   setMaintenanceMode(false);
   console.log('[App] Запуск приложения...');
+  
   try {
+    // Запускаем сервер и настраиваем Express СРАЗУ, чтобы Render.com определил порт
+    const server = app.listen(PORT, () => console.log(`✅ [App] Сервер запущен на порту ${PORT}.`));
+    setupExpress();
+    
+    // Остальная инициализация
     await loadTexts(true);
     await redisService.connect();
     initializeDownloadManager(bot);
     
-    // Отслеживаем "тишину" апдейтов
     let lastUpdateTs = Date.now();
     bot.use((ctx, next) => { lastUpdateTs = Date.now(); return next(); });
     
-    // Очередь скачивания
     downloadQueue.start();
     console.log('[App] Очередь скачивания принудительно запущена.');
     
-    let EXPECTED_WEBHOOK = null; // сюда сохраним фактический URL вебхука
+    let EXPECTED_WEBHOOK = null;
     
     if (process.env.NODE_ENV === 'production' && !forcePolling) {
-  const fullBase = WEBHOOK_URL.endsWith('/') ? WEBHOOK_URL.slice(0, -1) : WEBHOOK_URL;
-  const fullWebhookUrl = fullBase + WEBHOOK_PATH;
-  const allowedUpdates = ['message', 'callback_query', 'inline_query'];
-  
-  // === ✅ НОВЫЙ БЛОК С RETRY ===
-  let webhookSet = false;
-  for (let i = 0; i < 3; i++) {
-    try {
-      console.log(`[App] Попытка ${i + 1}/3: устанавливаю вебхук...`);
-      await bot.telegram.setWebhook(fullWebhookUrl, {
-        drop_pending_updates: true,
-        allowed_updates: allowedUpdates
-      });
-      webhookSet = true;
-      console.log('[App] ✅ Вебхук успешно настроен.');
-      break; // Выходим из цикла при успехе
-    } catch (e) {
-      console.error(`[App] ❌ Ошибка установки вебхука (попытка ${i + 1}):`, e.message);
-      if (i < 2) {
-        console.log('[App] Жду 5 секунд перед повторной попыткой...');
-        await new Promise(r => setTimeout(r, 5000)); // Ждём 5 секунд
-      } else {
-        // Если все попытки провалились - выбрасываем ошибку, чтобы остановить запуск
-        throw new Error('Не удалось установить вебхук после 3 попыток.');
+      const fullBase = WEBHOOK_URL.endsWith('/') ? WEBHOOK_URL.slice(0, -1) : WEBHOOK_URL;
+      const fullWebhookUrl = fullBase + WEBHOOK_PATH;
+      const allowedUpdates = ['message', 'callback_query', 'inline_query'];
+      
+      // Retry-логика для вебхука
+      for (let i = 0; i < 3; i++) {
+        try {
+          console.log(`[App] Попытка ${i + 1}/3: устанавливаю вебхук...`);
+          await bot.telegram.setWebhook(fullWebhookUrl, {
+            drop_pending_updates: true,
+            allowed_updates: allowedUpdates
+          });
+          console.log('[App] ✅ Вебхук успешно настроен.');
+          break; // Успех, выходим из цикла
+        } catch (e) {
+          console.error(`[App] ❌ Ошибка установки вебхука (попытка ${i + 1}):`, e.message);
+          if (i < 2) {
+            await new Promise(r => setTimeout(r, 5000)); // Ждём 5 секунд
+          } else {
+            throw new Error('Не удалось установить вебхук после 3 попыток.'); // Все попытки провалились
+          }
+        }
       }
-    }
-  }
-  
-  EXPECTED_WEBHOOK = fullWebhookUrl; // ВАЖНО: сохраняем ожидаемый URL
-  
-  // Логируем текущее состояние вебхука в Telegram
-  try {
-    const info = await bot.telegram.getWebhookInfo();
-    console.log('[WebhookInfo]', JSON.stringify(info, null, 2));
-  } catch (e) {
-    console.warn('[WebhookInfo] Ошибка получения информации:', e.message);
-  }
-  
-  // Точечный маршрут вебхука + лог каждого входящего апдейта
-  app.post(
-    WEBHOOK_PATH,
-    express.json({ limit: '1mb' }),
-    (req, res, next) => {
+      
+      EXPECTED_WEBHOOK = fullWebhookUrl;
+      
+      // Логируем состояние вебхука
       try {
-        const u = req.body || {};
-        const type =
-          u.message ? 'message' :
-          u.callback_query ? 'callback_query' :
-          u.inline_query ? 'inline_query' :
-          Object.keys(u).filter(k => k !== 'update_id')[0] || 'unknown';
-        console.log(`[Webhook] Update ${u.update_id || '-'} type=${type}`);
-      } catch {}
-      next();
-    },
-    bot.webhookCallback(WEBHOOK_PATH)
-  );
-  
-  // После монтирования вебхука настраиваем Express (админка/страницы)
-  setupExpress();
-} else {
-  // ... (остальной код без изменений)
-      // Режим long-polling (для разработки или диагностики)
+        const info = await bot.telegram.getWebhookInfo();
+        console.log('[WebhookInfo]', JSON.stringify(info, null, 2));
+      } catch (e) {
+        console.warn('[WebhookInfo] Ошибка получения информации:', e.message);
+      }
+      
+      // Маршрут вебхука
+      app.post(
+        WEBHOOK_PATH,
+        express.json({ limit: '1mb' }),
+        (req, res, next) => {
+          try {
+            const u = req.body || {};
+            const type =
+              u.message ? 'message' :
+              u.callback_query ? 'callback_query' :
+              u.inline_query ? 'inline_query' :
+              Object.keys(u).filter(k => k !== 'update_id')[0] || 'unknown';
+            console.log(`[Webhook] Update ${u.update_id || '-'} type=${type}`);
+          } catch {}
+          next();
+        },
+        bot.webhookCallback(WEBHOOK_PATH)
+      );
+      
+    } else {
+      // Режим long-polling (для разработки)
       console.log('[App] Запуск бота в режиме long-polling...');
       await bot.telegram.deleteWebhook({ drop_pending_updates: true });
       bot.launch({
         allowedUpdates: ['message', 'callback_query', 'inline_query']
       });
-      
-      setupExpress();
     }
     
     // Диагностический роут для просмотра состояния вебхука
@@ -182,7 +175,7 @@ async function startApp() {
       }
     });
     
-    const server = app.listen(PORT, () => console.log(`✅ [App] Сервер запущен на порту ${PORT}.`));
+    // Инициализируем воркеры и фоновые задачи
     initializeWorkers(server, bot);
     
     console.log('[App] Настройка фоновых задач...');
@@ -190,24 +183,24 @@ async function startApp() {
       checkAndSendExpirationNotifications(bot).catch(e => {
         console.error('[Cron] Ошибка дневного нотификатора:', e.message);
       });
-    }, 60000); // 1 минута
+    }, 60000);
     
-    // Почасовой страховщик для истекающих сегодня
     setInterval(() => {
       notifyExpiringTodayHourly(bot).catch(e => {
         console.error('[Cron] Ошибка почасового нотификатора:', e.message);
       });
-    }, 3600000); // 1 час
+    }, 3600000);
     
     console.log('[App] Нотификаторы истечения подписок запущены.');
+    
     setInterval(async () => {
       try { await resetDailyStats(); } catch (e) { console.error('[Cron] resetDailyStats error:', e.message); }
     }, 24 * 3600 * 1000);
+    
     setInterval(() => console.log(`[Monitor] Очередь: ${downloadQueue.size} в ожидании, ${downloadQueue.pending} в работе.`), 60000);
     
-    // --- Watchdog вебхука: авто-починка и детектор тишины ---
+    // Watchdog вебхука
     if (EXPECTED_WEBHOOK) {
-      // 1) Раз в 10 минут проверяем состояние вебхука в Telegram
       setInterval(async () => {
         try {
           const info = await bot.telegram.getWebhookInfo();
@@ -227,7 +220,6 @@ async function startApp() {
         }
       }, 10 * 60 * 1000);
       
-      // 2) Детектор "тишины": если 15 минут нет апдейтов — переустановим вебхук
       setInterval(async () => {
         if (Date.now() - lastUpdateTs > 15 * 60 * 1000) {
           console.warn('[WebhookWatch] Давно не было апдейтов, переустанавливаю вебхук...');
