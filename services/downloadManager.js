@@ -754,10 +754,20 @@ const entries = isPlaylist ? info.entries : [info];
         if (isPlaylist) console.log(`[Queue] Добавляю плейлист: ${tasksToReallyDownload.length} треков от ${userId}`);
         
         const prio = fullUser.premium_limit || 0;
-        for (const task of tasksToReallyDownload) {
-          if (!isPlaylist) console.log('[Queue] Добавляю задачу', { userId, prio, url: task.url });
-          downloadQueue.add({ userId, ...task, priority: prio });
-        }
+for (const task of tasksToReallyDownload) {
+  if (!isPlaylist) {
+    console.log('[Queue] Добавляю задачу', { userId, prio, url: task.url });
+  }
+  
+  // ✅ ДОБАВЛЕН .catch() ДЛЯ ОБРАБОТКИ ОШИБОК
+  downloadQueue.add({ userId, ...task, priority: prio })
+    .catch(err => {
+      // Игнорируем ошибки "очистки", чтобы не засорять логи
+      if (!err.message.includes('cleared by admin')) {
+        console.warn(`[Enqueue] Промис задачи для ${userId} был отклонен:`, err.message);
+      }
+    });
+}
         
         finalMessage += `⏳ ${tasksToReallyDownload.length} трек(ов) добавлено в очередь.\n`;
         
