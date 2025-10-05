@@ -644,31 +644,35 @@ export function enqueue(ctx, userId, url) {
 
       // --- Уведомление о начале обработки ---
       statusMessage = await safeSendMessage(userId, '🔍 Анализирую ссылку...');
-      
-      // --- Умные лимиты для плейлистов ---
-      // --- Умные лимиты для плейлистов (берутся из настроек) ---
-const PLAYLIST_LIMITS = {
+
+const limits = {
   free: parseInt(getSetting('playlist_limit_free'), 10) || 10,
   plus: parseInt(getSetting('playlist_limit_plus'), 10) || 30,
   pro: parseInt(getSetting('playlist_limit_pro'), 10) || 100,
   unlim: parseInt(getSetting('playlist_limit_unlim'), 10) || 200,
 };
 
-let playlistLimit = PLAYLIST_LIMITS.free;
-if (dailyLimit >= 10000) playlistLimit = PLAYLIST_LIMITS.unlim;
-else if (dailyLimit >= 100) playlistLimit = PLAYLIST_LIMITS.pro;
-else if (dailyLimit >= 30) playlistLimit = PLAYLIST_LIMITS.plus;
+let pLimit = limits.free;
+if (dailyLimit >= 10000) pLimit = limits.unlim;
+else if (dailyLimit >= 100) pLimit = limits.pro;
+else if (dailyLimit >= 30) pLimit = limits.plus;
 
-const remainingDailyLimit = Math.max(0, dailyLimit - downloadsToday);
-const playlistEnd = Math.min(remainingDailyLimit, playlistLimit);
-      // --- Получение метаданных ---
-      const info = await ytdl(url, {
-        'dump-single-json': true,
-        'playlist-end': playlistEnd + 1, // +1 чтобы проверить, был ли плейлист урезан
-        ...YTDL_COMMON
-      });
+const pEnd = Math.min(Math.max(0, dailyLimit - downloadsToday), pLimit);
 
-    if (!info) {
+// === ✅ ГЛАВНОЕ ИСПРАВЛЕНИЕ ЗДЕСЬ ===
+let info;
+try {
+  info = await ytdl(url, {
+    'dump-single-json': true,
+    'playlist-end': pEnd + 1,
+    ...YTDL_COMMON
+  });
+} catch (ytdlError) {
+  console.error(`[youtube-dl] Критическая ошибка при получении метаданных для ${url}:`, ytdlError.stderr || ytdlError.message);
+  throw new Error('Не удалось получить метаданные. Возможно, ссылка недействительна или трек недоступен.');
+}
+
+if (!info) {
   throw new Error('Не удалось получить метаданные. Ссылка может быть недействительной или трек недоступен.');
 }
 
