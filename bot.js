@@ -746,16 +746,24 @@ bot.action(/pl_cancel:(.+)/, async (ctx) => {
 async function processUrlInBackground(ctx, url) {
     let loadingMessage;
     try {
-        // Отправляем сообщение о начале анализа
         loadingMessage = await ctx.reply('🔍 Анализирую ссылку...');
         const youtubeDl = getYoutubeDl();
         
-        // Та самая долгая операция. Теперь она выполняется здесь, в фоне.
-        const data = await youtubeDl(url, { dumpSingleJson: true, flatPlaylist: true });
-        
-        // --- ЭТО ПЛЕЙЛИСТ ---
+        // === ✅ ГЛАВНОЕ ИСПРАВЛЕНИЕ ЗДЕСЬ ===
+        let data;
+        try {
+            data = await youtubeDl(url, { dumpSingleJson: true, flatPlaylist: true });
+        } catch (ytdlError) {
+            console.error(`[youtube-dl] Критическая ошибка (processUrlInBackground) для ${url}:`, ytdlError.stderr || ytdlError.message);
+            throw new Error('Не удалось получить метаданные. Ссылка может быть недействительной или трек недоступен.');
+        }
+
+        if (!data) {
+            throw new Error('Не удалось получить метаданные. Ссылка может быть недействительной или трек недоступен.');
+        }
+        // === КОНЕЦ ИСПРАВЛЕНИЯ ===
+
         if (data.entries && data.entries.length > 0) {
-            // Удаляем сообщение "Анализирую..."
             await ctx.deleteMessage(loadingMessage.message_id).catch(() => {});
             
             const playlistId = `pl_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
@@ -768,40 +776,25 @@ async function processUrlInBackground(ctx, url) {
                 currentPage: 0,
                 fullTracks: false
             });
-            const message = `🎶 В плейлисте <b>"${data.title}"</b> найдено <b>${data.entries.length}</b> треков.\n\nЧто делаем?`;
+            const message = `🎶 В плейлисте <b>"${escapeHtml(data.title)}"</b> найдено <b>${data.entries.length}</b> треков.\n\nЧто делаем?`;
             await ctx.reply(message, { parse_mode: 'HTML', ...generateInitialPlaylistMenu(playlistId, data.entries.length) });
             
-            // --- ЭТО ОДИНОЧНЫЙ ТРЕК ---
         } else {
             const user = await getUser(ctx.from.id);
-if ((user.downloads_today || 0) >= (user.premium_limit || 0)) {
-  const bonusAvailable = Boolean(CHANNEL_USERNAME && !user.subscribed_bonus_used);
-  const cleanUsername = CHANNEL_USERNAME?.replace('@', '');
-  const bonusText = bonusAvailable
-    ? `\n\n🎁 Доступен бонус! Подпишись на <a href="https://t.me/${cleanUsername}">@${cleanUsername}</a> и получи <b>7 дней тарифа Plus</b>.`
-    : '';
-  const extra = {
-    parse_mode: 'HTML',
-    disable_web_page_preview: true
-  };
-  if (bonusAvailable) {
-    extra.reply_markup = {
-      inline_keyboard: [[ { text: '✅ Я подписался, забрать бонус', callback_data: 'check_subscription' } ]]
-    };
-  }
-  await ctx.telegram.editMessageText(
-    ctx.chat.id,
-    loadingMessage.message_id,
-    undefined,
-    `${T('limitReached')}${bonusText}`,
-    extra
-  );
-  return;
-}
+            if ((user.downloads_today || 0) >= (user.premium_limit || 0)) {
+                const bonusAvailable = Boolean(CHANNEL_USERNAME && !user.subscribed_bonus_used);
+                const cleanUsername = CHANNEL_USERNAME?.replace('@', '');
+                const bonusText = bonusAvailable ? `\n\n🎁 Доступен бонус! Подпишись на <a href="https://t.me/${cleanUsername}">@${cleanUsername}</a> и получи <b>7 дней тарифа Plus</b>.` : '';
+                const extra = { parse_mode: 'HTML', disable_web_page_preview: true };
+                if (bonusAvailable) {
+                    extra.reply_markup = { inline_keyboard: [[ { text: '✅ Я подписался, забрать бонус', callback_data: 'check_subscription' } ]] };
+                }
+                await ctx.telegram.editMessageText(ctx.chat.id, loadingMessage.message_id, undefined, `${T('limitReached')}${bonusText}`, extra);
+                return;
+            }
             
             await ctx.telegram.editMessageText(ctx.chat.id, loadingMessage.message_id, undefined, '✅ Распознал трек, ставлю в очередь...');
             
-            // Удаляем сообщение "ставлю в очередь..." через 3 секунды для чистоты чата
             setTimeout(() => ctx.deleteMessage(loadingMessage.message_id).catch(() => {}), 3000);
             
             addTaskToQueue({
@@ -810,11 +803,11 @@ if ((user.downloads_today || 0) >= (user.premium_limit || 0)) {
                 url: data.webpage_url || url,
                 originalUrl: data.webpage_url || url,
                 metadata: { id: data.id, title: data.title, uploader: data.uploader, duration: data.duration, thumbnail: data.thumbnail },
-                ctx: null // ctx больше не передаем в очередь
+                ctx: null
             });
         }
     } catch (error) {
-        console.error('Ошибка при фоновой обработке URL:', error.stderr || error.message);
+        console.error('Ошибка при фоновой обработке URL:', error.message);
         const userMessage = '❌ Не удалось обработать ссылку. Убедитесь, что она корректна и контент доступен.';
         if (loadingMessage) {
             await ctx.telegram.editMessageText(ctx.chat.id, loadingMessage.message_id, undefined, userMessage).catch(() => {});
@@ -823,9 +816,8 @@ if ((user.downloads_today || 0) >= (user.premium_limit || 0)) {
         }
     }
 }
+
 async function handleSoundCloudUrl(ctx, url) {
-    // Просто запускаем обработку в фоне и ничего больше не делаем.
-    // Проверкой кэша теперь займется воркер.
     processUrlInBackground(ctx, url);
 }
 bot.on('text', async (ctx) => {
