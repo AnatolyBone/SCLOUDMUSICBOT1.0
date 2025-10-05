@@ -16,6 +16,7 @@ import { bot } from '../bot.js';
 import { T } from '../config/texts.js';
 import { TaskQueue } from '../lib/TaskQueue.js';
 import * as db from '../db.js';
+import { getSetting } from './settingsManager.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(path.dirname(__filename));
@@ -645,21 +646,21 @@ export function enqueue(ctx, userId, url) {
       statusMessage = await safeSendMessage(userId, '🔍 Анализирую ссылку...');
       
       // --- Умные лимиты для плейлистов ---
-      const PLAYLIST_LIMITS = {
-        free: 10,
-        plus: 30,
-        pro: 100,
-        unlim: 200 // Мягкое ограничение даже для безлимита
-      };
-      
-      let playlistLimit = PLAYLIST_LIMITS.free;
-      if (dailyLimit >= 10000) playlistLimit = PLAYLIST_LIMITS.unlim;
-      else if (dailyLimit >= 100) playlistLimit = PLAYLIST_LIMITS.pro;
-      else if (dailyLimit >= 30) playlistLimit = PLAYLIST_LIMITS.plus;
+      // --- Умные лимиты для плейлистов (берутся из настроек) ---
+const PLAYLIST_LIMITS = {
+  free: parseInt(getSetting('playlist_limit_free'), 10) || 10,
+  plus: parseInt(getSetting('playlist_limit_plus'), 10) || 30,
+  pro: parseInt(getSetting('playlist_limit_pro'), 10) || 100,
+  unlim: parseInt(getSetting('playlist_limit_unlim'), 10) || 200,
+};
 
-      const remainingDailyLimit = Math.max(0, dailyLimit - downloadsToday);
-      const playlistEnd = Math.min(remainingDailyLimit, playlistLimit);
+let playlistLimit = PLAYLIST_LIMITS.free;
+if (dailyLimit >= 10000) playlistLimit = PLAYLIST_LIMITS.unlim;
+else if (dailyLimit >= 100) playlistLimit = PLAYLIST_LIMITS.pro;
+else if (dailyLimit >= 30) playlistLimit = PLAYLIST_LIMITS.plus;
 
+const remainingDailyLimit = Math.max(0, dailyLimit - downloadsToday);
+const playlistEnd = Math.min(remainingDailyLimit, playlistLimit);
       // --- Получение метаданных ---
       const info = await ytdl(url, {
         'dump-single-json': true,
