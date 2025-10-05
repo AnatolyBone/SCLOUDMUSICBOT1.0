@@ -100,48 +100,67 @@ async function startApp() {
     let EXPECTED_WEBHOOK = null; // сюда сохраним фактический URL вебхука
     
     if (process.env.NODE_ENV === 'production' && !forcePolling) {
-      const fullBase = WEBHOOK_URL.endsWith('/') ? WEBHOOK_URL.slice(0, -1) : WEBHOOK_URL;
-      const fullWebhookUrl = fullBase + WEBHOOK_PATH;
-      const allowedUpdates = ['message', 'callback_query', 'inline_query'];
-      
-      console.log('[App] Принудительно устанавливаю вебхук и сбрасываю очередь...');
+  const fullBase = WEBHOOK_URL.endsWith('/') ? WEBHOOK_URL.slice(0, -1) : WEBHOOK_URL;
+  const fullWebhookUrl = fullBase + WEBHOOK_PATH;
+  const allowedUpdates = ['message', 'callback_query', 'inline_query'];
+  
+  // === ✅ НОВЫЙ БЛОК С RETRY ===
+  let webhookSet = false;
+  for (let i = 0; i < 3; i++) {
+    try {
+      console.log(`[App] Попытка ${i + 1}/3: устанавливаю вебхук...`);
       await bot.telegram.setWebhook(fullWebhookUrl, {
         drop_pending_updates: true,
         allowed_updates: allowedUpdates
       });
-      console.log('[App] Вебхук успешно настроен.');
-      EXPECTED_WEBHOOK = fullWebhookUrl; // ВАЖНО: сохраняем ожидаемый URL
-      
-      // Логируем текущее состояние вебхука в Telegram
-      try {
-        const info = await bot.telegram.getWebhookInfo();
-        console.log('[WebhookInfo]', JSON.stringify(info, null, 2));
-      } catch (e) {
-        console.warn('[WebhookInfo] Ошибка получения информации:', e.message);
+      webhookSet = true;
+      console.log('[App] ✅ Вебхук успешно настроен.');
+      break; // Выходим из цикла при успехе
+    } catch (e) {
+      console.error(`[App] ❌ Ошибка установки вебхука (попытка ${i + 1}):`, e.message);
+      if (i < 2) {
+        console.log('[App] Жду 5 секунд перед повторной попыткой...');
+        await new Promise(r => setTimeout(r, 5000)); // Ждём 5 секунд
+      } else {
+        // Если все попытки провалились - выбрасываем ошибку, чтобы остановить запуск
+        throw new Error('Не удалось установить вебхук после 3 попыток.');
       }
-      
-      // Точечный маршрут вебхука + лог каждого входящего апдейта
-      app.post(
-        WEBHOOK_PATH,
-        express.json({ limit: '1mb' }),
-        (req, res, next) => {
-          try {
-            const u = req.body || {};
-            const type =
-              u.message ? 'message' :
-              u.callback_query ? 'callback_query' :
-              u.inline_query ? 'inline_query' :
-              Object.keys(u).filter(k => k !== 'update_id')[0] || 'unknown';
-            console.log(`[Webhook] Update ${u.update_id || '-'} type=${type}`);
-          } catch {}
-          next();
-        },
-        bot.webhookCallback(WEBHOOK_PATH)
-      );
-      
-      // После монтирования вебхука настраиваем Express (админка/страницы)
-      setupExpress();
-    } else {
+    }
+  }
+  
+  EXPECTED_WEBHOOK = fullWebhookUrl; // ВАЖНО: сохраняем ожидаемый URL
+  
+  // Логируем текущее состояние вебхука в Telegram
+  try {
+    const info = await bot.telegram.getWebhookInfo();
+    console.log('[WebhookInfo]', JSON.stringify(info, null, 2));
+  } catch (e) {
+    console.warn('[WebhookInfo] Ошибка получения информации:', e.message);
+  }
+  
+  // Точечный маршрут вебхука + лог каждого входящего апдейта
+  app.post(
+    WEBHOOK_PATH,
+    express.json({ limit: '1mb' }),
+    (req, res, next) => {
+      try {
+        const u = req.body || {};
+        const type =
+          u.message ? 'message' :
+          u.callback_query ? 'callback_query' :
+          u.inline_query ? 'inline_query' :
+          Object.keys(u).filter(k => k !== 'update_id')[0] || 'unknown';
+        console.log(`[Webhook] Update ${u.update_id || '-'} type=${type}`);
+      } catch {}
+      next();
+    },
+    bot.webhookCallback(WEBHOOK_PATH)
+  );
+  
+  // После монтирования вебхука настраиваем Express (админка/страницы)
+  setupExpress();
+} else {
+  // ... (остальной код без изменений)
       // Режим long-polling (для разработки или диагностики)
       console.log('[App] Запуск бота в режиме long-polling...');
       await bot.telegram.deleteWebhook({ drop_pending_updates: true });
