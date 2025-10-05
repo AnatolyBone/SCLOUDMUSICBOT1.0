@@ -12,7 +12,7 @@ import fs from 'fs';
 import os from 'os';
 import mime from 'mime-types';
 import { checkAndSendExpirationNotifications, notifyExpiringTodayHourly } from './services/notifier.js';
-import { loadSettings } from './services/settingsManager.js';
+import { loadSettings,getAllSettings} from './services/settingsManager.js';
 import {
   pool,
   getUserById,
