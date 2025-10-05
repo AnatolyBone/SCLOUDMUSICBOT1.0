@@ -1283,3 +1283,26 @@ export async function getExpiringUsers() {
     return []; // Возвращаем пустой массив, чтобы приложение не падало
   }
 }
+
+/**
+ * Получает все настройки из таблицы app_settings
+ */
+export async function getAppSettings() {
+  const { rows } = await query('SELECT key, value FROM app_settings');
+  const settings = {};
+  for (const row of rows) {
+    settings[row.key] = row.value;
+  }
+  return settings;
+}
+
+/**
+ * Обновляет одну настройку
+ */
+export async function setAppSetting(key, value) {
+  await query(
+    `INSERT INTO app_settings (key, value) VALUES ($1, $2)
+     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+    [key, value]
+  );
+}
