@@ -668,11 +668,12 @@ const playlistEnd = Math.min(remainingDailyLimit, playlistLimit);
         ...YTDL_COMMON
       });
 
-      if (!info) throw new Error('Не удалось получить метаданные');
+    if (!info) {
+  throw new Error('Не удалось получить метаданные. Ссылка может быть недействительной или трек недоступен.');
+}
 
-      const isPlaylist = Array.isArray(info.entries);
-      const entries = isPlaylist ? info.entries : [info];
-
+const isPlaylist = Array.isArray(info.entries);
+const entries = isPlaylist ? info.entries : [info];
       // --- Уведомление об ограничении плейлиста ---
       if (isPlaylist && entries.length > playlistEnd) {
         await safeSendMessage(
