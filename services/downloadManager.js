@@ -475,54 +475,52 @@ export async function trackDownloadProcessor(task) {
         `✅ Скачал. Отправляю...`
       ).catch(() => {});
     }
+// ... (код до отправки)
 
-    // --- Отправка пользователю ---
-    const sentToUserMessage = await bot.telegram.sendAudio(
-      userId,
-      { source: fs.createReadStream(tempFilePath) },
-      { 
-        title, 
-        performer: uploader || 'Unknown Artist', 
-        duration: roundedDuration 
-      }
-    );
+// --- Отправка пользователю ---
+const safeFilename = `${sanitizeFilename(title)}.mp3`;
+const sentMsg = await bot.telegram.sendAudio(
+  userId,
+  { 
+    source: fs.createReadStream(tempFilePath),
+    filename: safeFilename
+  },
+  { 
+    title: title, 
+    performer: uploader || 'Unknown Artist', 
+    duration: roundedDuration 
+  }
+);
 
-    // --- Удаление статусного сообщения ---
-    if (statusMessage) {
-      await bot.telegram.deleteMessage(userId, statusMessage.message_id).catch(() => {});
+// --- Удаление статусного сообщения ---
+if (statusMessage) {
+  await bot.telegram.deleteMessage(userId, statusMessage.message_id).catch(() => {});
+}
+
+// --- Инкремент загрузок и кеширование ---
+if (sentMsg?.audio?.file_id) {
+  const fileId = sentMsg.audio.file_id;
+  await incrementDownload(userId, title, fileId, cacheKey);
+  
+  if (STORAGE_CHANNEL_ID) {
+    try {
+      const sentToStorage = await bot.telegram.sendAudio(STORAGE_CHANNEL_ID, fileId);
+      await db.cacheTrack({
+        url: cacheKey,
+        fileId: sentToStorage.audio.file_id,
+        title,
+        artist: uploader,
+        duration: roundedDuration,
+        thumbnail
+      });
+      console.log(`✅ [Cache] Трек "${title}" успешно закэширован.`);
+    } catch (storageErr) {
+      console.error(`❌ [Cache] Ошибка при кэшировании трека "${title}":`, storageErr.message);
     }
+  }
+}
 
-    // --- Инкремент загрузок и кеширование ---
-    if (sentToUserMessage?.audio?.file_id) {
-      const fileId = sentToUserMessage.audio.file_id;
-
-      // Инкрементируем счётчик
-      await incrementDownload(userId, title, fileId, cacheKey);
-
-      // Сохраняем в канал-хранилище и кэш БД
-      if (STORAGE_CHANNEL_ID) {
-        try {
-          const sentToStorage = await bot.telegram.sendAudio(
-            STORAGE_CHANNEL_ID, 
-            fileId
-          );
-
-          const normalizedKey = cacheKey || getCacheKey(metadata, ensuredUrl);
-          await db.cacheTrack({
-            url: normalizedKey,
-            fileId: sentToStorage.audio.file_id,
-            title,
-            artist: uploader,
-            duration: roundedDuration,
-            thumbnail
-          });
-
-          console.log(`✅ [Cache] Трек "${title}" успешно закэширован.`);
-        } catch (storageErr) {
-          console.error(`❌ [Cache] Ошибка при кэшировании трека "${title}":`, storageErr.message);
-        }
-      }
-    }
+// ... (остальной код)
 
   } catch (err) {
     // --- Обработка ошибок ---
