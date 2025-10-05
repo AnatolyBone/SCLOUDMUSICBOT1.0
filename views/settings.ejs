@@ -1,0 +1,39 @@
+<%# views/settings.ejs %>
+
+<%- contentFor('body') %>
+<div class="d-flex justify-content-between align-items-center pt-3 pb-2 mb-3 border-bottom">
+  <h1 class="h2"><i class="bi bi-gear-fill me-2"></i>Настройки</h1>
+</div>
+
+<% if (locals.success) { %>
+  <div class="alert alert-success" data-autohide="3000">Настройки успешно сохранены!</div>
+<% } %>
+
+<div class="row">
+  <div class="col-lg-6">
+    <div class="card">
+      <div class="card-header fw-semibold">Лимиты для плейлистов</div>
+      <div class="card-body">
+        <form action="/settings/update" method="POST">
+          <div class="mb-3">
+            <label for="limit-free" class="form-label">🆓 Free</label>
+            <input type="number" class="form-control" id="limit-free" name="playlist_limit_free" value="<%= settings.playlist_limit_free %>">
+          </div>
+          <div class="mb-3">
+            <label for="limit-plus" class="form-label">🎯 Plus</label>
+            <input type="number" class="form-control" id="limit-plus" name="playlist_limit_plus" value="<%= settings.playlist_limit_plus %>">
+          </div>
+          <div class="mb-3">
+            <label for="limit-pro" class="form-label">💪 Pro</label>
+            <input type="number" class="form-control" id="limit-pro" name="playlist_limit_pro" value="<%= settings.playlist_limit_pro %>">
+          </div>
+          <div class="mb-3">
+            <label for="limit-unlim" class="form-label">💎 Unlimited</label>
+            <input type="number" class="form-control" id="limit-unlim" name="playlist_limit_unlim" value="<%= settings.playlist_limit_unlim %>">
+          </div>
+          <button type="submit" class="btn btn-primary">Сохранить</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
