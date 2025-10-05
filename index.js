@@ -346,7 +346,22 @@ app.get('/health', async (req, res) => {
   });
 
   app.get('/logout', (req, res) => req.session.destroy(() => res.redirect('/admin')));
+app.post('/admin/queue/clear', requireAuth, (req, res) => {
+  const count = downloadQueue.clear();
+  console.log(`[Admin] Очередь полностью очищена, удалено ${count} задач.`);
+  // Можно добавить flash-сообщение об успехе
+  res.redirect('back');
+});
 
+// Очистка очереди для конкретного пользователя
+app.post('/admin/queue/clear-user', requireAuth, (req, res) => {
+  const { userId } = req.body;
+  if (userId) {
+    const count = downloadQueue.clearUser(userId);
+    console.log(`[Admin] Очищена очередь для пользователя ${userId}, удалено ${count} задач.`);
+  }
+  res.redirect('back');
+});
 app.get('/settings', requireAuth, (req, res) => {
   res.render('settings', {
     title: 'Настройки',
