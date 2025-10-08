@@ -39,13 +39,18 @@ const FFMPEG_AVAILABLE =
   process.env.FFMPEG_AVAILABLE !== '0' &&
   process.env.FFMPEG_STATIC_SKIP_DOWNLOAD !== '1';
 
+// services/downloadManager.js
+
 const YTDL_COMMON = {
   'ffmpeg-location': ffmpegPath || undefined,
   'user-agent': FAKE_USER_AGENT,
   proxy: PROXY_URL || undefined,
   retries: 3,
   'socket-timeout': YTDL_TIMEOUT,
-  'no-warnings': true
+  'no-warnings': true,
+  
+  // === ✅ ДОБАВЬ ЭТУ СТРОКУ ===
+  'extractor-args': 'soundcloud:player_client_id=CLIENT_ID'
 };
 
 // ========================= HELPER FUNCTIONS =========================
