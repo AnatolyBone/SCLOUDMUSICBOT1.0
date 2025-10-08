@@ -477,35 +477,27 @@ console.log(`[DownloadManager] 🚀 Очередь запущена (max: ${MAX_
  * - Меньше промежуточных статусов
  */
 export function enqueue(ctx, userId, url) {
+  // НЕ ДЕЛАЕМ AWAIT! Запускаем асинхронно
   (async () => {
     let statusMessage = null;
     const startTime = Date.now();
 
     try {
-      // 1️⃣ Валидация URL
       if (!url || typeof url !== 'string') {
         console.error('[Enqueue] Некорректный URL:', url);
         return;
       }
 
-      // Блокировка Spotify (временно)
       if (url.includes('spotify.com')) {
-        await safeSendMessage(
-          userId,
-          '🛠 К сожалению, скачивание из Spotify временно недоступно.'
-        );
+        await safeSendMessage(userId, '🛠 К сожалению, скачивание из Spotify временно недоступно.');
         return;
       }
 
-      // 2️⃣ Сброс дневного лимита
       await db.resetDailyLimitIfNeeded(userId);
-
-      // 3️⃣ Получение данных пользователя
       const fullUser = await db.getUser(userId);
       const downloadsToday = Number(fullUser?.downloads_today || 0);
       const dailyLimit = Number(fullUser?.premium_limit || 0);
 
-      // 4️⃣ Проверка лимита
       if (downloadsToday >= dailyLimit) {
         const bonusAvailable = Boolean(CHANNEL_USERNAME && !fullUser?.subscribed_bonus_used);
         const cleanUsername = CHANNEL_USERNAME?.replace('@', '');
@@ -514,16 +506,11 @@ export function enqueue(ctx, userId, url) {
           : '';
 
         const text = `${T('limitReached')}${bonusText}`;
-        const extra = {
-          parse_mode: 'HTML',
-          disable_web_page_preview: true
-        };
+        const extra = { parse_mode: 'HTML', disable_web_page_preview: true };
 
         if (bonusAvailable) {
           extra.reply_markup = {
-            inline_keyboard: [[
-              Markup.button.callback('✅ Я подписался, забрать бонус', 'check_subscription')
-            ]]
+            inline_keyboard: [[ Markup.button.callback('✅ Я подписался, забрать бонус', 'check_subscription') ]]
           };
         }
 
@@ -531,10 +518,9 @@ export function enqueue(ctx, userId, url) {
         return;
       }
 
-      // 5️⃣ Уведомление о начале
+      // 🔥 ОДНО сообщение на ВСЮ операцию
       statusMessage = await safeSendMessage(userId, '🔍 Анализирую ссылку...');
 
-      // 6️⃣ Определение лимитов плейлиста
       const limits = {
         free: parseInt(getSetting('playlist_limit_free'), 10) || 10,
         plus: parseInt(getSetting('playlist_limit_plus'), 10) || 30,
@@ -550,7 +536,6 @@ export function enqueue(ctx, userId, url) {
       const remainingToday = Math.max(0, dailyLimit - downloadsToday);
       const maxTracksToProcess = Math.min(remainingToday, playlistLimit);
 
-      // 7️⃣ 🔥 БЫСТРОЕ получение списка треков (БЕЗ полных метаданных!)
       let trackUrls = [];
       let isPlaylist = false;
 
@@ -558,7 +543,7 @@ export function enqueue(ctx, userId, url) {
         console.log('[Enqueue] 🔍 Получаю список треков (flat-playlist)...');
         
         const info = await ytdl(url, {
-          'flat-playlist': true, // 🔥 КЛЮЧЕВАЯ ОПТИМИЗАЦИЯ!
+          'flat-playlist': true,
           'dump-single-json': true,
           'playlist-end': maxTracksToProcess,
           ...YTDL_COMMON
@@ -586,7 +571,6 @@ export function enqueue(ctx, userId, url) {
         throw new Error('Не найдено треков для загрузки.');
       }
 
-      // 8️⃣ Уведомление об ограничении плейлиста
       if (isPlaylist && trackUrls.length >= maxTracksToProcess) {
         await safeSendMessage(
           userId,
@@ -595,7 +579,7 @@ export function enqueue(ctx, userId, url) {
         );
       }
 
-      // 9️⃣ Обновление статуса
+      // 🔥 ПРОВЕРКА КЭША (параллельно)
       if (statusMessage) {
         await bot.telegram.editMessageText(
           userId,
@@ -605,13 +589,10 @@ export function enqueue(ctx, userId, url) {
         ).catch(() => {});
       }
 
-      // 🔟 🔥 ПАРАЛЛЕЛЬНАЯ проверка кеша для всех треков
       const cacheCheckResults = await pMap(
         trackUrls,
         async (trackUrl) => {
-          // Генерируем предварительный cache key из URL
           const preliminaryCacheKey = `sc:${trackUrl}`;
-          
           const cached = await db.findCachedTrack(preliminaryCacheKey) ||
                          await db.findCachedTrack(trackUrl);
           
@@ -620,16 +601,15 @@ export function enqueue(ctx, userId, url) {
             cached: cached?.fileId ? cached : null
           };
         },
-        { concurrency: 10 } // Быстрая параллельная проверка
+        { concurrency: 10 }
       );
 
-      // Разделяем на закэшированные и новые
       const cachedTracks = cacheCheckResults.filter(r => r.cached);
       const newTracks = cacheCheckResults.filter(r => !r.cached);
 
       console.log(`[Enqueue] 📊 Кеш: ${cachedTracks.length}, Новые: ${newTracks.length}`);
 
-      // 1️⃣1️⃣ Мгновенная отправка закэшированных треков
+      // 🔥 МГНОВЕННАЯ отправка из кэша
       if (cachedTracks.length > 0) {
         if (statusMessage) {
           await bot.telegram.editMessageText(
@@ -652,14 +632,14 @@ export function enqueue(ctx, userId, url) {
               
               await incrementDownload(userId, cached.trackName, cached.fileId, cached.url);
             } catch (sendErr) {
-              console.error('[Enqueue] Ошибка отправки из кеша:', sendErr.message);
+              console.error('[Enqueue] Ошибка отправки из кэша:', sendErr.message);
             }
           },
-          { concurrency: 3 } // Отправляем по 3 трека параллельно
+          { concurrency: 3 }
         );
       }
 
-      // 1️⃣2️⃣ Постановка новых треков в очередь
+      // 🔥 Постановка НОВЫХ треков в очередь
       if (newTracks.length > 0) {
         if (statusMessage) {
           const msg = cachedTracks.length > 0
@@ -674,20 +654,20 @@ export function enqueue(ctx, userId, url) {
           ).catch(() => {});
         }
 
+        // 🔥 ИСПРАВЛЕНИЕ: используем add() вместо enqueue()
         for (const { url: trackUrl } of newTracks) {
-          await downloadQueue.enqueue({
+          downloadQueue.add({
             userId,
             url: trackUrl,
             originalUrl: trackUrl,
             source: 'soundcloud',
-            // 🔥 Метаданные получим в воркере!
             metadata: null,
             cacheKey: null
           });
         }
       }
 
-      // 1️⃣3️⃣ Удаление статусного сообщения
+      // Удаляем статус через 3 секунды
       if (statusMessage) {
         setTimeout(() => {
           bot.telegram.deleteMessage(userId, statusMessage.message_id).catch(() => {});
@@ -719,7 +699,5 @@ export function enqueue(ctx, userId, url) {
         await safeSendMessage(userId, userMsg);
       }
     }
-  })();
+  })(); // 🔥 ВАЖНО: НЕ ЖДЁМ ЗАВЕРШЕНИЯ!
 }
-
-// 
