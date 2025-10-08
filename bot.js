@@ -645,24 +645,23 @@ bot.action(/pl_cancel:(.+)/, async (ctx) => {
 // bot.js
 
 // ========================= URL HANDLER (МОДЕРНИЗИРОВАННАЯ ВЕРСИЯ) =========================
+// bot.js (processUrlInBackground)
 
 async function processUrlInBackground(ctx, url) {
     let loadingMessage;
     try {
         loadingMessage = await ctx.reply('🔍 Анализирую ссылку...');
         
-        // 🔥 ИСПОЛЬЗУЕМ soundcloud-downloader вместо ytdl
         let data;
         try {
-            // Проверяем, это плейлист или трек
+            // 🔥 ПРАВИЛЬНЫЙ API
             if (url.includes('/sets/')) {
                 // Это плейлист
-                data = await scdl.getSetInfo(url);
+                const playlistInfo = await scdl.getSetInfo(url);
                 
-                // Преобразуем в формат, совместимый со старой логикой
                 data = {
-                    title: data.title,
-                    entries: data.tracks.map(track => ({
+                    title: playlistInfo.title,
+                    entries: playlistInfo.tracks.map(track => ({
                         title: track.title,
                         url: track.permalink_url,
                         webpage_url: track.permalink_url,
@@ -676,7 +675,7 @@ async function processUrlInBackground(ctx, url) {
                 data = {
                     title: trackInfo.title,
                     webpage_url: trackInfo.permalink_url,
-                    entries: null // Нет плейлиста
+                    entries: null
                 };
             }
         } catch (scdlError) {
