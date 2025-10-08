@@ -360,18 +360,31 @@ export async function trackDownloadProcessor(task) {
     const { metadata, cacheKey, url: ensuredUrl } = ensured;
     const { title, uploader, id: trackId, duration, thumbnail, ext, acodec } = metadata;
     const roundedDuration = duration ? Math.round(duration) : undefined;
-
+    
     // 4. Проверка кэша
-    let cached = await db.findCachedTrack(cacheKey) || await db.findCachedTrack(task.originalUrl || ensuredUrl);
-    if (!cached && typeof db.findCachedTrackByMeta === 'function') {
-      cached = await db.findCachedTrackByMeta({ title, artist: uploader, duration: roundedDuration });
+let cached = await db.findCachedTrack(cacheKey) || await db.findCachedTrack(task.originalUrl || ensuredUrl);
+if (!cached && typeof db.findCachedTrackByMeta === 'function') {
+  cached = await db.findCachedTrackByMeta({ title, artist: uploader, duration: roundedDuration });
+}
+
+if (cached?.fileId) {
+  console.log(`[Worker/Cache] ХИТ! Отправляю "${cached.trackName || title}" из кэша.`);
+  
+  // ✅ ИСПРАВЛЕНИЕ: Используем 'artist' из кэша, если он есть
+  const performer = cached.artist || uploader || 'Unknown Artist';
+  
+  await bot.telegram.sendAudio(
+    userId,
+    cached.fileId,
+    {
+      title: cached.trackName || title,
+      performer: performer,
+      duration: roundedDuration
     }
-    if (cached?.fileId) {
-      console.log(`[Worker/Cache] ХИТ! Отправляю "${cached.trackName || title}" из кэша.`);
-      await bot.telegram.sendAudio(userId, cached.fileId, { title: cached.trackName || title, performer: uploader, duration: roundedDuration });
-      await incrementDownload(userId, cached.trackName || title, cached.fileId, cacheKey);
-      return;
-    }
+  );
+  await incrementDownload(userId, cached.trackName || title, cached.fileId, cacheKey);
+  return; // Выход, задача выполнена из кэша
+}
 
     // 5. Скачивание
     statusMessage = await safeSendMessage(userId, `⏳ Начинаю скачивание: "${title}"`);
