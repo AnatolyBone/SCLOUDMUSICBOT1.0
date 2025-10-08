@@ -763,15 +763,12 @@ async function processUrlInBackground(ctx, url) {
         // === ✅ ГЛАВНОЕ ИСПРАВЛЕНИЕ ЗДЕСЬ ===
         let data;
         try {
-            data = await youtubeDl(url, { dumpSingleJson: true, flatPlaylist: true });
-        } catch (ytdlError) {
-            console.error(`[youtube-dl] Критическая ошибка (processUrlInBackground) для ${url}:`, ytdlError.stderr || ytdlError.message);
-            throw new Error('Не удалось получить метаданные. Ссылка может быть недействительной или трек недоступен.');
-        }
-
-        if (!data) {
-            throw new Error('Не удалось получить метаданные. Ссылка может быть недействительной или трек недоступен.');
-        }
+    data = await youtubeDl(url, { dumpSingleJson: true, flatPlaylist: true });
+} catch (ytdlError) {
+    // ✅ ИЗМЕНЕНИЕ: выводим весь объект ошибки
+    console.error(`[youtube-dl] Критическая ошибка (processUrlInBackground) для ${url}:`, ytdlError);
+    throw new Error('Не удалось получить метаданные. Ссылка может быть недействительной или трек недоступен.');
+}
         // === КОНЕЦ ИСПРАВЛЕНИЯ ===
 
         if (data.entries && data.entries.length > 0) {
