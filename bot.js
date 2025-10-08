@@ -4,6 +4,7 @@
 
 import { Telegraf, Markup, TelegramError } from 'telegraf';
 import { HttpsProxyAgent } from 'https-proxy-agent';
+import axios from 'axios';
 import SCDL from 'soundcloud-downloader'; // 🔥 ИЗМЕНЕНО
 import { ADMIN_ID, BOT_TOKEN, WEBHOOK_URL, CHANNEL_USERNAME, STORAGE_CHANNEL_ID, PROXY_URL } from './config.js';
 import { 
@@ -654,46 +655,89 @@ bot.action(/pl_cancel:(.+)/, async (ctx) => {
     }
 });
 
-// bot.js
 
-// ========================= URL HANDLER (МОДЕРНИЗИРОВАННАЯ ВЕРСИЯ) =========================
-async function processUrlInBackground(ctx, url) {
-        let loadingMessage;
+// ========================= URL RESOLVER =========================
+
+/**
+ * Расширяет короткую ссылку SoundCloud (on.soundcloud.com → soundcloud.com/...)
+ */
+async function resolveShortUrl(url) {
+    try {
+        // Проверяем, является ли ссылка короткой
+        if (!url.includes('on.soundcloud.com')) {
+            return url; // Уже полная ссылка
+        }
+        
+        console.log(`[URL Resolver] Расширяю короткую ссылку: ${url}`);
+        
+        // Делаем HEAD-запрос для получения редиректа
+        const response = await axios.head(url, {
+            maxRedirects: 5,
+            validateStatus: (status) => status >= 200 && status < 400
+        });
+        
+        // Получаем финальный URL после редиректов
+        const finalUrl = response.request?.res?.responseUrl || url;
+        
+        console.log(`[URL Resolver] ✅ Расширенная ссылка: ${finalUrl}`);
+        return finalUrl;
+        
+    } catch (error) {
+        console.error('[URL Resolver] ❌ Ошибка:', error.message);
+        
+        // Fallback: пробуем через fetch
         try {
-            loadingMessage = await ctx.reply('🔍 Анализирую ссылку...');
+            const res = await fetch(url, {
+                method: 'HEAD',
+                redirect: 'follow'
+            });
             
-            // Ждём инициализации
-            if (!scdl) {
-                await new Promise(resolve => setTimeout(resolve, 1000));
-                if (!scdl) scdl = await SCDL.create();
+            return res.url || url;
+        } catch (fetchErr) {
+            console.error('[URL Resolver] Fallback тоже не сработал:', fetchErr.message);
+            return url; // Возвращаем оригинал
+        }
+    }
+}
+
+// ========================= URL HANDLER (ИСПРАВЛЕННЫЙ) =========================
+
+async function processUrlInBackground(ctx, url) {
+    let loadingMessage;
+    try {
+        loadingMessage = await ctx.reply('🔍 Анализирую ссылку...');
+        
+        // 🔥 РАСШИРЯЕМ КОРОТКУЮ ССЫЛКУ
+        const resolvedUrl = await resolveShortUrl(url);
+        
+        let data;
+        try {
+            // 🔥 ИСПОЛЬЗУЕМ soundcloud-downloader с расширенной ссылкой
+            if (resolvedUrl.includes('/sets/')) {
+                // Это плейлист
+                const playlistInfo = await scdl.getSetInfo(resolvedUrl);
+                
+                data = {
+                    title: playlistInfo.title,
+                    entries: playlistInfo.tracks.map(track => ({
+                        title: track.title,
+                        url: track.permalink_url,
+                        webpage_url: track.permalink_url,
+                        id: track.id
+                    }))
+                };
+            } else {
+                // Это одиночный трек
+                const trackInfo = await scdl.getInfo(resolvedUrl);
+                
+                data = {
+                    title: trackInfo.title,
+                    webpage_url: trackInfo.permalink_url,
+                    entries: null
+                };
             }
-            
-            let data;
-            try {
-                // 🔥 ПРАВИЛЬНЫЙ API
-                if (url.includes('/sets/')) {
-                    const playlistInfo = await scdl.getSetInfo(url);
-                    
-                    data = {
-                        title: playlistInfo.title,
-                        entries: playlistInfo.tracks.map(track => ({
-                            title: track.title,
-                            url: track.permalink_url,
-                            webpage_url: track.permalink_url,
-                            id: track.id
-                        }))
-                    };
-                } else {
-                    const trackInfo = await scdl.getInfo(url);
-                    
-                    data = {
-                        title: trackInfo.title,
-                        webpage_url: trackInfo.permalink_url,
-                        entries: null
-                    };
-                }
-            } catch (scdlError) {
-            console.error(`[scdl] Ошибка:`, scdlError.message);
+        } catch (scdlError) {
+            console.error(`[scdl] Ошибка для ${resolvedUrl}:`, scdlError.message);
             throw new Error('Не удалось получить метаданные. Проверьте ссылку.');
         }
         
@@ -706,10 +750,10 @@ async function processUrlInBackground(ctx, url) {
                 playlistId,
                 title: data.title,
                 tracks: data.entries,
-                originalUrl: url,
+                originalUrl: resolvedUrl, // 🔥 Сохраняем расширенную ссылку
                 selected: new Set(),
                 currentPage: 0,
-                fullTracks: true // 🔥 Данные уже полные!
+                fullTracks: true
             });
             
             const message = `🎶 В плейлисте <b>"${escapeHtml(data.title)}"</b> найдено <b>${data.entries.length}</b> треков.\n\nЧто делаем?`;
@@ -722,29 +766,28 @@ async function processUrlInBackground(ctx, url) {
         } else {
             await ctx.deleteMessage(loadingMessage.message_id).catch(() => {});
             
-            // 🔥 ПЕРЕДАЁМ В downloadManager
-            soundcloudEnqueue(ctx, ctx.from.id, url);
+            // 🔥 ПЕРЕДАЁМ РАСШИРЕННУЮ ССЫЛКУ В downloadManager
+            soundcloudEnqueue(ctx, ctx.from.id, resolvedUrl);
         }
-        } catch (error) {
-            console.error('[processUrlInBackground] Ошибка:', error.message);
-            
-            const userMessage = '❌ Не удалось обработать ссылку. Убедитесь, что она корректна и доступна.';
-            
-            if (loadingMessage) {
-                await ctx.telegram.editMessageText(
-                    ctx.chat.id,
-                    loadingMessage.message_id,
-                    undefined,
-                    userMessage
-                ).catch(() => {});
-            } else {
-                await ctx.reply(userMessage);
-            }
-        }
-        }
+    } catch (error) {
+        console.error('[processUrlInBackground] Ошибка:', error.message);
         
+        const userMessage = '❌ Не удалось обработать ссылку. Убедитесь, что она корректна и доступна.';
+        
+        if (loadingMessage) {
+            await ctx.telegram.editMessageText(
+                ctx.chat.id,
+                loadingMessage.message_id,
+                undefined,
+                userMessage
+            ).catch(() => {});
+        } else {
+            await ctx.reply(userMessage);
+        }
+    }
+}
+
 async function handleSoundCloudUrl(ctx, url) {
-    // Просто запускаем фоновую обработку
     processUrlInBackground(ctx, url);
 }
 // ========================= URL HANDLER (УПРОЩЁННАЯ ВЕРСИЯ) =========================
