@@ -1,7 +1,10 @@
 // ======================= ОПТИМИЗИРОВАННАЯ ВЕРСИЯ BOT.JS =======================
 
+// ======================= ОПТИМИЗИРОВАННАЯ ВЕРСИЯ BOT.JS =======================
+
 import { Telegraf, Markup, TelegramError } from 'telegraf';
 import { HttpsProxyAgent } from 'https-proxy-agent';
+import scdl from 'soundcloud-downloader'; // 🔥 ДОБАВЛЕНО
 import { ADMIN_ID, BOT_TOKEN, WEBHOOK_URL, CHANNEL_USERNAME, STORAGE_CHANNEL_ID, PROXY_URL } from './config.js';
 import { 
     updateUserField, getUser, createUser, setPremium, getAllUsers, 
@@ -13,17 +16,9 @@ import {
 import { T, allTextsSync } from './config/texts.js';
 import { performInlineSearch } from './services/searchManager.js';
 import { spotifyEnqueue } from './services/spotifyManager.js';
-import { downloadQueue, enqueue as soundcloudEnqueue } from './services/downloadManager.js'; // ✅ Импорт новой функции
+import { downloadQueue, enqueue as soundcloudEnqueue } from './services/downloadManager.js';
 import { handleReferralCommand, processNewUserReferral } from './services/referralManager.js';
 import { isShuttingDown, isMaintenanceMode, setMaintenanceMode } from './services/appState.js';
-import ytdl from 'youtube-dl-exec';
-import { YTDL_COMMON } from './services/downloadManager.js'; // ✅ Импорт единой конфигурации
-
-// ========================= УДАЛЕНО =========================
-// ❌ УДАЛИЛИ getYoutubeDl() — теперь используем YTDL_COMMON
-// ❌ УДАЛИЛИ addTaskToQueue() — теперь используем soundcloudEnqueue()
-
-// ========================= HELPER FUNCTIONS =========================
 
 function escapeHtml(text) {
     if (typeof text !== 'string') return '';
@@ -647,26 +642,45 @@ bot.action(/pl_cancel:(.+)/, async (ctx) => {
     }
 });
 
-// ========================= URL HANDLER =========================
-
 // bot.js
 
-// ========================= URL HANDLER (ИСПРАВЛЕНО) =========================
+// ========================= URL HANDLER (МОДЕРНИЗИРОВАННАЯ ВЕРСИЯ) =========================
 
 async function processUrlInBackground(ctx, url) {
     let loadingMessage;
     try {
         loadingMessage = await ctx.reply('🔍 Анализирую ссылку...');
         
+        // 🔥 ИСПОЛЬЗУЕМ soundcloud-downloader вместо ytdl
         let data;
         try {
-            data = await ytdl(url, {
-                'dump-single-json': true,
-                'flat-playlist': true, // 🔥 Быстрый режим
-                ...YTDL_COMMON
-            });
-        } catch (ytdlError) {
-            console.error(`[youtube-dl] Ошибка для ${url}:`, ytdlError.stderr || ytdlError.message);
+            // Проверяем, это плейлист или трек
+            if (url.includes('/sets/')) {
+                // Это плейлист
+                data = await scdl.getSetInfo(url);
+                
+                // Преобразуем в формат, совместимый со старой логикой
+                data = {
+                    title: data.title,
+                    entries: data.tracks.map(track => ({
+                        title: track.title,
+                        url: track.permalink_url,
+                        webpage_url: track.permalink_url,
+                        id: track.id
+                    }))
+                };
+            } else {
+                // Это одиночный трек
+                const trackInfo = await scdl.getInfo(url);
+                
+                data = {
+                    title: trackInfo.title,
+                    webpage_url: trackInfo.permalink_url,
+                    entries: null // Нет плейлиста
+                };
+            }
+        } catch (scdlError) {
+            console.error(`[scdl] Ошибка для ${url}:`, scdlError.message);
             throw new Error('Не удалось получить метаданные. Проверьте ссылку.');
         }
         
@@ -682,7 +696,7 @@ async function processUrlInBackground(ctx, url) {
                 originalUrl: url,
                 selected: new Set(),
                 currentPage: 0,
-                fullTracks: false
+                fullTracks: true // 🔥 Уже есть полная информация!
             });
             
             const message = `🎶 В плейлисте <b>"${escapeHtml(data.title)}"</b> найдено <b>${data.entries.length}</b> треков.\n\nЧто делаем?`;
@@ -693,10 +707,11 @@ async function processUrlInBackground(ctx, url) {
             
             // ===== ЕСЛИ ЭТО ОДИНОЧНЫЙ ТРЕК =====
         } else {
-            // 🔥 ВАЖНО: Удаляем сообщение "Анализирую..." сразу
+            // Удаляем сообщение "Анализирую..."
             await ctx.deleteMessage(loadingMessage.message_id).catch(() => {});
             
-            // 🔥 ПЕРЕДАЁМ УПРАВЛЕНИЕ downloadManager (он сам всё сделает)
+            // 🔥 ПЕРЕДАЁМ УПРАВЛЕНИЕ downloadManager
+            // Он сам всё сделает: проверит кеш, скачает, отправит
             soundcloudEnqueue(ctx, ctx.from.id, url);
         }
     } catch (error) {
@@ -718,11 +733,10 @@ async function processUrlInBackground(ctx, url) {
 }
 
 async function handleSoundCloudUrl(ctx, url) {
-    // Просто запускаем фоновую обработку (не ждём результата)
+    // Просто запускаем фоновую обработку
     processUrlInBackground(ctx, url);
 }
-
-// ========================= TEXT HANDLER (БЕЗ ИЗМЕНЕНИЙ) =========================
+// ========================= URL HANDLER (УПРОЩЁННАЯ ВЕРСИЯ) =========================
 
 bot.on('text', async (ctx) => {
     if (isShuttingDown()) {
@@ -751,14 +765,15 @@ bot.on('text', async (ctx) => {
     const url = urlMatch[0];
     
     if (url.includes('soundcloud.com')) {
-        // 🔥 НЕ проверяем лимит здесь (это делает downloadManager)
-        handleSoundCloudUrl(ctx, url);
+        // 🔥 ПРОСТО ПЕРЕДАЁМ В downloadManager (он всё сделает сам!)
+        soundcloudEnqueue(ctx, ctx.from.id, url);
     } else if (url.includes('open.spotify.com')) {
         await ctx.reply('🛠 Скачивание из Spotify временно недоступно.');
     } else {
         await ctx.reply('Я умею скачивать треки из SoundCloud.');
     }
 });
+
 // ========================= EXPORTS =========================
 
 export default bot;
