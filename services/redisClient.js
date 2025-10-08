@@ -1,92 +1,95 @@
-// services/redisClient.js (IOREDIS VERSION)
+// services/redisClient.js (улучшенная версия)
 
-import Redis from 'ioredis';
+import { createClient } from 'redis';
 
 class RedisService {
   constructor() {
     this.client = null;
-    this.isConnected = false;
+    this.connectionPromise = null;
     this.reconnectAttempts = 0;
     console.log('[Redis] Сервис создан.');
   }
 
   /**
    * Устанавливает соединение с Redis
+   * Гарантирует только одну попытку подключения за раз
    */
   async connect() {
     // Если уже подключены, возвращаем клиента
-    if (this.client && this.isConnected) {
+    if (this.client?.isReady) {
       return this.client;
     }
 
-    const redisUrl = process.env.REDIS_URL;
-    
-    if (!redisUrl) {
-      console.warn('[Redis] Переменная REDIS_URL не найдена. Redis не будет использоваться.');
-      return null;
+    // Если идет процесс подключения, возвращаем его
+    if (this.connectionPromise) {
+      return this.connectionPromise;
     }
 
-    console.log('[Redis] Подключаюсь...');
-    
-    this.client = new Redis(redisUrl, {
-      retryStrategy: (times) => {
-        this.reconnectAttempts = times;
-        
-        if (times > 10) {
-          console.error('[Redis] Превышен лимит попыток переподключения (10).');
-          return null; // Прекращаем автореконнект
+    this.connectionPromise = (async () => {
+      const redisUrl = process.env.REDIS_URL;
+      
+      if (!redisUrl) {
+        console.warn('[Redis] Переменная REDIS_URL не найдена. Redis не будет использоваться.');
+        this.connectionPromise = null;
+        return null;
+      }
+
+      console.log('[Redis] Подключаюсь...');
+      
+      const client = createClient({
+        url: redisUrl,
+        socket: {
+          reconnectStrategy: (retries) => {
+            this.reconnectAttempts = retries;
+            
+            // После 10 попыток прекращаем
+            if (retries > 10) {
+              console.error('[Redis] Превышен лимит попыток переподключения (10).');
+              this.client = null;
+              return false; // Прекращаем автореконнект
+            }
+            
+            const delay = Math.min(retries * 100, 3000);
+            console.log(`[Redis] Попытка переподключения ${retries}/10 через ${delay}мс...`);
+            return delay;
+          }
         }
-        
-        const delay = Math.min(times * 100, 3000);
-        console.log(`[Redis] Попытка переподключения ${times}/10 через ${delay}мс...`);
-        return delay;
-      },
-      maxRetriesPerRequest: 3,
-      enableReadyCheck: true,
-      lazyConnect: false
-    });
+      });
 
-    // События
-    this.client.on('error', (err) => {
-      console.error('🔴 [Redis] Ошибка:', err.message);
-      this.isConnected = false;
-    });
+      client.on('error', (err) => {
+        console.error('🔴 [Redis] Ошибка:', err.message);
+      });
 
-    this.client.on('reconnecting', () => {
-      console.log('[Redis] Переподключение...');
-      this.isConnected = false;
-    });
+      client.on('reconnecting', () => {
+        console.log('[Redis] Переподключение...');
+      });
 
-    this.client.on('connect', () => {
-      console.log('✅ [Redis] Соединение восстановлено.');
-      this.isConnected = true;
-      this.reconnectAttempts = 0;
-    });
+      client.on('ready', () => {
+        console.log('✅ [Redis] Соединение восстановлено.');
+        this.reconnectAttempts = 0;
+      });
 
-    this.client.on('ready', () => {
-      console.log('✅ [Redis] Клиент успешно подключен.');
-      this.isConnected = true;
-    });
+      try {
+        await client.connect();
+        console.log('✅ [Redis] Клиент успешно подключен.');
+        this.client = client;
+        this.connectionPromise = null;
+        return client;
+      } catch (err) {
+        console.error('🔴 [Redis] Критическая ошибка при подключении:', err.message);
+        this.connectionPromise = null;
+        throw err;
+      }
+    })();
 
-    this.client.on('close', () => {
-      console.log('[Redis] Соединение закрыто.');
-      this.isConnected = false;
-    });
-
-    try {
-      await this.client.ping();
-      return this.client;
-    } catch (err) {
-      console.error('🔴 [Redis] Критическая ошибка при подключении:', err.message);
-      throw err;
-    }
+    return this.connectionPromise;
   }
 
   /**
    * Проверяет и возвращает активное соединение
    */
   async ensureConnection() {
-    if (this.client && this.isConnected) return this.client;
+    if (this.client?.isReady) return this.client;
     return await this.connect();
   }
 
@@ -129,12 +132,7 @@ class RedisService {
     try {
       const client = await this.ensureConnection();
       if (!client) return;
-      
-      if (ttlSeconds) {
-        await client.setex(key, ttlSeconds, valueToStore);
-      } else {
-        await client.set(key, valueToStore);
-      }
+      await client.set(key, valueToStore, { EX: ttlSeconds });
     } catch (e) {
       console.error(`[Redis SET] Ошибка при установке ключа ${key}:`, e.message);
     }
@@ -145,26 +143,6 @@ class RedisService {
    */
   async setEx(key, ttlSeconds, value) {
     return await this.set(key, value, ttlSeconds);
-  }
-
-  /**
-   * setex с правильным порядком аргументов (для ioredis)
-   */
-  async setex(key, ttlSeconds, value) {
-    if (!key || typeof key !== 'string') {
-      console.error('[Redis SETEX] Некорректный ключ:', key);
-      return;
-    }
-
-    const valueToStore = typeof value === 'object' ? JSON.stringify(value) : String(value);
-
-    try {
-      const client = await this.ensureConnection();
-      if (!client) return;
-      await client.setex(key, ttlSeconds, valueToStore);
-    } catch (e) {
-      console.error(`[Redis SETEX] Ошибка:`, e.message);
-    }
   }
 
   /**
@@ -260,11 +238,10 @@ class RedisService {
    * Закрывает соединение
    */
   async disconnect() {
-    if (this.client) {
+    if (this.client?.isOpen) {
       console.log('[Redis] Закрываю соединение...');
       await this.client.quit();
       this.client = null;
-      this.isConnected = false;
     }
   }
 }
@@ -282,3 +259,15 @@ process.on('SIGINT', async () => {
 });
 
 export default redisService;
+
+// ========================= EXPORTS SUMMARY =========================
+// Основные методы:
+// - get(key): получить значение
+// - set(key, value, ttl): установить значение с TTL
+// - setEx(key, ttl, value): алиас для совместимости
+// - del(key): удалить ключ
+// - getJson(key): получить JSON объект
+// - setJson(key, obj, ttl): сохранить JSON объект
+// - isAvailable(): проверка доступности (для healthcheck)
+// - incr(key): инкремент счётчика
+// - expire(key, ttl): установить TTL для существующего ключа
