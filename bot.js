@@ -743,10 +743,6 @@ async function processUrlInBackground(ctx, url) {
         }
         }
         
-        async function handleSoundCloudUrl(ctx, url) {
-            processUrlInBackground(ctx, url);
-        }
-
 async function handleSoundCloudUrl(ctx, url) {
     // Просто запускаем фоновую обработку
     processUrlInBackground(ctx, url);
