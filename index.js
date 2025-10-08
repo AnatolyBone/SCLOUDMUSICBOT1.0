@@ -109,7 +109,7 @@ async function startApp() {
     bot.use((ctx, next) => { lastUpdateTs = Date.now(); return next(); });
     
     // ✅ Очередь автоматически инициализируется при импорте downloadManager.js
-    downloadQueue.start();
+   // downloadQueue.start();
     console.log('[App] Очередь скачивания принудительно запущена.');
     
     let EXPECTED_WEBHOOK = null;
