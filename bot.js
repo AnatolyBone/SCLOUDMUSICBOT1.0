@@ -18,17 +18,19 @@ import { isShuttingDown, isMaintenanceMode, setMaintenanceMode } from './service
 // --- Глобальные переменные и хелперы ---
 const playlistSessions = new Map();
 const TRACKS_PER_PAGE = 5;
-
 function getYoutubeDl() {
     const options = {};
     if (PROXY_URL) {
         options.proxy = PROXY_URL;
     }
     
-    // Флаги, которые будут добавляться к КАЖДОМУ вызову youtube-dl из этого файла
+    // Эти флаги должны быть ИДЕНТИЧНЫ флагам в downloadManager.js, чтобы избежать ошибок
     const defaultFlags = {
-        'extractor-args': 'soundcloud:player_client_id=CLIENT_ID',
-        'no-warnings': true
+        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36',
+        'retries': 3,
+        'socket-timeout': 120,
+        'no-warnings': true,
+        'extractor-args': 'soundcloud:player_client_id=CLIENT_ID'
     };
     
     // Возвращаем функцию, которая объединяет дефолтные флаги с теми, что передаются при вызове
