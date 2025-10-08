@@ -649,6 +649,10 @@ bot.action(/pl_cancel:(.+)/, async (ctx) => {
 
 // ========================= URL HANDLER =========================
 
+// bot.js
+
+// ========================= URL HANDLER (ИСПРАВЛЕНО) =========================
+
 async function processUrlInBackground(ctx, url) {
     let loadingMessage;
     try {
@@ -656,17 +660,18 @@ async function processUrlInBackground(ctx, url) {
         
         let data;
         try {
-            data = await ytdl(url, { 
-                'dump-single-json': true, 
-                'flat-playlist': true,
-                ...YTDL_COMMON 
+            data = await ytdl(url, {
+                'dump-single-json': true,
+                'flat-playlist': true, // 🔥 Быстрый режим
+                ...YTDL_COMMON
             });
         } catch (ytdlError) {
-            console.error(`[youtube-dl] Критическая ошибка для ${url}:`, ytdlError);
-            throw new Error('Не удалось получить метаданные. Ссылка может быть недействительной или трек недоступен.');
+            console.error(`[youtube-dl] Ошибка для ${url}:`, ytdlError.stderr || ytdlError.message);
+            throw new Error('Не удалось получить метаданные. Проверьте ссылку.');
         }
-
-        if (data.entries && data.entries.length > 0) {
+        
+        // ===== ЕСЛИ ЭТО ПЛЕЙЛИСТ =====
+        if (data.entries && data.entries.length > 1) {
             await ctx.deleteMessage(loadingMessage.message_id).catch(() => {});
             
             const playlistId = `pl_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
@@ -681,57 +686,29 @@ async function processUrlInBackground(ctx, url) {
             });
             
             const message = `🎶 В плейлисте <b>"${escapeHtml(data.title)}"</b> найдено <b>${data.entries.length}</b> треков.\n\nЧто делаем?`;
-            await ctx.reply(message, { 
-                parse_mode: 'HTML', 
-                ...generateInitialPlaylistMenu(playlistId, data.entries.length) 
+            await ctx.reply(message, {
+                parse_mode: 'HTML',
+                ...generateInitialPlaylistMenu(playlistId, data.entries.length)
             });
             
+            // ===== ЕСЛИ ЭТО ОДИНОЧНЫЙ ТРЕК =====
         } else {
-            const user = await getUser(ctx.from.id);
-            if ((user.downloads_today || 0) >= (user.premium_limit || 0)) {
-                const bonusAvailable = Boolean(CHANNEL_USERNAME && !user.subscribed_bonus_used);
-                const cleanUsername = CHANNEL_USERNAME?.replace('@', '');
-                const bonusText = bonusAvailable 
-                    ? `\n\n🎁 Доступен бонус! Подпишись на <a href="https://t.me/${cleanUsername}">@${cleanUsername}</a> и получи <b>7 дней тарифа Plus</b>.` 
-                    : '';
-                
-                const extra = { parse_mode: 'HTML', disable_web_page_preview: true };
-                if (bonusAvailable) {
-                    extra.reply_markup = { 
-                        inline_keyboard: [[ { text: '✅ Я подписался, забрать бонус', callback_data: 'check_subscription' } ]] 
-                    };
-                }
-                
-                await ctx.telegram.editMessageText(
-                    ctx.chat.id, 
-                    loadingMessage.message_id, 
-                    undefined, 
-                    `${T('limitReached')}${bonusText}`, 
-                    extra
-                );
-                return;
-            }
+            // 🔥 ВАЖНО: Удаляем сообщение "Анализирую..." сразу
+            await ctx.deleteMessage(loadingMessage.message_id).catch(() => {});
             
-            await ctx.telegram.editMessageText(
-                ctx.chat.id, 
-                loadingMessage.message_id, 
-                undefined, 
-                '✅ Распознал трек, ставлю в очередь...'
-            );
-            
-            setTimeout(() => ctx.deleteMessage(loadingMessage.message_id).catch(() => {}), 3000);
-            
-            // 🔥 ИСПОЛЬЗУЕМ НОВУЮ СИСТЕМУ
-            soundcloudEnqueue(ctx, ctx.from.id, data.webpage_url || url);
+            // 🔥 ПЕРЕДАЁМ УПРАВЛЕНИЕ downloadManager (он сам всё сделает)
+            soundcloudEnqueue(ctx, ctx.from.id, url);
         }
     } catch (error) {
-        console.error('Ошибка при фоновой обработке URL:', error.message);
-        const userMessage = '❌ Не удалось обработать ссылку. Убедитесь, что она корректна и контент доступен.';
+        console.error('[processUrlInBackground] Ошибка:', error.message);
+        
+        const userMessage = '❌ Не удалось обработать ссылку. Убедитесь, что она корректна и доступна.';
+        
         if (loadingMessage) {
             await ctx.telegram.editMessageText(
-                ctx.chat.id, 
-                loadingMessage.message_id, 
-                undefined, 
+                ctx.chat.id,
+                loadingMessage.message_id,
+                undefined,
                 userMessage
             ).catch(() => {});
         } else {
@@ -741,23 +718,24 @@ async function processUrlInBackground(ctx, url) {
 }
 
 async function handleSoundCloudUrl(ctx, url) {
+    // Просто запускаем фоновую обработку (не ждём результата)
     processUrlInBackground(ctx, url);
 }
 
-// ========================= TEXT HANDLER =========================
+// ========================= TEXT HANDLER (БЕЗ ИЗМЕНЕНИЙ) =========================
 
 bot.on('text', async (ctx) => {
     if (isShuttingDown()) {
-        console.log('[Shutdown] Отклонен новый запрос, так как идет завершение работы.');
+        console.log('[Shutdown] Отклонен новый запрос.');
         return;
     }
     
     if (isMaintenanceMode() && ctx.from.id !== ADMIN_ID) {
-        return await ctx.reply('⏳ Бот на плановом обслуживании. Новые запросы временно не принимаются. Пожалуйста, попробуйте через 5-10 минут.');
+        return await ctx.reply('⏳ Бот на обслуживании. Попробуйте через 5-10 минут.');
     }
     
     if (ctx.chat.type !== 'private') {
-        console.log(`[Ignore] Сообщение из не-приватного чата (${ctx.chat.type}) было проигнорировано.`);
+        console.log(`[Ignore] Сообщение из не-приватного чата.`);
         return;
     }
     
@@ -771,35 +749,16 @@ bot.on('text', async (ctx) => {
     }
     
     const url = urlMatch[0];
-
+    
     if (url.includes('soundcloud.com')) {
-        const user = await getUser(ctx.from.id);
-        if ((user.downloads_today || 0) >= (user.premium_limit || 0)) {
-            const bonusAvailable = Boolean(CHANNEL_USERNAME && !user.subscribed_bonus_used);
-            const cleanUsername = CHANNEL_USERNAME?.replace('@', '');
-            const bonusText = bonusAvailable
-                ? `\n\n🎁 Доступен бонус! Подпишись на <a href="https://t.me/${cleanUsername}">@${cleanUsername}</a> и получи <b>7 дней тарифа Plus</b>.`
-                : '';
-
-            const extra = { parse_mode: 'HTML', disable_web_page_preview: true };
-            if (bonusAvailable) {
-                extra.reply_markup = {
-                    inline_keyboard: [[ { text: '✅ Я подписался, забрать бонус', callback_data: 'check_subscription' } ]]
-                };
-            }
-
-            await ctx.reply(`${T('limitReached')}${bonusText}`, extra);
-            return;
-        }
-
+        // 🔥 НЕ проверяем лимит здесь (это делает downloadManager)
         handleSoundCloudUrl(ctx, url);
     } else if (url.includes('open.spotify.com')) {
-        await ctx.reply('🛠 К сожалению, скачивание из Spotify временно на техническом обслуживании. Мы работаем над этим!');
+        await ctx.reply('🛠 Скачивание из Spotify временно недоступно.');
     } else {
-        await ctx.reply('Я умею скачивать треки из SoundCloud. Поддержка других платформ в разработке!');
+        await ctx.reply('Я умею скачивать треки из SoundCloud.');
     }
 });
-
 // ========================= EXPORTS =========================
 
 export default bot;
