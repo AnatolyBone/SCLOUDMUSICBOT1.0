@@ -1,10 +1,10 @@
 // ======================= ОПТИМИЗИРОВАННАЯ ВЕРСИЯ BOT.JS =======================
 
-// ======================= ОПТИМИЗИРОВАННАЯ ВЕРСИЯ BOT.JS =======================
+// bot.js (НАЧАЛО ФАЙЛА)
 
 import { Telegraf, Markup, TelegramError } from 'telegraf';
 import { HttpsProxyAgent } from 'https-proxy-agent';
-import scdl from 'soundcloud-downloader'; // 🔥 ДОБАВЛЕНО
+import SCDL from 'soundcloud-downloader'; // 🔥 ИЗМЕНЕНО
 import { ADMIN_ID, BOT_TOKEN, WEBHOOK_URL, CHANNEL_USERNAME, STORAGE_CHANNEL_ID, PROXY_URL } from './config.js';
 import { 
     updateUserField, getUser, createUser, setPremium, getAllUsers, 
@@ -19,6 +19,18 @@ import { spotifyEnqueue } from './services/spotifyManager.js';
 import { downloadQueue, enqueue as soundcloudEnqueue } from './services/downloadManager.js';
 import { handleReferralCommand, processNewUserReferral } from './services/referralManager.js';
 import { isShuttingDown, isMaintenanceMode, setMaintenanceMode } from './services/appState.js';
+
+// 🔥 Инициализация SCDL-клиента
+let scdl = null;
+(async () => {
+  try {
+    scdl = await SCDL.create();
+    console.log('✅ [Bot/SCDL] Клиент инициализирован');
+  } catch (e) {
+    console.error('❌ [Bot/SCDL] Ошибка инициализации:', e.message);
+  }
+})();
+
 
 function escapeHtml(text) {
     if (typeof text !== 'string') return '';
@@ -645,41 +657,43 @@ bot.action(/pl_cancel:(.+)/, async (ctx) => {
 // bot.js
 
 // ========================= URL HANDLER (МОДЕРНИЗИРОВАННАЯ ВЕРСИЯ) =========================
-// bot.js (processUrlInBackground)
-
 async function processUrlInBackground(ctx, url) {
-    let loadingMessage;
-    try {
-        loadingMessage = await ctx.reply('🔍 Анализирую ссылку...');
-        
-        let data;
+        let loadingMessage;
         try {
-            // 🔥 ПРАВИЛЬНЫЙ API
-            if (url.includes('/sets/')) {
-                // Это плейлист
-                const playlistInfo = await scdl.getSetInfo(url);
-                
-                data = {
-                    title: playlistInfo.title,
-                    entries: playlistInfo.tracks.map(track => ({
-                        title: track.title,
-                        url: track.permalink_url,
-                        webpage_url: track.permalink_url,
-                        id: track.id
-                    }))
-                };
-            } else {
-                // Это одиночный трек
-                const trackInfo = await scdl.getInfo(url);
-                
-                data = {
-                    title: trackInfo.title,
-                    webpage_url: trackInfo.permalink_url,
-                    entries: null
-                };
+            loadingMessage = await ctx.reply('🔍 Анализирую ссылку...');
+            
+            // Ждём инициализации
+            if (!scdl) {
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                if (!scdl) scdl = await SCDL.create();
             }
-        } catch (scdlError) {
-            console.error(`[scdl] Ошибка для ${url}:`, scdlError.message);
+            
+            let data;
+            try {
+                // 🔥 ПРАВИЛЬНЫЙ API
+                if (url.includes('/sets/')) {
+                    const playlistInfo = await scdl.getSetInfo(url);
+                    
+                    data = {
+                        title: playlistInfo.title,
+                        entries: playlistInfo.tracks.map(track => ({
+                            title: track.title,
+                            url: track.permalink_url,
+                            webpage_url: track.permalink_url,
+                            id: track.id
+                        }))
+                    };
+                } else {
+                    const trackInfo = await scdl.getInfo(url);
+                    
+                    data = {
+                        title: trackInfo.title,
+                        webpage_url: trackInfo.permalink_url,
+                        entries: null
+                    };
+                }
+            } catch (scdlError) {
+            console.error(`[scdl] Ошибка:`, scdlError.message);
             throw new Error('Не удалось получить метаданные. Проверьте ссылку.');
         }
         
@@ -695,7 +709,7 @@ async function processUrlInBackground(ctx, url) {
                 originalUrl: url,
                 selected: new Set(),
                 currentPage: 0,
-                fullTracks: true // 🔥 Уже есть полная информация!
+                fullTracks: true // 🔥 Данные уже полные!
             });
             
             const message = `🎶 В плейлисте <b>"${escapeHtml(data.title)}"</b> найдено <b>${data.entries.length}</b> треков.\n\nЧто делаем?`;
@@ -706,30 +720,32 @@ async function processUrlInBackground(ctx, url) {
             
             // ===== ЕСЛИ ЭТО ОДИНОЧНЫЙ ТРЕК =====
         } else {
-            // Удаляем сообщение "Анализирую..."
             await ctx.deleteMessage(loadingMessage.message_id).catch(() => {});
             
-            // 🔥 ПЕРЕДАЁМ УПРАВЛЕНИЕ downloadManager
-            // Он сам всё сделает: проверит кеш, скачает, отправит
+            // 🔥 ПЕРЕДАЁМ В downloadManager
             soundcloudEnqueue(ctx, ctx.from.id, url);
         }
-    } catch (error) {
-        console.error('[processUrlInBackground] Ошибка:', error.message);
-        
-        const userMessage = '❌ Не удалось обработать ссылку. Убедитесь, что она корректна и доступна.';
-        
-        if (loadingMessage) {
-            await ctx.telegram.editMessageText(
-                ctx.chat.id,
-                loadingMessage.message_id,
-                undefined,
-                userMessage
-            ).catch(() => {});
-        } else {
-            await ctx.reply(userMessage);
+        } catch (error) {
+            console.error('[processUrlInBackground] Ошибка:', error.message);
+            
+            const userMessage = '❌ Не удалось обработать ссылку. Убедитесь, что она корректна и доступна.';
+            
+            if (loadingMessage) {
+                await ctx.telegram.editMessageText(
+                    ctx.chat.id,
+                    loadingMessage.message_id,
+                    undefined,
+                    userMessage
+                ).catch(() => {});
+            } else {
+                await ctx.reply(userMessage);
+            }
         }
-    }
-}
+        }
+        
+        async function handleSoundCloudUrl(ctx, url) {
+            processUrlInBackground(ctx, url);
+        }
 
 async function handleSoundCloudUrl(ctx, url) {
     // Просто запускаем фоновую обработку
