@@ -21,10 +21,19 @@ const TRACKS_PER_PAGE = 5;
 
 function getYoutubeDl() {
     const options = {};
-    if (PROXY_URL) options.proxy = PROXY_URL;
-    return (url, flags) => execYoutubeDl(url, flags, options);
+    if (PROXY_URL) {
+        options.proxy = PROXY_URL;
+    }
+    
+    // Флаги, которые будут добавляться к КАЖДОМУ вызову youtube-dl из этого файла
+    const defaultFlags = {
+        'extractor-args': 'soundcloud:player_client_id=CLIENT_ID',
+        'no-warnings': true
+    };
+    
+    // Возвращаем функцию, которая объединяет дефолтные флаги с теми, что передаются при вызове
+    return (url, flags) => execYoutubeDl(url, { ...defaultFlags, ...flags }, options);
 }
-
 /**
  * Асинхронно добавляет задачу в очередь, не блокируя основной поток.
  * Это позволяет боту мгновенно отвечать пользователю, а скачивание начинается в фоне.
