@@ -64,12 +64,12 @@ const app = express();
 
 // Храним временные файлы в /tmp (на Render быстрее)
 const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
+  destination: function(req, file, cb) {
     const dest = path.join(os.tmpdir(), 'uploads');
     fs.mkdirSync(dest, { recursive: true });
     cb(null, dest);
   },
-  filename: function (req, file, cb) {
+  filename: function(req, file, cb) {
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
     cb(null, file.fieldname + '-' + uniqueSuffix + path.extname(file.originalname));
   }
@@ -79,7 +79,13 @@ const upload = multer({ storage, limits: { fileSize: 49 * 1024 * 1024 } });
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// index.js -> startApp()
+console.log(`
+🚀 Запуск в режиме ${process.env.NODE_ENV || 'development'}
+📡 Webhook: ${WEBHOOK_URL}${WEBHOOK_PATH}
+🔐 Redis: ${process.env.REDIS_URL ? '✅ настроен' : '⚠️ не настроен'}
+📦 Supabase: ${process.env.SUPABASE_URL ? '✅ настроен' : '⚠️ не настроен'}
+🎁 Бонусы за подписку: ${process.env.CHANNEL_USERNAME ? '✅ доступны' : '⚠️ не настроены'}
+`);
 
 async function startApp() {
   setMaintenanceMode(false);
