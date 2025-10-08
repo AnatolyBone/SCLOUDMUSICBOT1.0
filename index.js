@@ -58,18 +58,18 @@ import {
   WEBHOOK_PATH, STORAGE_CHANNEL_ID, BROADCAST_STORAGE_ID
 } from './config.js';
 import { loadTexts, setText, getEditableTexts } from './config/texts.js';
-import { downloadQueue } from './services/downloadManager.js';
+import { downloadQueue, initializeDownloadManager } from './services/downloadManager.js';
 
 const app = express();
 
 // Храним временные файлы в /tmp (на Render быстрее)
 const storage = multer.diskStorage({
-  destination: function(req, file, cb) {
+  destination: function (req, file, cb) {
     const dest = path.join(os.tmpdir(), 'uploads');
     fs.mkdirSync(dest, { recursive: true });
     cb(null, dest);
   },
-  filename: function(req, file, cb) {
+  filename: function (req, file, cb) {
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
     cb(null, file.fieldname + '-' + uniqueSuffix + path.extname(file.originalname));
   }
@@ -79,34 +79,32 @@ const upload = multer({ storage, limits: { fileSize: 49 * 1024 * 1024 } });
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-console.log(`
-🚀 Запуск в режиме ${process.env.NODE_ENV || 'development'}
-📡 Webhook: ${WEBHOOK_URL}${WEBHOOK_PATH}
-🔐 Redis: ${process.env.REDIS_URL ? '✅ настроен' : '⚠️ не настроен'}
-📦 Supabase: ${process.env.SUPABASE_URL ? '✅ настроен' : '⚠️ не настроен'}
-🎁 Бонусы за подписку: ${process.env.CHANNEL_USERNAME ? '✅ доступны' : '⚠️ не настроены'}
-`);
+// index.js -> startApp()
 
 async function startApp() {
   setMaintenanceMode(false);
   console.log('[App] Запуск приложения...');
   const forcePolling = process.env.FORCE_POLLING === '1';
   
+  setMaintenanceMode(false);
+  console.log('[App] Запуск приложения...');
   try {
-    // Запускаем сервер и настраиваем Express СРАЗУ
+    // Запускаем сервер и настраиваем Express СРАЗУ, чтобы Render.com определил порт
     const server = app.listen(PORT, () => console.log(`✅ [App] Сервер запущен на порту ${PORT}.`));
     setupExpress();
     
     // Остальная инициализация
     await loadTexts(true);
     await redisService.connect();
-    await loadSettings();
+await loadSettings();
+    
+    initializeDownloadManager(bot);
     
     let lastUpdateTs = Date.now();
     bot.use((ctx, next) => { lastUpdateTs = Date.now(); return next(); });
     
-    // ✅ Очередь больше не требует ручного запуска.
-    // Строки `initializeDownloadManager` и `downloadQueue.start()` удалены.
+    downloadQueue.start();
+    console.log('[App] Очередь скачивания принудительно запущена.');
     
     let EXPECTED_WEBHOOK = null;
     
@@ -115,24 +113,29 @@ async function startApp() {
       const fullWebhookUrl = fullBase + WEBHOOK_PATH;
       const allowedUpdates = ['message', 'callback_query', 'inline_query'];
       
+      // Retry-логика для вебхука
       for (let i = 0; i < 3; i++) {
         try {
           console.log(`[App] Попытка ${i + 1}/3: устанавливаю вебхук...`);
-          await bot.telegram.setWebhook(fullWebhookUrl, { drop_pending_updates: true, allowed_updates: allowedUpdates });
+          await bot.telegram.setWebhook(fullWebhookUrl, {
+            drop_pending_updates: true,
+            allowed_updates: allowedUpdates
+          });
           console.log('[App] ✅ Вебхук успешно настроен.');
-          break;
+          break; // Успех, выходим из цикла
         } catch (e) {
           console.error(`[App] ❌ Ошибка установки вебхука (попытка ${i + 1}):`, e.message);
           if (i < 2) {
-            await new Promise(r => setTimeout(r, 5000));
+            await new Promise(r => setTimeout(r, 5000)); // Ждём 5 секунд
           } else {
-            throw new Error('Не удалось установить вебхук после 3 попыток.');
+            throw new Error('Не удалось установить вебхук после 3 попыток.'); // Все попытки провалились
           }
         }
       }
       
       EXPECTED_WEBHOOK = fullWebhookUrl;
       
+      // Логируем состояние вебхука
       try {
         const info = await bot.telegram.getWebhookInfo();
         console.log('[WebhookInfo]', JSON.stringify(info, null, 2));
@@ -140,6 +143,7 @@ async function startApp() {
         console.warn('[WebhookInfo] Ошибка получения информации:', e.message);
       }
       
+      // Маршрут вебхука
       app.post(
         WEBHOOK_PATH,
         express.json({ limit: '1mb' }),
@@ -159,16 +163,80 @@ async function startApp() {
       );
       
     } else {
+      // Режим long-polling (для разработки)
       console.log('[App] Запуск бота в режиме long-polling...');
       await bot.telegram.deleteWebhook({ drop_pending_updates: true });
-      bot.launch({ allowedUpdates: ['message', 'callback_query', 'inline_query'] });
+      bot.launch({
+        allowedUpdates: ['message', 'callback_query', 'inline_query']
+      });
     }
+    
+    // Диагностический роут для просмотра состояния вебхука
+    app.get('/debug/webhook', async (req, res) => {
+      try {
+        const info = await bot.telegram.getWebhookInfo();
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        res.end(JSON.stringify(info, null, 2));
+      } catch (e) {
+        res.status(500).send(e.message);
+      }
+    });
     
     // Инициализируем воркеры и фоновые задачи
     initializeWorkers(server, bot);
     
-  } catch (error) {
-    console.error('[App] Критическая ошибка при запуске:', error);
+    console.log('[App] Настройка фоновых задач...');
+    setInterval(() => {
+      checkAndSendExpirationNotifications(bot).catch(e => {
+        console.error('[Cron] Ошибка дневного нотификатора:', e.message);
+      });
+    }, 60000);
+    
+    setInterval(() => {
+      notifyExpiringTodayHourly(bot).catch(e => {
+        console.error('[Cron] Ошибка почасового нотификатора:', e.message);
+      });
+    }, 3600000);
+    
+    console.log('[App] Нотификаторы истечения подписок запущены.');
+    
+    setInterval(async () => {
+      try { await resetDailyStats(); } catch (e) { console.error('[Cron] resetDailyStats error:', e.message); }
+    }, 24 * 3600 * 1000);
+    
+    setInterval(() => console.log(`[Monitor] Очередь: ${downloadQueue.size} в ожидании, ${downloadQueue.pending} в работе.`), 60000);
+    
+    // Watchdog вебхука
+    if (EXPECTED_WEBHOOK) {
+      setInterval(async () => {
+        try {
+          const info = await bot.telegram.getWebhookInfo();
+          const hasError = Boolean(info.last_error_date);
+          const urlMismatch = info.url !== EXPECTED_WEBHOOK;
+          if (hasError || urlMismatch) {
+            console.warn('[WebhookWatch] Проблема с вебхуком:', {
+              currentUrl: info.url,
+              last_error_message: info.last_error_message,
+              last_error_date: info.last_error_date
+            });
+            await bot.telegram.setWebhook(EXPECTED_WEBHOOK);
+            console.log('[WebhookWatch] Вебхук переустановлен.');
+          }
+        } catch (e) {
+          console.error('[WebhookWatch] Ошибка проверки вебхука:', e.message);
+        }
+      }, 10 * 60 * 1000);
+      
+      setInterval(async () => {
+        if (Date.now() - lastUpdateTs > 15 * 60 * 1000) {
+          console.warn('[WebhookWatch] Давно не было апдейтов, переустанавливаю вебхук...');
+          try { await bot.telegram.setWebhook(EXPECTED_WEBHOOK); } catch (e) {}
+          lastUpdateTs = Date.now();
+        }
+      }, 5 * 60 * 1000);
+    }
+  } catch (err) {
+    console.error('🔴 Критическая ошибка при запуске:', err);
     process.exit(1);
   }
 }
