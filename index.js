@@ -58,7 +58,7 @@ import {
   WEBHOOK_PATH, STORAGE_CHANNEL_ID, BROADCAST_STORAGE_ID
 } from './config.js';
 import { loadTexts, setText, getEditableTexts } from './config/texts.js';
-import { downloadQueue, initializeDownloadManager } from './services/downloadManager.js';
+import { downloadQueue } from './services/downloadManager.js';
 
 const app = express();
 
@@ -86,8 +86,6 @@ async function startApp() {
   console.log('[App] Запуск приложения...');
   const forcePolling = process.env.FORCE_POLLING === '1';
   
-  setMaintenanceMode(false);
-  console.log('[App] Запуск приложения...');
   try {
     // Запускаем сервер и настраиваем Express СРАЗУ, чтобы Render.com определил порт
     const server = app.listen(PORT, () => console.log(`✅ [App] Сервер запущен на порту ${PORT}.`));
@@ -96,13 +94,15 @@ async function startApp() {
     // Остальная инициализация
     await loadTexts(true);
     await redisService.connect();
-await loadSettings();
+    await loadSettings();
     
-    initializeDownloadManager(bot);
+    // ❌ УДАЛЕНА ЭТА СТРОКА:
+    // initializeDownloadManager(bot);
     
     let lastUpdateTs = Date.now();
     bot.use((ctx, next) => { lastUpdateTs = Date.now(); return next(); });
     
+    // ✅ Очередь автоматически инициализируется при импорте downloadManager.js
     downloadQueue.start();
     console.log('[App] Очередь скачивания принудительно запущена.');
     
@@ -122,13 +122,13 @@ await loadSettings();
             allowed_updates: allowedUpdates
           });
           console.log('[App] ✅ Вебхук успешно настроен.');
-          break; // Успех, выходим из цикла
+          break;
         } catch (e) {
           console.error(`[App] ❌ Ошибка установки вебхука (попытка ${i + 1}):`, e.message);
           if (i < 2) {
-            await new Promise(r => setTimeout(r, 5000)); // Ждём 5 секунд
+            await new Promise(r => setTimeout(r, 5000));
           } else {
-            throw new Error('Не удалось установить вебхук после 3 попыток.'); // Все попытки провалились
+            throw new Error('Не удалось установить вебхук после 3 попыток.');
           }
         }
       }
@@ -171,72 +171,8 @@ await loadSettings();
       });
     }
     
-    // Диагностический роут для просмотра состояния вебхука
-    app.get('/debug/webhook', async (req, res) => {
-      try {
-        const info = await bot.telegram.getWebhookInfo();
-        res.setHeader('Content-Type', 'application/json; charset=utf-8');
-        res.end(JSON.stringify(info, null, 2));
-      } catch (e) {
-        res.status(500).send(e.message);
-      }
-    });
-    
-    // Инициализируем воркеры и фоновые задачи
-    initializeWorkers(server, bot);
-    
-    console.log('[App] Настройка фоновых задач...');
-    setInterval(() => {
-      checkAndSendExpirationNotifications(bot).catch(e => {
-        console.error('[Cron] Ошибка дневного нотификатора:', e.message);
-      });
-    }, 60000);
-    
-    setInterval(() => {
-      notifyExpiringTodayHourly(bot).catch(e => {
-        console.error('[Cron] Ошибка почасового нотификатора:', e.message);
-      });
-    }, 3600000);
-    
-    console.log('[App] Нотификаторы истечения подписок запущены.');
-    
-    setInterval(async () => {
-      try { await resetDailyStats(); } catch (e) { console.error('[Cron] resetDailyStats error:', e.message); }
-    }, 24 * 3600 * 1000);
-    
-    setInterval(() => console.log(`[Monitor] Очередь: ${downloadQueue.size} в ожидании, ${downloadQueue.pending} в работе.`), 60000);
-    
-    // Watchdog вебхука
-    if (EXPECTED_WEBHOOK) {
-      setInterval(async () => {
-        try {
-          const info = await bot.telegram.getWebhookInfo();
-          const hasError = Boolean(info.last_error_date);
-          const urlMismatch = info.url !== EXPECTED_WEBHOOK;
-          if (hasError || urlMismatch) {
-            console.warn('[WebhookWatch] Проблема с вебхуком:', {
-              currentUrl: info.url,
-              last_error_message: info.last_error_message,
-              last_error_date: info.last_error_date
-            });
-            await bot.telegram.setWebhook(EXPECTED_WEBHOOK);
-            console.log('[WebhookWatch] Вебхук переустановлен.');
-          }
-        } catch (e) {
-          console.error('[WebhookWatch] Ошибка проверки вебхука:', e.message);
-        }
-      }, 10 * 60 * 1000);
-      
-      setInterval(async () => {
-        if (Date.now() - lastUpdateTs > 15 * 60 * 1000) {
-          console.warn('[WebhookWatch] Давно не было апдейтов, переустанавливаю вебхук...');
-          try { await bot.telegram.setWebhook(EXPECTED_WEBHOOK); } catch (e) {}
-          lastUpdateTs = Date.now();
-        }
-      }, 5 * 60 * 1000);
-    }
-  } catch (err) {
-    console.error('🔴 Критическая ошибка при запуске:', err);
+  } catch (error) {
+    console.error('[App] Критическая ошибка при запуске:', error);
     process.exit(1);
   }
 }
