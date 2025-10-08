@@ -338,6 +338,8 @@ startCacheCleanup();
 
 // services/downloadManager.js
 
+// services/downloadManager.js
+
 export async function trackDownloadProcessor(task) {
   let tempFilePath = null;
   let statusMessage = null;
@@ -345,73 +347,55 @@ export async function trackDownloadProcessor(task) {
   if (!userId || isNaN(userId)) { console.error('[Worker] Invalid userId:', task.userId); return; }
 
   try {
-    // 1. Проверка лимитов
+    // 1. Проверка лимитов и получение метаданных
     const usage = await getUserUsage(userId);
     if (!usage || usage.downloads_today >= usage.premium_limit) {
       await safeSendMessage(userId, T('limitReached'));
       return;
     }
 
-    // 2. Получение метаданных
     const ensured = await ensureTaskMetadata(task);
     const { metadata, cacheKey, url: ensuredUrl } = ensured;
     const { title, uploader, id: trackId, duration, thumbnail, ext, acodec } = metadata;
     const roundedDuration = duration ? Math.round(duration) : undefined;
-    
-    // 3. Проверка кэша
+
+    // 2. Проверка кэша
     let cached = await db.findCachedTrack(cacheKey) || await db.findCachedTrack(task.originalUrl || ensuredUrl);
     if (!cached && typeof db.findCachedTrackByMeta === 'function') {
       cached = await db.findCachedTrackByMeta({ title, artist: uploader, duration: roundedDuration });
     }
     if (cached?.fileId) {
       const performer = cached.artist || uploader || 'Unknown Artist';
-      await bot.telegram.sendAudio(userId, cached.fileId, { title: cached.trackName || title, performer: performer, duration: roundedDuration });
+      await bot.telegram.sendAudio(userId, cached.fileId, { title: cached.trackName || title, performer, duration: roundedDuration });
       await incrementDownload(userId, cached.trackName || title, cached.fileId, cacheKey);
       return;
     }
 
-    // --- ЕСЛИ В КЭШЕ НЕТ ---
-    statusMessage = await safeSendMessage(userId, `⏳ Готовлю трек к отправке: "${title}"`);
+    // --- ЕСЛИ В КЭШЕ НЕТ, НАЧИНАЕМ СКАЧИВАНИЕ ---
+    statusMessage = await safeSendMessage(userId, `⏳ Начинаю скачивание: "${title}"`);
 
-    // === 4. ✅ БЫСТРЫЙ СПОСОБ: ОТПРАВКА ПО ССЫЛКЕ ===
-    try {
-      console.log(`[Worker/URL] Попытка отправки по прямой ссылке для "${title}"...`);
-      let directUrl = await ytdl(ensuredUrl, { 'get-url': true, 'format': 'bestaudio', ...YTDL_COMMON });
-      if (Array.isArray(directUrl)) directUrl = directUrl[0];
+    const sizeCheck = await checkFileSize(ensuredUrl);
+    if (!sizeCheck.ok && sizeCheck.reason === 'FILE_TOO_LARGE') throw new Error('FILE_TOO_LARGE');
 
-      if (!directUrl || typeof directUrl !== 'string' || !isSafeUrl(directUrl)) {
-        throw new Error('Не удалось получить валидную прямую ссылку.');
-      }
-
-      const safeFilename = `${sanitizeFilename(title)}.mp3`;
-      const sentMsg = await bot.telegram.sendAudio(
-        userId,
-        { url: directUrl, filename: safeFilename },
-        { title, performer: uploader, duration: roundedDuration, thumb: { url: thumbnail } }
-      );
-
-      if (statusMessage) await bot.telegram.deleteMessage(userId, statusMessage.message_id).catch(() => {});
-      
-      if (sentMsg?.audio?.file_id) {
-        const fileId = sentMsg.audio.file_id;
-        await db.cacheTrack({ url: cacheKey, fileId, title, artist: uploader, duration: roundedDuration, thumbnail });
-        await incrementDownload(userId, title, fileId, cacheKey);
-        console.log(`✅ [Worker/URL] Трек "${title}" успешно отправлен по ссылке и закэширован.`);
-      }
-      return; // Успех, выходим
-      
-    } catch (urlError) {
-      console.warn(`[Worker/URL] ⚠️ Быстрый способ не сработал для "${title}", переключаюсь на скачивание...`);
-      if (statusMessage) await bot.telegram.editMessageText(userId, statusMessage.message_id, undefined, `⏳ Возникла проблема, пробую другой способ...`).catch(() => {});
-    }
-    
-    // === 5. ✅ FALLBACK: ТВОЙ СТАРЫЙ НАДЁЖНЫЙ СПОСОБ ===
     const tempFileName = `${trackId || 'track'}-${crypto.randomUUID()}.mp3`;
     tempFilePath = path.join(cacheDir, tempFileName);
-    const ytdlArgs = canCopyMp3(ext, acodec)
-      ? { output: tempFilePath, 'embed-thumbnail': true, 'add-metadata': true, ...YTDL_COMMON }
-      : { output: tempFilePath, 'extract-audio': true, 'audio-format': 'mp3', 'embed-thumbnail': true, 'add-metadata': true, ...YTDL_COMMON };
+
+    // === ✅ ОПТИМИЗАЦИЯ YTDL ДЛЯ СКОРОСТИ ===
+    const ytdlArgs = {
+      output: tempFilePath,
+      'extract-audio': true,
+      'audio-format': 'mp3',
+      'audio-quality': 0, // 0 - лучшее, 9 - худшее
+      'embed-thumbnail': true,
+      'add-metadata': true,
+      // Указываем, что нужно предпочитать прогрессивные форматы, а не HLS/DASH
+      'format': 'bestaudio/best', 
+      ...YTDL_COMMON
+    };
+    
+    console.log(`[Worker] Начинаю скачивание "${title}" с оптимизированными параметрами...`);
     await ytdl(ensuredUrl, ytdlArgs);
+    // === КОНЕЦ ОПТИМИЗАЦИИ ===
 
     if (!fs.existsSync(tempFilePath) || (await fs.promises.stat(tempFilePath)).size > MAX_FILE_SIZE_BYTES) {
       throw new Error('FILE_TOO_LARGE');
@@ -432,10 +416,10 @@ export async function trackDownloadProcessor(task) {
         if (sentToStorage?.audio?.file_id) {
           finalFileId = sentToStorage.audio.file_id;
           await db.cacheTrack({ url: cacheKey, fileId: finalFileId, title, artist: uploader, duration: roundedDuration, thumbnail });
-          console.log(`✅ [Worker/Fallback] Трек "${title}" успешно закэширован.`);
+          console.log(`✅ [Cache] Трек "${title}" успешно закэширован.`);
         }
       } catch (storageErr) {
-        console.error(`❌ [Cache] Ошибка кэширования (fallback):`, storageErr.message);
+        console.error(`❌ [Cache] Ошибка кэширования:`, storageErr.message);
       }
     }
 
@@ -451,9 +435,8 @@ export async function trackDownloadProcessor(task) {
     if (finalFileId) {
       await incrementDownload(userId, title, finalFileId, cacheKey);
     }
-    
+
   } catch (err) {
-    // 7. Обработка ошибок
     const errorDetails = err?.stderr || err?.message || '';
     let userMsg = '❌ Не удалось обработать трек.';
     if (errorDetails.includes('FILE_TOO_LARGE')) userMsg = '❌ Файл слишком большой.';
@@ -468,7 +451,6 @@ export async function trackDownloadProcessor(task) {
       await safeSendMessage(userId, userMsg);
     }
   } finally {
-    // 8. Очистка
     if (tempFilePath) {
       fs.promises.unlink(tempFilePath).catch(() => {});
     }
