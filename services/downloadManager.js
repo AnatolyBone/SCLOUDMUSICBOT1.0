@@ -32,7 +32,7 @@ const MAX_FILE_SIZE_BYTES = 49 * 1024 * 1024;
 const FAKE_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
 // 🔥 Оптимизировано для Render.com (можно увеличить до 4 при наличии RAM)
-const MAX_CONCURRENT_DOWNLOADS = parseInt(process.env.MAX_CONCURRENT_DOWNLOADS, 10) || 3;
+const MAX_CONCURRENT_DOWNLOADS = parseInt(process.env.MAX_CONCURRENT_DOWNLOADS, 10) || 2;
 
 const FFMPEG_AVAILABLE =
   (!!ffmpegPath && fs.existsSync(ffmpegPath)) &&
@@ -40,7 +40,7 @@ const FFMPEG_AVAILABLE =
   process.env.FFMPEG_STATIC_SKIP_DOWNLOAD !== '1';
 
 // 🔥 Базовые аргументы youtube-dl (оптимизированы)
-const YTDL_COMMON = {
+export const YTDL_COMMON = {
   'user-agent': FAKE_USER_AGENT,
   proxy: PROXY_URL || undefined,
   retries: 2, // Уменьшено с 3
