@@ -524,6 +524,7 @@ export async function cacheTrack(trackData) {
 // ========================================
 // ПОИСК ПО ТОЧНОМУ URL
 // ========================================
+
 export async function findCachedTrack(trackUrl) {
   try {
     const { rows } = await query(
@@ -611,7 +612,14 @@ export async function getCachedTracksCount() {
     return 0;
   }
 }
-
+export async function deleteCachedTrack(url) {
+  try {
+    await query('DELETE FROM track_cache WHERE url = $1', [url]);
+    console.log(`[Cache] Удалён устаревший file_id для: ${url}`);
+  } catch (e) {
+    console.error('[DB Error] deleteCachedTrack:', e.message);
+  }
+}
 /* ========================= Логирование ========================= */
 
 export async function incrementDownloadsAndSaveTrack(userId, trackName, fileId, url) {
