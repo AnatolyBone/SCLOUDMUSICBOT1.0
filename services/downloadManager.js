@@ -1,4 +1,4 @@
-// services/downloadManager.js (ИСПРАВЛЕННАЯ ВЕРСИЯ С ПОТОКОВОЙ ПЕРЕДАЧЕЙ И ФИКСОМ TaskQueue)
+// services/downloadManager.js (ФИНАЛЬНО ИСПРАВЛЕННАЯ ВЕРСИЯ TaskQueue)
 
 // === ИМПОРТЫ: ОБНОВЛЕННЫЕ ===
 import { spawn } from 'child_process';
@@ -15,7 +15,6 @@ import fs from 'fs';
 import os from 'os';
 import { fileURLToPath } from 'url';
 import crypto from 'crypto';
-// import ytdl from 'youtube-dl-exec'; // УДАЛЕНО: Заменено на spawn
 
 import { bot } from '../bot.js';
 import { T } from '../config/texts.js';
@@ -31,7 +30,6 @@ const __dirname = path.dirname(path.dirname(__filename));
 // ВРЕМЕННЫЕ ФАЙЛЫ: Директория для кэширования метаданных
 const cacheDir = path.join(os.tmpdir(), 'cache');
 if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir, { recursive: true });
-
 
 const YTDL_TIMEOUT = 120;
 const MAX_FILE_SIZE_BYTES = 49 * 1024 * 1024; // 49 МБ (лимит Telegram)
@@ -60,7 +58,6 @@ function sanitizeFilename(title, artist = '') {
     return filename.trim().substring(0, 100);
 }
 
-
 /**
  * Централизованная функция для безопасной отправки сообщения пользователю.
  */
@@ -78,7 +75,6 @@ async function safeSendMessage(userId, text, extra = {}) {
     }
 }
 
-
 /**
  * Извлекает метаданные из объекта info.json
  */
@@ -92,7 +88,6 @@ function extractMetadataFromInfo(info) {
         id: info.id
     };
 }
-
 
 /**
  * Проверяет, что URL безопасен (нет SSRF)
@@ -109,10 +104,11 @@ function isSafeUrl(url) {
  * Воркер очереди, выполняющий загрузку и отправку трека.
  * Использует потоковую передачу для максимальной скорости.
  *
- * ПРИМЕЧАНИЕ: Функция теперь принимает один объект { task, ctx }
+ * ПРИМЕЧАНИЕ: Функция теперь принимает ОДИН объект задачи, как это принято в TaskQueue.
  */
-async function trackDownloadProcessor({ task, ctx }) { // <-- ИСПРАВЛЕНИЕ 1: Изменена сигнатура
-    const { userId, url, originalUrl, metadata, priority } = task;
+async function trackDownloadProcessor(taskData) { // <-- ИСПРАВЛЕНИЕ 1: Сигнатура теперь принимает ОДИН объект
+    // Деструктурируем данные, переданные в downloadQueue.add()
+    const { userId, url, originalUrl, metadata, priority, ctx } = taskData;
 
     // 1. ПРОВЕРКА ЛИМИТОВ
     // ... (Ваша логика проверки лимитов остается здесь, если она была) ...
@@ -170,9 +166,6 @@ async function trackDownloadProcessor({ task, ctx }) { // <-- ИСПРАВЛЕН
     ytdlArgs.push('--socket-timeout', YTDL_TIMEOUT);
 
     // 4. ЗАПУСК ПРОЦЕССА И НАСТРОЙКА ПОТОКОВ
-    // ВАЖНО: убедитесь, что в окружении есть yt-dlp. 
-    // Если он установлен как npm-зависимость, используйте path.join(__dirname, 'node_modules', 'youtube-dl-exec', 'yt-dlp.exe') 
-    // или укажите полный путь, если Render требует. Для yt-dlp в PATH просто используем 'yt-dlp'.
     const downloader = spawn('yt-dlp', ytdlArgs); 
     const stream = new PassThrough();
 
@@ -259,18 +252,18 @@ async function trackDownloadProcessor({ task, ctx }) { // <-- ИСПРАВЛЕН
 
 /**
  * Глобальный инстанс очереди загрузок с приоритетами.
+ * 🚨 КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Конструктор TaskQueue вызывается с ОДНИМ объектом настроек.
  */
-export const downloadQueue = new TaskQueue( // <-- ИСПРАВЛЕННОЕ МЕСТО (строка ~260)
-    trackDownloadProcessor, // <-- Функция-обработчик передается как первый аргумент
-    {
-        concurrency: MAX_CONCURRENT_DOWNLOADS,
-        autoStart: true,
-        name: 'DownloadQueue'
-    }
-);
+export const downloadQueue = new TaskQueue({ // <-- ИСПРАВЛЕНИЕ 2: Оборачиваем аргументы в один объект
+    taskProcessor: trackDownloadProcessor, // <-- Передаем функцию как значение свойства
+    concurrency: MAX_CONCURRENT_DOWNLOADS,
+    autoStart: true,
+    name: 'DownloadQueue'
+});
 
 /**
  * Добавляет задачу в очередь загрузок.
+ * 🚨 КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Передаем ОДИН объект в метод add().
  */
 export function enqueue(task, ctx, metadata) {
     if (!task || !metadata) {
@@ -281,11 +274,15 @@ export function enqueue(task, ctx, metadata) {
     // Нормализация приоритета: 1000 (Unlim), 100 (Pro), 30 (Plus), 5 (Free)
     const priority = task.priority || 5; 
     
-    // task.metadata и task.ctx используются для того, чтобы передать их в воркер
-    downloadQueue.add(
-        { task, ctx }, // <-- Передаем данные задачи одним объектом в воркер
-        { priority: priority }
-    );
+    // Формируем ОДИН объект задачи для TaskQueue.add()
+    downloadQueue.add({
+        userId: task.userId, // Предполагаем, что userId, url и т.д. в task
+        url: task.url,
+        originalUrl: task.originalUrl,
+        metadata: metadata, // metadata, переданная извне
+        priority: priority,
+        ctx: ctx // Контекст бота, который может понадобиться для ответов
+    });
     
     console.log(`[DownloadManager] Задача добавлена: ${task.url} (P: ${priority})`);
     return true;
@@ -303,11 +300,11 @@ export function initializeDownloadManager() {
     console.log(`[DownloadManager] FFMPEG доступен: ${FFMPEG_AVAILABLE ? '✅' : '❌'}`);
     console.log(`[DownloadManager] Максимум одновременных загрузок: ${MAX_CONCURRENT_DOWNLOADS}`);
     console.log(`[DownloadManager] Канал-хранилище: ${STORAGE_CHANNEL_ID ? '✅ настроен' : '⚠️ не настроен'}`);
-    // console.log(`[DownloadManager] Автоочистка кэша: ❌ отключена (нет больших локальных файлов)`);
 }
 
 // ========================= EXPORTS SUMMARY =========================
 // Основные экспорты:
+// - trackDownloadProcessor: воркер для обработки одной задачи (теперь не экспортируется, так как это внутренняя функция)
 // - downloadQueue: глобальная очередь с приоритетами
 // - enqueue: функция для добавления треков в очередь
 // - initializeDownloadManager: инициализация (вызывается из index.js)
