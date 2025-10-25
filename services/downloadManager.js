@@ -111,7 +111,7 @@ function isSafeUrl(url) {
  *
  * ПРИМЕЧАНИЕ: Функция теперь принимает один объект { task, ctx }
  */
-async function trackDownloadProcessor({ task, ctx }) { // <-- ИСПРАВЛЕНИЕ 1: Изменена сигнатура и убран export
+async function trackDownloadProcessor({ task, ctx }) { // <-- ИСПРАВЛЕНИЕ 1: Изменена сигнатура
     const { userId, url, originalUrl, metadata, priority } = task;
 
     // 1. ПРОВЕРКА ЛИМИТОВ
@@ -257,8 +257,8 @@ async function trackDownloadProcessor({ task, ctx }) { // <-- ИСПРАВЛЕН
 /**
  * Глобальный инстанс очереди загрузок с приоритетами.
  */
-export const downloadQueue = new TaskQueue( // <-- ИСПРАВЛЕНИЕ 2: Функция-обработчик теперь первый аргумент
-    trackDownloadProcessor,
+export const downloadQueue = new TaskQueue( // <-- ИСПРАВЛЕННОЕ МЕСТО (строка ~260)
+    trackDownloadProcessor, // <-- Функция-обработчик передается как первый аргумент
     {
         concurrency: MAX_CONCURRENT_DOWNLOADS,
         autoStart: true,
@@ -280,7 +280,7 @@ export function enqueue(task, ctx, metadata) {
     
     // task.metadata и task.ctx используются для того, чтобы передать их в воркер
     downloadQueue.add(
-        { task, ctx }, // <-- ИСПРАВЛЕНИЕ 3: Передаем данные задачи одним объектом
+        { task, ctx }, // <-- Передаем данные задачи одним объектом в воркер
         { priority: priority }
     );
     
