@@ -525,27 +525,34 @@ export async function cacheTrack(trackData) {
 // ПОИСК ПО ТОЧНОМУ URL
 // ========================================
 export async function findCachedTrack(trackUrl) {
-    try {
-        const { rows } = await query(
-            'SELECT file_id, title, artist, duration FROM track_cache WHERE url = $1 LIMIT 1',
-            [trackUrl]
-        );
-        
-        if (rows.length > 0) {
-            console.log(`[✓ Cache HIT by URL] ${rows[0].title}`);
-            return {
-                fileId: rows[0].file_id,
-                trackName: rows[0].title,
-                artist: rows[0].artist
-            };
-        }
-        
-        console.log(`[✗ Cache MISS by URL] ${trackUrl}`);
-        return null;
-    } catch (e) {
-        console.error('[DB Error] findCachedTrack:', e.message);
-        return null;
+  try {
+    const { rows } = await query(
+      `SELECT 
+        file_id, 
+        title, 
+        artist, 
+        duration 
+      FROM track_cache 
+      WHERE url = $1 
+      LIMIT 1`,
+      [trackUrl]
+    );
+    
+    if (rows.length > 0) {
+      console.log(`[✓ Cache HIT] ${rows[0].title} (по URL)`);
+      return {
+        fileId: rows[0].file_id,
+        trackName: rows[0].title,
+        artist: rows[0].artist,
+        duration: rows[0].duration
+      };
     }
+    
+    return null;
+  } catch (e) {
+    console.error('[DB Error] findCachedTrack:', e.message);
+    return null;
+  }
 }
 
 // ========================================
