@@ -362,29 +362,29 @@ export async function trackDownloadProcessor(task) {
     const roundedDuration = duration ? Math.round(duration) : undefined;
     
     // 4. Проверка кэша
-//let cached = await db.findCachedTrack(cacheKey) || await db.findCachedTrack(task.originalUrl || ensuredUrl);
-//if (!cached && typeof db.findCachedTrackByMeta === 'function') {
-//  cached = await db.findCachedTrackByMeta({ title, artist: uploader, duration: roundedDuration });
-//}
+let cached = await db.findCachedTrack(cacheKey) || await db.findCachedTrack(task.originalUrl || ensuredUrl);
+if (!cached && typeof db.findCachedTrackByMeta === 'function') {
+  cached = await db.findCachedTrackByMeta({ title, artist: uploader, duration: roundedDuration });
+}
 
-//if (cached?.fileId) {
-  //console.log(`[Worker/Cache] ХИТ! Отправляю "${cached.trackName || title}" из кэша.`);
+if (cached?.fileId) {
+  console.log(`[Worker/Cache] ХИТ! Отправляю "${cached.trackName || title}" из кэша.`);
   
   // ✅ ИСПРАВЛЕНИЕ: Используем 'artist' из кэша, если он есть
-//  const performer = cached.artist || uploader || 'Unknown Artist';
+  const performer = cached.artist || uploader || 'Unknown Artist';
   
-//  await bot.telegram.sendAudio(
-   // userId,
-//    cached.fileId,
-//    {
-//      title: cached.trackName || //title,
-//      performer: performer,
- //     duration: roundedDuration
- //   }
-//  );
-//  await incrementDownload(userId, cached.trackName || title, cached.fileId, cacheKey);
-//  return; // Выход, задача выполнена из кэша
-//}
+  await bot.telegram.sendAudio(
+    userId,
+    cached.fileId,
+    {
+      title: cached.trackName || title,
+      performer: performer,
+      duration: roundedDuration
+    }
+  );
+  await incrementDownload(userId, cached.trackName || title, cached.fileId, cacheKey);
+  return; // Выход, задача выполнена из кэша
+}
 
     // 5. Скачивание
     statusMessage = await safeSendMessage(userId, `⏳ Начинаю скачивание: "${title}"`);
@@ -598,34 +598,24 @@ const entries = isPlaylist ? info.entries : [info];
       }
 
       // --- Проверка кэша ---
-      // --- Проверка кэша (УЛУЧШЕННАЯ ЛОГИКА) ---
-let remaining = Math.max(0, (fullUser.premium_limit || 0) - (fullUser.downloads_today || 0));
-const tasksToDownload = [];
-const cachedToSend = [];
+      const keyPairs = tracksToProcess.map(t => ({ track: t, primary: t.cacheKey, legacy: t.originalUrl }));
+      const uniqueKeys = Array.from(new Set(keyPairs.flatMap(k => [k.primary, k.legacy].filter(Boolean))));
+      const cacheMap = typeof db.findCachedTracks === 'function' ? await db.findCachedTracks(uniqueKeys) : new Map();
+      
+      let remaining = Math.max(0, (fullUser.premium_limit || 0) - (fullUser.downloads_today || 0));
+      const tasksToDownload = [];
+      const cachedToSend = [];
 
-for (const track of tracksToProcess) {
-  if (remaining <= 0) break;
-  
-  const { cacheKey, originalUrl, metadata } = track;
-  const { title, uploader, duration } = metadata;
-  const roundedDuration = duration ? Math.round(duration) : undefined;
-  
-  // 1. Ищем по ключу или URL
-  let cached = await db.findCachedTrack(cacheKey) || await db.findCachedTrack(originalUrl);
-  
-  // 2. Если не нашли, ищем по метаданным (самая надежная проверка)
-  if (!cached && typeof db.findCachedTrackByMeta === 'function') {
-    cached = await db.findCachedTrackByMeta({ title, artist: uploader, duration: roundedDuration });
-  }
-  
-  if (cached) {
-    // ХИТ КЭША! Добавляем в список на быструю отправку
-    cachedToSend.push({ track, cached });
-  } else {
-    // ПРОМАХ КЭША! Добавляем в очередь на скачивание
-    tasksToDownload.push(track);
-  }
-}
+      for (const pair of keyPairs) {
+        if (remaining <= 0) break;
+        const cached = cacheMap.get(pair.primary) || cacheMap.get(pair.legacy);
+        if (cached) {
+          cachedToSend.push({ track: pair.track, cached });
+        } else {
+          tasksToDownload.push(pair.track);
+        }
+      }
+      
       // --- Отправка из кэша ---
       let sentFromCacheCount = 0;
       await pMap(cachedToSend, async ({ track, cached }) => {
