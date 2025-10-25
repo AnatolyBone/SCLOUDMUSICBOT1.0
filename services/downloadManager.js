@@ -526,41 +526,49 @@ export function enqueue(ctx, userId, url) {
       }
 
       // ========================================
-      // ✅ РАННЯЯ ПРОВЕРКА КЭША ПО URL
-      // ========================================
-      const quickCached = await db.findCachedTrack(url);
-      if (quickCached?.fileId) {
-        console.log(`[⚡ FAST CACHE HIT] Мгновенная отправка для URL: ${url}`);
-        
-        try {
-          await bot.telegram.sendAudio(
-            userId,
-            quickCached.fileId,
-            {
-              title: quickCached.trackName,
-              performer: quickCached.artist || 'Unknown Artist',
-              duration: quickCached.duration
-            }
-          );
-          
-          await incrementDownload(userId, quickCached.trackName, quickCached.fileId, url);
-          
-          const duration = (Date.now() - startTime) / 1000;
-          console.log(`[⚡ Cache] Трек отправлен за ${duration.toFixed(2)}с`);
-          return; // ← ВЫХОД! Не загружаем повторно
-          
-        } catch (sendErr) {
-          // Если file_id устарел — продолжаем обычную загрузку
-          if (sendErr?.description?.includes('FILE_REFERENCE_EXPIRED') || 
-              sendErr?.description?.includes('file_id')) {
-            console.warn('[Cache] file_id устарел, перезагружаю трек...');
-            // Удаляем устаревший кэш
-            await db.query('DELETE FROM track_cache WHERE url = $1', [url]);
-          } else {
-            throw sendErr; // Другие ошибки пробрасываем
-          }
-        }
+// ========================================
+// ✅ РАННЯЯ ПРОВЕРКА КЭША ПО URL
+// ========================================
+const quickCached = await db.findCachedTrack(url);
+if (quickCached?.fileId) {
+  console.log(`[⚡ FAST CACHE HIT] Мгновенная отправка: ${quickCached.trackName}`);
+  
+  try {
+    await bot.telegram.sendAudio(
+      userId,
+      quickCached.fileId,
+      {
+        title: quickCached.trackName,
+        performer: quickCached.artist || 'Unknown Artist',
+        duration: quickCached.duration
       }
+    );
+    
+    await incrementDownload(userId, quickCached.trackName, quickCached.fileId, url);
+    
+    const duration = (Date.now() - startTime) / 1000;
+    console.log(`[⚡ Cache] Трек отправлен за ${duration.toFixed(2)}с`);
+    return; // ← ВЫХОД!
+    
+  } catch (sendErr) {
+    // Если file_id устарел — продолжаем обычную загрузку
+    if (sendErr?.description?.includes('FILE_REFERENCE_EXPIRED') ||
+      sendErr?.description?.includes('file_id')) {
+      console.warn('[Cache] file_id устарел, перезагружаю трек...');
+      
+      // ✅ ИСПРАВЛЕНО: используем функцию из db.js
+      if (typeof db.deleteCachedTrack === 'function') {
+        await db.deleteCachedTrack(url);
+      } else if (typeof db.query === 'function') {
+        await db.query('DELETE FROM track_cache WHERE url = $1', [url]);
+      }
+      // Продолжаем выполнение (не делаем return)
+      
+    } else {
+      throw sendErr; // Другие ошибки пробрасываем
+    }
+  }
+}
 
       // --- Сброс дневного лимита если нужно ---
       await db.resetDailyLimitIfNeeded(userId);
