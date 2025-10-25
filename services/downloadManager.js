@@ -1,4 +1,4 @@
-// services/downloadManager.js (ИСПРАВЛЕННАЯ ВЕРСИЯ С ПОТОКОВОЙ ПЕРЕДАЧЕЙ)
+// services/downloadManager.js (ИСПРАВЛЕННАЯ ВЕРСИЯ С ПОТОКОВОЙ ПЕРЕДАЧЕЙ И ФИКСОМ TaskQueue)
 
 // === ИМПОРТЫ: ОБНОВЛЕННЫЕ ===
 import { spawn } from 'child_process';
@@ -19,7 +19,7 @@ import crypto from 'crypto';
 
 import { bot } from '../bot.js';
 import { T } from '../config/texts.js';
-import { TaskQueue } from '../lib/TaskQueue.js';
+import { TaskQueue } from '../lib/TaskQueue.js'; // <-- УБЕДИТЕСЬ, ЧТО ЭТОТ ФАЙЛ СУЩЕСТВУЕТ
 import * as db from '../db.js';
 import { getSetting } from './settingsManager.js';
 
@@ -170,7 +170,10 @@ async function trackDownloadProcessor({ task, ctx }) { // <-- ИСПРАВЛЕН
     ytdlArgs.push('--socket-timeout', YTDL_TIMEOUT);
 
     // 4. ЗАПУСК ПРОЦЕССА И НАСТРОЙКА ПОТОКОВ
-    const downloader = spawn('yt-dlp', ytdlArgs);
+    // ВАЖНО: убедитесь, что в окружении есть yt-dlp. 
+    // Если он установлен как npm-зависимость, используйте path.join(__dirname, 'node_modules', 'youtube-dl-exec', 'yt-dlp.exe') 
+    // или укажите полный путь, если Render требует. Для yt-dlp в PATH просто используем 'yt-dlp'.
+    const downloader = spawn('yt-dlp', ytdlArgs); 
     const stream = new PassThrough();
 
     // Соединение stdout yt-dlp с потоком-буфером для Telegram
@@ -204,7 +207,7 @@ async function trackDownloadProcessor({ task, ctx }) { // <-- ИСПРАВЛЕН
         };
         
         // Отправка аудио с метаданными
-        const message = await ctx.telegram.sendAudio(userId, file, {
+        const message = await bot.telegram.sendAudio(userId, file, {
             title: metadata.title,
             performer: metadata.uploader,
             duration: metadata.duration,
