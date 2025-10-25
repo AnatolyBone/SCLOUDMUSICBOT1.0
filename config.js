@@ -69,7 +69,7 @@ function parseChannelUsername(input) {
   
   // Telegram usernames должны быть 5-32 символа
   if (username.length < 5 || username.length > 32) {
-    console.warn(`⚠️  CHANNEL_URL имеет некорректную длину: ${username.length} символов`);
+    console.warn(`⚠️ CHANNEL_URL имеет некорректную длину: ${username.length} символов`);
     return '';
   }
   
@@ -171,7 +171,7 @@ function warnOptionalVars() {
   }
   
   if (warnings.length > 0) {
-    console.warn('\n⚠️  ПРЕДУПРЕЖДЕНИЯ О КОНФИГУРАЦИИ:\n');
+    console.warn('\n⚠️ ПРЕДУПРЕЖДЕНИЯ О КОНФИГУРАЦИИ:\n');
     warnings.forEach((warn, i) => console.warn(`   ${i + 1}. ${warn}`));
     console.warn('');
   }
@@ -315,9 +315,9 @@ if (isDev) {
 } else {
   console.log('\n🚀 Запуск в режиме production');
   console.log(`📡 Webhook: ${CONFIG.WEBHOOK_URL}${CONFIG.WEBHOOK_PATH}`);
-  console.log(`🔐 Redis: ${hasRedis() ? '✅ настроен' : '⚠️  не настроен'}`);
-  console.log(`📦 Supabase: ${hasSupabase() ? '✅ настроен' : '⚠️  не настроен'}`);
-  console.log(`🎁 Бонусы за подписку: ${hasChannelBonus() ? '✅ доступны' : '⚠️  недоступны'}`);
+  console.log(`🔐 Redis: ${hasRedis() ? '✅ настроен' : '⚠️ не настроен'}`);
+  console.log(`📦 Supabase: ${hasSupabase() ? '✅ настроен' : '⚠️ не настроен'}`);
+  console.log(`🎁 Бонусы за подписку: ${hasChannelBonus() ? '✅ доступны' : '⚠️ недоступны'}`);
   console.log('');
 }
 
