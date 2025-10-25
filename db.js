@@ -496,86 +496,105 @@ export async function searchTracksInCache(searchQuery, limit = 7) {
   }
 }
 
+// ========================================
+// СОХРАНЕНИЕ ТРЕКА В КЭШ
+// ========================================
 export async function cacheTrack(trackData) {
-  const { url, fileId, title, artist, duration, thumbnail } = trackData;
-  await query(
-    `INSERT INTO track_cache (url, file_id, title, artist, duration, thumbnail)
-     VALUES ($1, $2, $3, $4, $5, $6)
-     ON CONFLICT (url) DO UPDATE SET
-       file_id = EXCLUDED.file_id,
-       title = EXCLUDED.title,
-       artist = EXCLUDED.artist,
-       duration = EXCLUDED.duration,
-       thumbnail = EXCLUDED.thumbnail`,
-    [url, fileId, title, artist, duration, thumbnail]
-  );
-}
-
-export async function findCachedTrack(trackUrl) {
-  try {
-    const { rows } = await query('SELECT file_id, title FROM track_cache WHERE url = $1 LIMIT 1', [trackUrl]);
-    return rows.length ? { fileId: rows[0].file_id, trackName: rows[0].title } : null;
-  } catch (e) {
-    console.error('Критическая ошибка в findCachedTrack:', e.message);
-    return null;
-  }
-}
-
-// db.js
-
-// ЗАМЕНИ СТАРУЮ ВЕРСИЮ ЭТОЙ ФУНКЦИИ НА НОВУЮ НИЖЕ
-
-export async function findCachedTrackByMeta({ title, artist, duration }) {
+    const { url, fileId, title, artist, duration, thumbnail } = trackData;
+    
     try {
-        // Этот запрос ищет трек по названию (без учета регистра),
-        // по артисту (тоже без учета регистра),
-        // и по длительности в диапазоне ±2 секунды.
-        // Это самый надежный способ найти совпадение.
-        
-        const query = `
-      SELECT file_id as "fileId", track_name as "trackName", artist, url
-      FROM track_cache
-      WHERE 
-        track_name ILIKE $1 AND 
-        artist ILIKE $2 AND
-        duration BETWEEN $3 AND $4
-      LIMIT 1;
-    `;
-        
-        // Важно: передаем округленную длительность
-        const roundedDuration = duration ? Math.round(duration) : null;
-        
-        // Если по какой-то причине длительность не определилась, мы не будем по ней искать
-        if (!roundedDuration) {
-            return null;
-        }
-        
+        await query(
+            `INSERT INTO track_cache (url, file_id, title, artist, duration, thumbnail)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (url) DO UPDATE SET
+         file_id = EXCLUDED.file_id,
+         title = EXCLUDED.title,
+         artist = EXCLUDED.artist,
+         duration = EXCLUDED.duration,
+         thumbnail = EXCLUDED.thumbnail,
+         cached_at = NOW()`,
+            [url, fileId, title, artist, duration, thumbnail]
+        );
+        console.log(`[✓ Cache Saved] ${title} - ${artist}`);
+    } catch (e) {
+        console.error('[✗ Cache Save Error]', e.message);
+    }
+}
+
+// ========================================
+// ПОИСК ПО ТОЧНОМУ URL
+// ========================================
+export async function findCachedTrack(trackUrl) {
+    try {
         const { rows } = await query(
-            `
-      SELECT file_id as "fileId", track_name as "trackName", artist, url
-      FROM track_cache
-      WHERE 
-        track_name ILIKE $1 AND 
-        artist ILIKE $2 AND
-        duration BETWEEN $3 AND $4
-      LIMIT 1;
-      `,
-            [title, artist, roundedDuration - 2, roundedDuration + 2]
+            'SELECT file_id, title, artist, duration FROM track_cache WHERE url = $1 LIMIT 1',
+            [trackUrl]
         );
         
         if (rows.length > 0) {
-            console.log(`[Cache Hit] Найден трек по метаданным: ${title} - ${artist}`);
-            return rows[0];
+            console.log(`[✓ Cache HIT by URL] ${rows[0].title}`);
+            return {
+                fileId: rows[0].file_id,
+                trackName: rows[0].title,
+                artist: rows[0].artist
+            };
         }
         
+        console.log(`[✗ Cache MISS by URL] ${trackUrl}`);
         return null;
-        
     } catch (e) {
-        console.error('[DB] Ошибка в findCachedTrackByMeta:', e.message);
+        console.error('[DB Error] findCachedTrack:', e.message);
         return null;
     }
 }
 
+// ========================================
+// ПОИСК ПО МЕТАДАННЫМ (title, artist, duration)
+// ========================================
+export async function findCachedTrackByMeta({ title, artist, duration }) {
+    try {
+        // Проверяем наличие данных
+        if (!title || !artist || !duration) {
+            console.log('[⚠ Cache] Недостаточно метаданных для поиска');
+            return null;
+        }
+        
+        const roundedDuration = Math.round(duration);
+        
+        // ✅ ИСПРАВЛЕНО: sqlQuery вместо query
+        const sqlQuery = `
+      SELECT file_id, title, artist, url, duration
+      FROM track_cache
+      WHERE 
+        title ILIKE $1 AND 
+        artist ILIKE $2 AND
+        duration BETWEEN $3 AND $4
+      LIMIT 1
+    `;
+        
+        const { rows } = await query(
+            sqlQuery,
+            [title, artist, roundedDuration - 2, roundedDuration + 2]
+        );
+        
+        if (rows.length > 0) {
+            console.log(`[✓ Cache HIT by Meta] ${rows[0].title} - ${rows[0].artist}`);
+            return {
+                fileId: rows[0].file_id,
+                trackName: rows[0].title,
+                artist: rows[0].artist,
+                url: rows[0].url
+            };
+        }
+        
+        console.log(`[✗ Cache MISS] ${title} - ${artist} (${roundedDuration}s)`);
+        return null;
+        
+    } catch (e) {
+        console.error('[DB Error] findCachedTrackByMeta:', e.message);
+        return null;
+    }
+}
 export async function getCachedTracksCount() {
   try {
     const { rows } = await query('SELECT COUNT(*) FROM track_cache');
