@@ -1,4 +1,4 @@
-// services/downloadManager.js (ВЕРСИЯ С ПОТОКОВОЙ ПЕРЕДАЧЕЙ)
+// services/downloadManager.js (ИСПРАВЛЕННАЯ ВЕРСИЯ С ПОТОКОВОЙ ПЕРЕДАЧЕЙ)
 
 // === ИМПОРТЫ: ОБНОВЛЕННЫЕ ===
 import { spawn } from 'child_process';
@@ -108,8 +108,10 @@ function isSafeUrl(url) {
 /**
  * Воркер очереди, выполняющий загрузку и отправку трека.
  * Использует потоковую передачу для максимальной скорости.
+ *
+ * ПРИМЕЧАНИЕ: Функция теперь принимает один объект { task, ctx }
  */
-export async function trackDownloadProcessor(task, ctx) {
+async function trackDownloadProcessor({ task, ctx }) { // <-- ИСПРАВЛЕНИЕ 1: Изменена сигнатура и убран export
     const { userId, url, originalUrl, metadata, priority } = task;
 
     // 1. ПРОВЕРКА ЛИМИТОВ
@@ -255,11 +257,14 @@ export async function trackDownloadProcessor(task, ctx) {
 /**
  * Глобальный инстанс очереди загрузок с приоритетами.
  */
-export const downloadQueue = new TaskQueue({
-    concurrency: MAX_CONCURRENT_DOWNLOADS,
-    autoStart: true,
-    name: 'DownloadQueue'
-});
+export const downloadQueue = new TaskQueue( // <-- ИСПРАВЛЕНИЕ 2: Функция-обработчик теперь первый аргумент
+    trackDownloadProcessor,
+    {
+        concurrency: MAX_CONCURRENT_DOWNLOADS,
+        autoStart: true,
+        name: 'DownloadQueue'
+    }
+);
 
 /**
  * Добавляет задачу в очередь загрузок.
@@ -275,7 +280,7 @@ export function enqueue(task, ctx, metadata) {
     
     // task.metadata и task.ctx используются для того, чтобы передать их в воркер
     downloadQueue.add(
-        () => trackDownloadProcessor(task, ctx), 
+        { task, ctx }, // <-- ИСПРАВЛЕНИЕ 3: Передаем данные задачи одним объектом
         { priority: priority }
     );
     
@@ -300,7 +305,6 @@ export function initializeDownloadManager() {
 
 // ========================= EXPORTS SUMMARY =========================
 // Основные экспорты:
-// - trackDownloadProcessor: воркер для обработки одной задачи
 // - downloadQueue: глобальная очередь с приоритетами
 // - enqueue: функция для добавления треков в очередь
 // - initializeDownloadManager: инициализация (вызывается из index.js)
