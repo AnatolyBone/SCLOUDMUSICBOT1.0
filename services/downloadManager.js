@@ -490,6 +490,7 @@ export async function trackDownloadProcessor(task) {
     }
 
 // ========================================
+// ========================================
 // 6. Отправка и кэширование
 // ========================================
 const safeFilename = `${sanitizeFilename(title)}.mp3`;
@@ -509,53 +510,54 @@ if (STORAGE_CHANNEL_ID) {
       finalFileId = sentToStorage.audio.file_id;
       
       // ========================================
-      // ✅ ИСПРАВЛЕННАЯ ЛОГИКА КЭШИРОВАНИЯ
+      // ✅ ПРАВИЛЬНАЯ СТРУКТУРА КЭШИРОВАНИЯ
       // ========================================
       
-      // 1. Определяем канонический URL (ТОЛЬКО soundcloud.com!)
-      let canonicalUrl = ensuredUrl; // Приоритет у резолвленного URL
+      // 1. Определяем канонический URL (полная ссылка soundcloud.com)
+      let canonicalUrl = ensuredUrl;
       
-      // Fallback на task.originalUrl, если ensuredUrl не soundcloud.com
-      if (!canonicalUrl || !canonicalUrl.includes('soundcloud.com')) {
-        canonicalUrl = task.originalUrl;
+      // Проверяем, что это НЕ временная ссылка
+      if (!canonicalUrl || !canonicalUrl.includes('soundcloud.com') ||
+          canonicalUrl.includes('playback.media-streaming')) {
+        canonicalUrl = task.url || task.originalUrl;
       }
       
-      // Последняя проверка - игнорируем временные ссылки
-      if (canonicalUrl && canonicalUrl.includes('playback.media-streaming')) {
-        console.error('[Cache] ❌ КРИТИЧНО: попытка сохранить временную ссылку!', canonicalUrl);
-        canonicalUrl = null; // Не сохраняем в кэш
-      }
-      
-      // 2. Собираем алиасы (все альтернативные URL)
+      // 2. Собираем все алиасы
       const aliases = [];
       
-      // Добавляем originalUrl (может быть короткая ссылка)
-      if (task.originalUrl && 
-          task.originalUrl !== canonicalUrl && 
+      // Добавляем оригинальную короткую ссылку (on.soundcloud.com)
+      if (task.originalUrl &&
+          task.originalUrl !== canonicalUrl &&
           task.originalUrl.includes('soundcloud.com')) {
         aliases.push(task.originalUrl);
+        console.log(`[Cache/Debug] ➕ Добавлен алиас: ${task.originalUrl}`);
       }
       
       // Добавляем task.url (если отличается)
-      if (task.url && 
-          task.url !== canonicalUrl && 
+      if (task.url &&
+          task.url !== canonicalUrl &&
           task.url !== task.originalUrl &&
           task.url.includes('soundcloud.com')) {
         aliases.push(task.url);
+        console.log(`[Cache/Debug] ➕ Добавлен алиас: ${task.url}`);
       }
       
       // Добавляем cacheKey (sc:ID)
       if (cacheKey && !cacheKey.startsWith('http')) {
         aliases.push(cacheKey);
+        console.log(`[Cache/Debug] ➕ Добавлен алиас: ${cacheKey}`);
       }
       
-      // 3. Сохраняем в БД
-      if (canonicalUrl) {
-        console.log(`[Cache/Debug] 💾 Сохраняю:`, {
-          canonical: canonicalUrl,
-          aliases: aliases,
-          trackId: trackId
-        });
+      console.log(`[Cache/Debug] 💾 Сохраняю:`, {
+        canonical: canonicalUrl,
+        aliases: aliases,
+        trackId: trackId,
+        originalShortUrl: task.originalUrl
+      });
+      
+      // 3. Сохраняем ТОЛЬКО если canonicalUrl валиден
+      if (canonicalUrl && canonicalUrl.includes('soundcloud.com') && 
+          !canonicalUrl.includes('playback.media-streaming')) {
         
         await db.cacheTrack({
           url: canonicalUrl,
@@ -568,30 +570,33 @@ if (STORAGE_CHANNEL_ID) {
         });
         
         console.log(`✅ [Cache] Трек "${title}" сохранён с ${aliases.length} алиасами.`);
+        
       } else {
         console.warn('[Cache] ⚠️ Не удалось определить канонический URL, кэш НЕ сохранён.');
+        console.warn('[Cache/Debug] canonicalUrl:', canonicalUrl);
       }
     }
   } catch (storageErr) {
     console.error(`❌ [Cache] Ошибка при кэшировании:`, storageErr.message);
   }
 }
-    // Отправка пользователю
-    if (finalFileId) {
-      await bot.telegram.sendAudio(
-        userId, 
-        finalFileId, 
-        { title, performer: uploader, duration: roundedDuration }
-      );
-    } else {
-      console.warn('[Worker] Отправляю файл как поток (кэширование не удалось).');
-      const sentMsg = await bot.telegram.sendAudio(
-        userId, 
-        { source: fs.createReadStream(tempFilePath), filename: safeFilename }, 
-        { title, performer: uploader, duration: roundedDuration }
-      );
-      finalFileId = sentMsg?.audio?.file_id;
-    }
+
+// Отправка пользователю
+if (finalFileId) {
+  await bot.telegram.sendAudio(
+    userId, 
+    finalFileId, 
+    { title, performer: uploader, duration: roundedDuration }
+  );
+} else {
+  console.warn('[Worker] Отправляю файл как поток (кэширование не удалось).');
+  const sentMsg = await bot.telegram.sendAudio(
+    userId, 
+    { source: fs.createReadStream(tempFilePath), filename: safeFilename }, 
+    { title, performer: uploader, duration: roundedDuration }
+  );
+  finalFileId = sentMsg?.audio?.file_id;
+}
 
     // Удаляем статус-сообщение
     if (statusMessage) {
@@ -683,42 +688,81 @@ export function enqueue(ctx, userId, url) {
           
           // Резолвим короткую ссылку в полную
          // Сохраняем оригинальную ссылку (может быть короткой)
-const originalShortUrl = url;
+// ========================================
+// ✅ ПРОВЕРЯЕМ КЭШ ДО РЕЗОЛВА!
+// ========================================
 
-// Резолвим короткую ссылку в полную
+const originalShortUrl = url; // Сохраняем оригинальную короткую ссылку
+
+console.log(`[Enqueue/Debug] 🔍 Проверяю кэш для короткой ссылки: ${url}`);
+const quickCached = await db.findCachedTrack(url);
+
+if (quickCached?.fileId) {
+  console.log(`[⚡ ULTRA FAST HIT] Нашёл по короткой ссылке: ${quickCached.trackName}`);
+  
+  try {
+    await bot.telegram.sendAudio(
+      userId,
+      quickCached.fileId,
+      {
+        title: quickCached.trackName,
+        performer: quickCached.artist || 'Unknown Artist',
+        duration: quickCached.duration
+      }
+    );
+    
+    await incrementDownload(userId, quickCached.trackName, quickCached.fileId, url);
+    
+    console.log(`[⚡ Cache] Трек отправлен за ${(Date.now() - startTime) / 1000}с`);
+    return; // ← ВЫХОД БЕЗ РЕЗОЛВА!
+    
+  } catch (sendErr) {
+    console.warn('[Cache] file_id устарел, перезагружаю...');
+    if (sendErr?.description?.includes('file_id')) {
+      await db.deleteCachedTrack(url);
+      // Продолжаем резолв ниже
+    } else {
+      throw sendErr;
+    }
+  }
+}
+
+// Если не нашли - резолвим
+console.log(`[Enqueue] Короткая ссылка не в кэше, резолвлю...`);
 const canonicalUrl = await resolveCanonicalUrl(url);
           
           console.log(`[Enqueue] ✅ Резолв завершён: ${canonicalUrl}`);
 
           
-          const quickCached = await db.findCachedTrack(canonicalUrl);
-          
-          console.log(`[Enqueue/Debug] 📦 Результат findCachedTrack:`, {
-            found: !!quickCached,
-            fileId: quickCached?.fileId ? 'Есть' : 'Нет',
-            trackName: quickCached?.trackName
-          });
-          
-          if (quickCached?.fileId) {
-            console.log(`[⚡ FAST CACHE HIT] Мгновенная отправка: ${quickCached.trackName}`);
-            
-            try {
-              await bot.telegram.sendAudio(
-                userId,
-                quickCached.fileId,
-                {
-                  title: quickCached.trackName,
-                  performer: quickCached.artist || 'Unknown Artist',
-                  duration: quickCached.duration
-                }
-              );
-              
-              await incrementDownload(userId, quickCached.trackName, quickCached.fileId, canonicalUrl);
-              
-              console.log(`[⚡ Cache] Трек отправлен за ${(Date.now() - startTime) / 1000}с`);
-              return; // ← ВЫХОД!
-              
-            } catch (sendErr) {
+          const canonicalCached = await db.findCachedTrack(canonicalUrl); // ← НОВОЕ ИМЯ!
+
+console.log(`[Enqueue/Debug] 📦 Результат findCachedTrack:`, {
+  found: !!canonicalCached, // ← ИСПРАВЬТЕ
+  fileId: canonicalCached?.fileId ? 'Есть' : 'Нет', // ← ИСПРАВЬТЕ
+  trackName: canonicalCached?.trackName // ← ИСПРАВЬТЕ
+});
+
+if (canonicalCached?.fileId) { // ← ИСПРАВЬТЕ
+  console.log(`[⚡ FAST CACHE HIT] Мгновенная отправка: ${canonicalCached.trackName}`); // ← ИСПРАВЬТЕ
+  
+  try {
+    await bot.telegram.sendAudio(
+      userId,
+      canonicalCached.fileId, // ← ИСПРАВЬТЕ
+      {
+        title: canonicalCached.trackName, // ← ИСПРАВЬТЕ
+        performer: canonicalCached.artist || 'Unknown Artist', // ← ИСПРАВЬТЕ
+        duration: canonicalCached.duration // ← ИСПРАВЬТЕ
+      }
+    );
+    
+    await incrementDownload(userId, canonicalCached.trackName, canonicalCached.fileId, canonicalUrl); // ← ИСПРАВЬТЕ
+    
+    console.log(`[⚡ Cache] Трек отправлен за ${(Date.now() - startTime) / 1000}с`);
+    return;
+    
+  } catch (sendErr) {
+  
               console.error('[Enqueue/Debug] ❌ Ошибка отправки:', sendErr.message);
               
               if (sendErr?.description?.includes('FILE_REFERENCE_EXPIRED') ||
@@ -882,22 +926,26 @@ await db.resetDailyLimitIfNeeded(userId);
         );
       }
       
-      let tracksToProcess = entries
-        .slice(0, pEnd)
-        .map(e => {
-          const md = extractMetadataFromInfo(e);
-          if (!md) return null;
-          const realUrl = e.webpage_url || e.url;
-          const key = getCacheKey(md, realUrl);
-          return { 
-            url: realUrl, 
-            originalUrl: realUrl, 
-            source: 'soundcloud', 
-            cacheKey: key, 
-            metadata: md 
-          };
-        })
-        .filter(Boolean);
+     let tracksToProcess = entries
+  .slice(0, pEnd)
+  .map(e => {
+    const md = extractMetadataFromInfo(e);
+    if (!md) return null;
+    const realUrl = e.webpage_url || e.url;
+    const key = getCacheKey(md, realUrl);
+    
+    // ✅ ИСПРАВЛЕНО: Для плейлистов используем URL трека
+    const trackOriginalUrl = isPlaylist ? realUrl : originalShortUrl;
+    
+    return {
+      url: realUrl,
+      originalUrl: trackOriginalUrl, // ← ИСПРАВЛЕНО!
+      source: 'soundcloud',
+      cacheKey: key,
+      metadata: md
+    };
+  })
+  .filter(Boolean);
 
       if (tracksToProcess.length === 0) {
         throw new Error('Не удалось найти треки для загрузки.');
