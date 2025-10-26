@@ -847,9 +847,9 @@ async function handleSoundCloudUrl(ctx, url) {
             throw new Error('Не удалось получить метаданные.');
         }
         
-        // === ПРОВЕРКА: ПЛЕЙЛИСТ ИЛИ ОДИНОЧНЫЙ ТРЕК ===
+        // ✅ ТОЛЬКО РОУТИНГ — без проверки кэша!
         if (data.entries && data.entries.length > 1) {
-            // ЭТО ПЛЕЙЛИСТ
+            // ПЛЕЙЛИСТ
             await ctx.deleteMessage(loadingMessage.message_id).catch(() => {});
             
             const playlistId = `pl_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
@@ -870,16 +870,13 @@ async function handleSoundCloudUrl(ctx, url) {
             });
             
         } else {
-            // ЭТО ОДИНОЧНЫЙ ТРЕК
-            // ✅ УДАЛЯЕМ СООБЩЕНИЕ И ПЕРЕДАЁМ УПРАВЛЕНИЕ enqueue
+            // ОДИНОЧНЫЙ ТРЕК — передаём в enqueue (там будет проверка кэша)
             await ctx.deleteMessage(loadingMessage.message_id).catch(() => {});
-            
-            // enqueue САМ проверит кэш, покажет сообщения и обработает трек
             enqueue(ctx, ctx.from.id, url);
         }
         
     } catch (error) {
-        console.error('Ошибка при обработке URL:', error.message);
+        console.error('Ошибка handleSoundCloudUrl:', error.message);
         const userMessage = '❌ Не удалось обработать ссылку.';
         if (loadingMessage) {
             await ctx.telegram.editMessageText(
