@@ -549,12 +549,36 @@ if (STORAGE_CHANNEL_ID) {
       }
       
       console.log(`[Cache/Debug] 💾 Сохраняю:`, {
-        canonical: canonicalUrl,
-        aliases: aliases,
-        trackId: trackId,
-        originalShortUrl: task.originalUrl
-      });
-      
+  canonical: canonicalUrl,
+  aliases: aliases,
+  trackId: trackId,
+  originalShortUrl: task.originalUrl
+});
+
+// ✅ ДОБАВЬТЕ ЭТИ ЛОГИ:
+console.log(`[Cache/Debug] 🔍 task.originalUrl =`, task.originalUrl);
+console.log(`[Cache/Debug] 🔍 task.url =`, task.url);
+console.log(`[Cache/Debug] 🔍 ensuredUrl =`, ensuredUrl);
+console.log(`[Cache/Debug] 🔍 canonicalUrl =`, canonicalUrl);
+console.log(`[Cache/Debug] 🔍 cacheKey =`, cacheKey);
+
+// 2. Собираем все алиасы
+const aliases = [];
+
+// Добавляем оригинальную короткую ссылку (on.soundcloud.com)
+console.log(`[Cache/Debug] 📝 Проверяю условие для task.originalUrl...`);
+console.log(`[Cache/Debug]   - task.originalUrl exists? ${!!task.originalUrl}`);
+console.log(`[Cache/Debug]   - task.originalUrl !== canonicalUrl? ${task.originalUrl !== canonicalUrl}`);
+console.log(`[Cache/Debug]   - includes('soundcloud.com')? ${task.originalUrl?.includes('soundcloud.com')}`);
+
+if (task.originalUrl &&
+  task.originalUrl !== canonicalUrl &&
+  task.originalUrl.includes('soundcloud.com')) {
+  aliases.push(task.originalUrl);
+  console.log(`[Cache/Debug] ➕ Добавлен алиас: ${task.originalUrl}`);
+} else {
+  console.warn(`[Cache/Debug] ⚠️ task.originalUrl НЕ добавлен! Значение:`, task.originalUrl);
+}
       // 3. Сохраняем ТОЛЬКО если canonicalUrl валиден
       if (canonicalUrl && canonicalUrl.includes('soundcloud.com') && 
           !canonicalUrl.includes('playback.media-streaming')) {
@@ -936,14 +960,22 @@ await db.resetDailyLimitIfNeeded(userId);
     
     // ✅ ИСПРАВЛЕНО: Для плейлистов используем URL трека
     const trackOriginalUrl = isPlaylist ? realUrl : originalShortUrl;
-    
-    return {
-      url: realUrl,
-      originalUrl: trackOriginalUrl, // ← ИСПРАВЛЕНО!
-      source: 'soundcloud',
-      cacheKey: key,
-      metadata: md
-    };
+
+// ✅ ДОБАВЬТЕ ЭТО:
+console.log(`[Enqueue/Debug] 📝 Формирую задачу:`, {
+  isPlaylist: isPlaylist,
+  realUrl: realUrl,
+  originalShortUrl: originalShortUrl,
+  trackOriginalUrl: trackOriginalUrl
+});
+
+return {
+  url: realUrl,
+  originalUrl: trackOriginalUrl,
+  source: 'soundcloud',
+  cacheKey: key,
+  metadata: md
+};
   })
   .filter(Boolean);
 
