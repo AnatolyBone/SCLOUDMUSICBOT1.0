@@ -488,8 +488,6 @@ export async function trackDownloadProcessor(task) {
     if (statusMessage) {
       await bot.telegram.editMessageText(userId, statusMessage.message_id, undefined, `✅ Скачал. Отправляю...`).catch(() => {});
     }
-
-// ========================================
 // ========================================
 // 6. Отправка и кэширование
 // ========================================
@@ -510,27 +508,44 @@ if (STORAGE_CHANNEL_ID) {
       finalFileId = sentToStorage.audio.file_id;
       
       // ========================================
-      // ✅ ПРАВИЛЬНАЯ СТРУКТУРА КЭШИРОВАНИЯ
+      // ✅ ФОРМИРОВАНИЕ АЛИАСОВ (БЕЗ ДУБЛИРОВАНИЯ!)
       // ========================================
       
-      // 1. Определяем канонический URL (полная ссылка soundcloud.com)
+      // 1. Определяем канонический URL
       let canonicalUrl = ensuredUrl;
       
-      // Проверяем, что это НЕ временная ссылка
       if (!canonicalUrl || !canonicalUrl.includes('soundcloud.com') ||
           canonicalUrl.includes('playback.media-streaming')) {
         canonicalUrl = task.url || task.originalUrl;
       }
       
-      // 2. Собираем все алиасы
-      const aliases = [];
+      // 2. DEBUG: Что пришло в задаче
+      console.log(`[Cache/Debug] 🔍 Входные данные задачи:`, {
+        'task.originalUrl': task.originalUrl,
+        'task.url': task.url,
+        'ensuredUrl': ensuredUrl,
+        'canonicalUrl': canonicalUrl,
+        'cacheKey': cacheKey
+      });
       
-      // Добавляем оригинальную короткую ссылку (on.soundcloud.com)
+      // 3. Собираем алиасы (ОДНО объявление!)
+      const urlAliases = [];
+      
+      // Добавляем оригинальную короткую ссылку
+      console.log(`[Cache/Debug] 📝 Проверяю task.originalUrl:`, {
+        'exists': !!task.originalUrl,
+        'value': task.originalUrl,
+        'isDifferent': task.originalUrl !== canonicalUrl,
+        'hasSoundcloud': task.originalUrl?.includes('soundcloud.com')
+      });
+      
       if (task.originalUrl &&
           task.originalUrl !== canonicalUrl &&
           task.originalUrl.includes('soundcloud.com')) {
-        aliases.push(task.originalUrl);
-        console.log(`[Cache/Debug] ➕ Добавлен алиас: ${task.originalUrl}`);
+        urlAliases.push(task.originalUrl);
+        console.log(`[Cache/Debug] ➕ Добавлен алиас originalUrl: ${task.originalUrl}`);
+      } else {
+        console.warn(`[Cache/Debug] ⚠️ originalUrl НЕ добавлен:`, task.originalUrl);
       }
       
       // Добавляем task.url (если отличается)
@@ -538,48 +553,19 @@ if (STORAGE_CHANNEL_ID) {
           task.url !== canonicalUrl &&
           task.url !== task.originalUrl &&
           task.url.includes('soundcloud.com')) {
-        aliases.push(task.url);
-        console.log(`[Cache/Debug] ➕ Добавлен алиас: ${task.url}`);
+        urlAliases.push(task.url);
+        console.log(`[Cache/Debug] ➕ Добавлен алиас task.url: ${task.url}`);
       }
       
       // Добавляем cacheKey (sc:ID)
       if (cacheKey && !cacheKey.startsWith('http')) {
-        aliases.push(cacheKey);
-        console.log(`[Cache/Debug] ➕ Добавлен алиас: ${cacheKey}`);
+        urlAliases.push(cacheKey);
+        console.log(`[Cache/Debug] ➕ Добавлен алиас cacheKey: ${cacheKey}`);
       }
       
-      console.log(`[Cache/Debug] 💾 Сохраняю:`, {
-  canonical: canonicalUrl,
-  aliases: aliases,
-  trackId: trackId,
-  originalShortUrl: task.originalUrl
-});
-
-// ✅ ДОБАВЬТЕ ЭТИ ЛОГИ:
-console.log(`[Cache/Debug] 🔍 task.originalUrl =`, task.originalUrl);
-console.log(`[Cache/Debug] 🔍 task.url =`, task.url);
-console.log(`[Cache/Debug] 🔍 ensuredUrl =`, ensuredUrl);
-console.log(`[Cache/Debug] 🔍 canonicalUrl =`, canonicalUrl);
-console.log(`[Cache/Debug] 🔍 cacheKey =`, cacheKey);
-
-// 2. Собираем все алиасы
-const aliases = [];
-
-// Добавляем оригинальную короткую ссылку (on.soundcloud.com)
-console.log(`[Cache/Debug] 📝 Проверяю условие для task.originalUrl...`);
-console.log(`[Cache/Debug]   - task.originalUrl exists? ${!!task.originalUrl}`);
-console.log(`[Cache/Debug]   - task.originalUrl !== canonicalUrl? ${task.originalUrl !== canonicalUrl}`);
-console.log(`[Cache/Debug]   - includes('soundcloud.com')? ${task.originalUrl?.includes('soundcloud.com')}`);
-
-if (task.originalUrl &&
-  task.originalUrl !== canonicalUrl &&
-  task.originalUrl.includes('soundcloud.com')) {
-  aliases.push(task.originalUrl);
-  console.log(`[Cache/Debug] ➕ Добавлен алиас: ${task.originalUrl}`);
-} else {
-  console.warn(`[Cache/Debug] ⚠️ task.originalUrl НЕ добавлен! Значение:`, task.originalUrl);
-}
-      // 3. Сохраняем ТОЛЬКО если canonicalUrl валиден
+      console.log(`[Cache/Debug] 💾 Итого алиасов: ${urlAliases.length}`, urlAliases);
+      
+      // 4. Сохраняем ТОЛЬКО если URL валиден
       if (canonicalUrl && canonicalUrl.includes('soundcloud.com') && 
           !canonicalUrl.includes('playback.media-streaming')) {
         
@@ -590,14 +576,13 @@ if (task.originalUrl &&
           artist: uploader,
           duration: roundedDuration,
           thumbnail,
-          aliases: aliases
+          aliases: urlAliases  // ← ИСПОЛЬЗУЕМ НОВОЕ ИМЯ
         });
         
-        console.log(`✅ [Cache] Трек "${title}" сохранён с ${aliases.length} алиасами.`);
+        console.log(`✅ [Cache] Трек "${title}" сохранён с ${urlAliases.length} алиасами.`);
         
       } else {
-        console.warn('[Cache] ⚠️ Не удалось определить канонический URL, кэш НЕ сохранён.');
-        console.warn('[Cache/Debug] canonicalUrl:', canonicalUrl);
+        console.warn('[Cache] ⚠️ Невалидный canonicalUrl, кэш НЕ сохранён:', canonicalUrl);
       }
     }
   } catch (storageErr) {
@@ -621,7 +606,6 @@ if (finalFileId) {
   );
   finalFileId = sentMsg?.audio?.file_id;
 }
-
     // Удаляем статус-сообщение
     if (statusMessage) {
       await bot.telegram.deleteMessage(userId, statusMessage.message_id).catch(() => {});
