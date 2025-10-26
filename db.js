@@ -499,12 +499,16 @@ export async function searchTracksInCache(searchQuery, limit = 7) {
 // ========================================
 // СОХРАНЕНИЕ ТРЕКА В КЭШ
 // ========================================
+/**
+ * Сохраняет трек в кэш с поддержкой множественных URL
+ */
 export async function cacheTrack(trackData) {
-    const { url, fileId, title, artist, duration, thumbnail } = trackData;
-    
-    try {
-        await query(
-            `INSERT INTO track_cache (url, file_id, title, artist, duration, thumbnail)
+  const { url, fileId, title, artist, duration, thumbnail, aliases = [] } = trackData;
+  
+  try {
+    // 1. Сохраняем основную запись
+    await query(
+      `INSERT INTO track_cache (url, file_id, title, artist, duration, thumbnail)
        VALUES ($1, $2, $3, $4, $5, $6)
        ON CONFLICT (url) DO UPDATE SET
          file_id = EXCLUDED.file_id,
@@ -513,21 +517,30 @@ export async function cacheTrack(trackData) {
          duration = EXCLUDED.duration,
          thumbnail = EXCLUDED.thumbnail,
          created_at = NOW()`,
-            [url, fileId, title, artist, duration, thumbnail]
-        );
-        console.log(`[✓ Cache Saved] ${title} - ${artist}`);
-    } catch (e) {
-        console.error('[✗ Cache Save Error]', e.message);
+      [url, fileId, title, artist, duration, thumbnail]
+    );
+    
+    // 2. Сохраняем алиасы (короткие ссылки, sc:ID и т.д.)
+    if (aliases.length > 0) {
+      for (const alias of aliases) {
+        if (alias && alias !== url) {
+          await query(
+            `INSERT INTO track_url_aliases (canonical_url, alias_url)
+             VALUES ($1, $2)
+             ON CONFLICT (alias_url) DO UPDATE SET canonical_url = EXCLUDED.canonical_url`,
+            [url, alias]
+          );
+        }
+      }
+      console.log(`[Cache] Сохранено ${aliases.length} алиасов для: ${title}`);
     }
+    
+    console.log(`[✓ Cache Saved] ${title} - ${artist}`);
+    
+  } catch (e) {
+    console.error('[✗ Cache Save Error]', e.message, { url, title });
+  }
 }
-
-// ========================================
-// ПОИСК ПО ТОЧНОМУ URL
-// ========================================
-
-// ========================================
-// ПОИСК ПО ТОЧНОМУ URL (С ДИАГНОСТИКОЙ)
-// ========================================
 
 export async function findCachedTrack(trackUrl) {
   try {
