@@ -431,63 +431,93 @@ export async function trackDownloadProcessor(task) {
       await bot.telegram.editMessageText(userId, statusMessage.message_id, undefined, `✅ Скачал. Отправляю...`).catch(() => {});
     }
 
-    // ========================================
-    // 6. Отправка и кэширование
-    // ========================================
-    const safeFilename = `${sanitizeFilename(title)}.mp3`;
-    let finalFileId = null;
+// ========================================
+// 6. Отправка и кэширование
+// ========================================
+const safeFilename = `${sanitizeFilename(title)}.mp3`;
+let finalFileId = null;
 
-    if (STORAGE_CHANNEL_ID) {
-      try {
-        console.log(`[Cache] Загружаю "${title}" в канал-хранилище...`);
+if (STORAGE_CHANNEL_ID) {
+  try {
+    console.log(`[Cache] Загружаю "${title}" в канал-хранилище...`);
+    
+    const sentToStorage = await bot.telegram.sendAudio(
+      STORAGE_CHANNEL_ID,
+      { source: fs.createReadStream(tempFilePath), filename: safeFilename },
+      { title, performer: uploader, duration: roundedDuration }
+    );
+    
+    if (sentToStorage?.audio?.file_id) {
+      finalFileId = sentToStorage.audio.file_id;
+      
+      // ========================================
+      // ✅ ИСПРАВЛЕННАЯ ЛОГИКА КЭШИРОВАНИЯ
+      // ========================================
+      
+      // 1. Определяем канонический URL (ТОЛЬКО soundcloud.com!)
+      let canonicalUrl = ensuredUrl; // Приоритет у резолвленного URL
+      
+      // Fallback на task.originalUrl, если ensuredUrl не soundcloud.com
+      if (!canonicalUrl || !canonicalUrl.includes('soundcloud.com')) {
+        canonicalUrl = task.originalUrl;
+      }
+      
+      // Последняя проверка - игнорируем временные ссылки
+      if (canonicalUrl && canonicalUrl.includes('playback.media-streaming')) {
+        console.error('[Cache] ❌ КРИТИЧНО: попытка сохранить временную ссылку!', canonicalUrl);
+        canonicalUrl = null; // Не сохраняем в кэш
+      }
+      
+      // 2. Собираем алиасы (все альтернативные URL)
+      const aliases = [];
+      
+      // Добавляем originalUrl (может быть короткая ссылка)
+      if (task.originalUrl && 
+          task.originalUrl !== canonicalUrl && 
+          task.originalUrl.includes('soundcloud.com')) {
+        aliases.push(task.originalUrl);
+      }
+      
+      // Добавляем task.url (если отличается)
+      if (task.url && 
+          task.url !== canonicalUrl && 
+          task.url !== task.originalUrl &&
+          task.url.includes('soundcloud.com')) {
+        aliases.push(task.url);
+      }
+      
+      // Добавляем cacheKey (sc:ID)
+      if (cacheKey && !cacheKey.startsWith('http')) {
+        aliases.push(cacheKey);
+      }
+      
+      // 3. Сохраняем в БД
+      if (canonicalUrl) {
+        console.log(`[Cache/Debug] 💾 Сохраняю:`, {
+          canonical: canonicalUrl,
+          aliases: aliases,
+          trackId: trackId
+        });
         
-        const sentToStorage = await bot.telegram.sendAudio(
-          STORAGE_CHANNEL_ID,
-          { source: fs.createReadStream(tempFilePath), filename: safeFilename },
-          { title, performer: uploader, duration: roundedDuration }
-        );
+        await db.cacheTrack({
+          url: canonicalUrl,
+          fileId: finalFileId,
+          title,
+          artist: uploader,
+          duration: roundedDuration,
+          thumbnail,
+          aliases: aliases
+        });
         
-        if (sentToStorage?.audio?.file_id) {
-          finalFileId = sentToStorage.audio.file_id;
-          
-          // ✅ DEBUG: Что сохраняем
-          console.log(`[Cache/Debug] 💾 Сохраняю в БД:`, {
-            originalUrl: task.originalUrl,
-            ensuredUrl: ensuredUrl,
-            cacheKey: cacheKey,
-            willSave: task.originalUrl || ensuredUrl
-          });
-          
-          // Сохраняем по оригинальному URL
-          await db.cacheTrack({ 
-            url: task.originalUrl || ensuredUrl,
-            fileId: finalFileId, 
-            title, 
-            artist: uploader, 
-            duration: roundedDuration, 
-            thumbnail 
-          });
-          
-          // Если есть отдельный cacheKey (sc:123456) - сохраняем и его
-          if (cacheKey && cacheKey !== (task.originalUrl || ensuredUrl)) {
-            await db.cacheTrack({ 
-              url: cacheKey,
-              fileId: finalFileId, 
-              title, 
-              artist: uploader, 
-              duration: roundedDuration, 
-              thumbnail 
-            });
-            console.log(`✅ [Cache] Также сохранён по ключу: ${cacheKey}`);
-          }
-          
-          console.log(`✅ [Cache] Трек "${title}" успешно закэширован.`);
-        }
-      } catch (storageErr) {
-        console.error(`❌ [Cache] Ошибка при кэшировании:`, storageErr.message);
+        console.log(`✅ [Cache] Трек "${title}" сохранён с ${aliases.length} алиасами.`);
+      } else {
+        console.warn('[Cache] ⚠️ Не удалось определить канонический URL, кэш НЕ сохранён.');
       }
     }
-
+  } catch (storageErr) {
+    console.error(`❌ [Cache] Ошибка при кэшировании:`, storageErr.message);
+  }
+}
     // Отправка пользователю
     if (finalFileId) {
       await bot.telegram.sendAudio(
@@ -630,18 +660,80 @@ export function enqueue(ctx, userId, url) {
                 throw sendErr;
               }
             }
-          } else {
-            console.log(`[Enqueue/Debug] ❌ Кэш не найден, продолжаю обычную загрузку`);
+} else {
+  console.log(`[Enqueue/Debug] ❌ Кэш не найден, продолжаю обычную загрузку`);
+}
+
+// ВАЖНО: используем canonicalUrl дальше!
+url = canonicalUrl;
+
+// ========================================
+// ✅ ПОЛУЧЕНИЕ МЕТАДАННЫХ ДЛЯ ПРОВЕРКИ КЭША
+// ========================================
+console.log('[Enqueue] 📡 Получаю метаданные для проверки кэша...');
+
+let earlyInfo;
+try {
+  earlyInfo = await ytdl(canonicalUrl, {
+    'dump-single-json': true,
+    'no-playlist': true,
+    ...YTDL_COMMON
+  });
+} catch (metaErr) {
+  console.warn('[Enqueue] Не удалось получить метаданные для кэша:', metaErr.message);
+  // Продолжаем без проверки по метаданным
+}
+
+// ========================================
+// ✅ ПРОВЕРКА КЭША ПО МЕТАДАННЫМ
+// ========================================
+if (earlyInfo && typeof db.findCachedTrackByMeta === 'function') {
+  const earlyMeta = extractMetadataFromInfo(earlyInfo);
+  
+  if (earlyMeta) {
+    console.log(`[Enqueue] 🔍 Проверяю кэш по метаданным: ${earlyMeta.title} - ${earlyMeta.uploader}`);
+    
+    const metaCached = await db.findCachedTrackByMeta({
+      title: earlyMeta.title,
+      artist: earlyMeta.uploader,
+      duration: Math.round(earlyMeta.duration)
+    });
+    
+    if (metaCached?.fileId) {
+      console.log(`[⚡ META CACHE HIT] ${metaCached.trackName}`);
+      
+      try {
+        await bot.telegram.sendAudio(
+          userId,
+          metaCached.fileId,
+          {
+            title: metaCached.trackName,
+            performer: metaCached.artist || 'Unknown Artist',
+            duration: Math.round(earlyMeta.duration)
           }
-          
-          // ВАЖНО: используем canonicalUrl дальше!
-          url = canonicalUrl;
-          
+        );
+        
+        await incrementDownload(userId, metaCached.trackName, metaCached.fileId, canonicalUrl);
+        
+        console.log(`[⚡ Cache] Трек отправлен за ${(Date.now() - startTime) / 1000}с`);
+        return; // ⬅️ ВЫХОД!
+        
+      } catch (sendErr) {
+        console.warn('[Meta Cache] file_id устарел, удаляю и перезагружаю.');
+        if (sendErr.response?.error_code === 400) {
+          await db.deleteCachedTrack(metaCached.url);
+        }
+        // Продолжаем загрузку
+      }
+    }
+  }
+}
 
+// ========================================
+// ПРОДОЛЖАЕМ ОБЫЧНУЮ ЛОГИКУ (ПЛЕЙЛИСТ/ОЧЕРЕДЬ)
+// ========================================
 
-// Резолвим короткую ссылку в полную
-
-      await db.resetDailyLimitIfNeeded(userId);
+await db.resetDailyLimitIfNeeded(userId);
 
       // --- Получение данных пользователя ---
       const fullUser = await db.getUser(userId);
