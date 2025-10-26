@@ -560,11 +560,15 @@ export function enqueue(ctx, userId, url) {
 }
 
 // ========================================
-// ✅ РАННЯЯ ПРОВЕРКА КЭША (ДОБАВЬТЕ СЮДА!)
+// ✅ РАННЯЯ ПРОВЕРКА КЭША ПО URL
 // ========================================
-console.log(`[Enqueue/Debug] 🔍 Получен URL от ${userId}: ${url}`);
 
-const quickCached = await db.findCachedTrack(url);
+// Резолвим короткую ссылку в полную
+const canonicalUrl = await resolveCanonicalUrl(url);
+
+console.log(`[Enqueue/Debug] 🔍 Проверяю кэш для URL: ${canonicalUrl}`);
+
+const quickCached = await db.findCachedTrack(canonicalUrl);
 
 console.log(`[Enqueue/Debug] 📦 Результат findCachedTrack:`, {
   found: !!quickCached,
@@ -586,18 +590,21 @@ if (quickCached?.fileId) {
       }
     );
     
-    await incrementDownload(userId, quickCached.trackName, quickCached.fileId, url);
+    await incrementDownload(userId, quickCached.trackName, quickCached.fileId, canonicalUrl);
     
     console.log(`[⚡ Cache] Трек отправлен за ${(Date.now() - startTime) / 1000}с`);
-    return; // ← КРИТИЧЕСКИ ВАЖНО!
+    
+    // ✅ НЕ ОТПРАВЛЯЕМ ДОПОЛНИТЕЛЬНОЕ СООБЩЕНИЕ - просто выходим
+    return;
     
   } catch (sendErr) {
     console.error('[Enqueue/Debug] ❌ Ошибка отправки:', sendErr.message);
     
-    if (sendErr?.description?.includes('FILE_REFERENCE_EXPIRED')) {
+    if (sendErr?.description?.includes('FILE_REFERENCE_EXPIRED') ||
+      sendErr?.description?.includes('file_id')) {
       console.warn('[Cache] file_id устарел, перезагружаю...');
-      await db.deleteCachedTrack(url);
-      // Продолжаем дальше (НЕ делаем return)
+      await db.deleteCachedTrack(canonicalUrl);
+      // НЕ делаем return — продолжаем загрузку
     } else {
       throw sendErr;
     }
@@ -605,6 +612,9 @@ if (quickCached?.fileId) {
 } else {
   console.log(`[Enqueue/Debug] ❌ Кэш не найден, продолжаю обычную загрузку`);
 }
+
+// ВАЖНО: используем canonicalUrl дальше в коде!
+url = canonicalUrl;
 
       await db.resetDailyLimitIfNeeded(userId);
 
@@ -815,12 +825,20 @@ if (quickCached?.fileId) {
         finalMessage += `\n🚫 Лимит исчерпан.`;
       }
       
-      if (finalMessage.trim() === '') {
-        const duration = (Date.now() - startTime) / 1000;
-        finalMessage = sentFromCacheCount > 0
-          ? `✅ ${sentFromCacheCount} трек(ов) за ${duration.toFixed(1)}с.`
-          : '✅ Все треки обработаны.';
-      }
+      // ✅ НЕ ОТПРАВЛЯЕМ СООБЩЕНИЕ, ЕСЛИ ЭТО БЫЛ ОДИНОЧНЫЙ ТРЕК ИЗ КЭША
+if (finalMessage.trim() === '') {
+  // Если это был одиночный трек из кэша (отправлен в ранней проверке)
+  // — просто выходим, не отправляя дополнительное сообщение
+  if (!isPlaylist && sentFromCacheCount === 0 && tasksToDownload.length === 0) {
+    return;
+  }
+  
+  // Для плейлистов показываем итоги
+  const duration = (Date.now() - startTime) / 1000;
+  finalMessage = sentFromCacheCount > 0 ?
+    `✅ ${sentFromCacheCount} трек(ов) за ${duration.toFixed(1)}с.` :
+    '✅ Все треки обработаны.';
+}
 
       if (statusMessage) {
         await bot.telegram.editMessageText(
