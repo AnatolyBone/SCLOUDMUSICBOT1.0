@@ -525,8 +525,58 @@ export async function cacheTrack(trackData) {
 // ПОИСК ПО ТОЧНОМУ URL
 // ========================================
 
+// ========================================
+// ПОИСК ПО ТОЧНОМУ URL (С ДИАГНОСТИКОЙ)
+// ========================================
+
 export async function findCachedTrack(trackUrl) {
   try {
+    // ========================================
+    // ✅ ВРЕМЕННАЯ ДИАГНОСТИКА
+    // ========================================
+    
+    // Извлекаем ключевые слова из URL для поиска похожих записей
+    const urlParts = trackUrl.split('/').filter(p => p && p.length > 3);
+    const lastPart = urlParts[urlParts.length - 1]; // Например: "fallon-diet-coke-extended-mix"
+    
+    if (lastPart) {
+      const debugQuery = `
+        SELECT 
+          url, 
+          LEFT(file_id, 25) as file_id_preview, 
+          title, 
+          artist,
+          duration
+        FROM track_cache
+        WHERE 
+          url ILIKE $1 
+          OR title ILIKE $2
+        LIMIT 10
+      `;
+      
+      try {
+        const { rows: debugRows } = await query(debugQuery, [
+          `%${lastPart}%`,
+          `%${lastPart.replace(/-/g, ' ')}%`
+        ]);
+        
+        if (debugRows.length > 0) {
+          console.log(`[DB/Debug] 🔍 Найдено ${debugRows.length} похожих записей для "${lastPart}":`);
+          debugRows.forEach((row, i) => {
+            console.log(`  ${i + 1}. URL: ${row.url.substring(0, 60)}...`);
+            console.log(`     Title: ${row.title} | Artist: ${row.artist} | Duration: ${row.duration}s`);
+          });
+        } else {
+          console.log(`[DB/Debug] ❌ Похожих записей для "${lastPart}" не найдено в БД`);
+        }
+      } catch (debugErr) {
+        console.warn('[DB/Debug] Ошибка диагностического запроса:', debugErr.message);
+      }
+    }
+    
+    // ========================================
+    // ОСНОВНОЙ ЗАПРОС
+    // ========================================
     const { rows } = await query(
       `SELECT 
         file_id, 
@@ -549,7 +599,9 @@ export async function findCachedTrack(trackUrl) {
       };
     }
     
+    console.log(`[✗ Cache MISS] Точного совпадения для URL не найдено: ${trackUrl.substring(0, 80)}...`);
     return null;
+    
   } catch (e) {
     console.error('[DB Error] findCachedTrack:', e.message);
     return null;
