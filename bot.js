@@ -827,9 +827,6 @@ async function processUrlInBackground(ctx, url) {
 }
 
 async function handleSoundCloudUrl(ctx, url) {
-    // Для одиночных треков используем enqueue (с ранней проверкой кэша)
-    // Для плейлистов оставляем старую логику
-    
     let loadingMessage;
     try {
         loadingMessage = await ctx.reply('🔍 Анализирую ссылку...');
@@ -873,10 +870,11 @@ async function handleSoundCloudUrl(ctx, url) {
             });
             
         } else {
-            // === ЭТО ОДИНОЧНЫЙ ТРЕК — используем enqueue ===
+            // === ЭТО ОДИНОЧНЫЙ ТРЕК ===
+            // ✅ УДАЛЯЕМ СООБЩЕНИЕ ИЗ bot.js
             await ctx.deleteMessage(loadingMessage.message_id).catch(() => {});
             
-            // ✅ ВЫЗЫВАЕМ ФУНКЦИЮ С РАННЕЙ ПРОВЕРКОЙ КЭША
+            // ✅ ВЫЗЫВАЕМ enqueue - ОНО ПОКАЖЕТ СВОЁ СООБЩЕНИЕ
             enqueue(ctx, ctx.from.id, url);
         }
         
