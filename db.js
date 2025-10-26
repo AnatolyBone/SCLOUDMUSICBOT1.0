@@ -18,6 +18,20 @@ async function query(text, params) {
     throw e;
   }
 }
+/**
+ * Экранирует спецсимволы для CSV-формата
+ */
+function escapeCsv(value) {
+  if (value == null) return '';
+  const str = String(value);
+  
+  // Если содержит запятую, кавычки или перевод строки - оборачиваем в кавычки
+  if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+    return `"${str.replace(/"/g, '""')}"`;
+  }
+  
+  return str;
+}
 // Сброс дневного лимита для конкретного пользователя, если наступил новый день
 export async function resetDailyLimitIfNeeded(userId) {
   // проверяем дату последнего сброса
@@ -520,19 +534,28 @@ export async function cacheTrack(trackData) {
       [url, fileId, title, artist, duration, thumbnail]
     );
     
-    // 2. Сохраняем алиасы (короткие ссылки, sc:ID и т.д.)
+    // 2. Сохраняем алиасы (с проверкой существования таблицы)
     if (aliases.length > 0) {
-      for (const alias of aliases) {
-        if (alias && alias !== url) {
-          await query(
-            `INSERT INTO track_url_aliases (canonical_url, alias_url)
-             VALUES ($1, $2)
-             ON CONFLICT (alias_url) DO UPDATE SET canonical_url = EXCLUDED.canonical_url`,
-            [url, alias]
-          );
+      try {
+        for (const alias of aliases) {
+          if (alias && alias !== url) {
+            await query(
+              `INSERT INTO track_url_aliases (canonical_url, alias_url)
+               VALUES ($1, $2)
+               ON CONFLICT (alias_url) DO UPDATE SET canonical_url = EXCLUDED.canonical_url`,
+              [url, alias]
+            );
+          }
+        }
+        console.log(`[Cache] Сохранено ${aliases.length} алиасов для: ${title}`);
+      } catch (aliasErr) {
+        // Если таблица не существует - просто логируем предупреждение
+        if (aliasErr.message.includes('does not exist')) {
+          console.warn('[Cache] Таблица track_url_aliases не существует. Создайте её через SQL Editor.');
+        } else {
+          console.error('[Cache] Ошибка сохранения алиасов:', aliasErr.message);
         }
       }
-      console.log(`[Cache] Сохранено ${aliases.length} алиасов для: ${title}`);
     }
     
     console.log(`[✓ Cache Saved] ${title} - ${artist}`);
@@ -542,77 +565,77 @@ export async function cacheTrack(trackData) {
   }
 }
 
+/**
+ * Ищет трек в кэше по URL (с поддержкой алиасов)
+ */
 export async function findCachedTrack(trackUrl) {
   try {
     // ========================================
-    // ✅ ВРЕМЕННАЯ ДИАГНОСТИКА
+    // 1. ПРЯМОЙ ПОИСК ПО URL
     // ========================================
-    
-    // Извлекаем ключевые слова из URL для поиска похожих записей
-    const urlParts = trackUrl.split('/').filter(p => p && p.length > 3);
-    const lastPart = urlParts[urlParts.length - 1]; // Например: "fallon-diet-coke-extended-mix"
-    
-    if (lastPart) {
-      const debugQuery = `
-        SELECT 
-          url, 
-          LEFT(file_id, 25) as file_id_preview, 
-          title, 
-          artist,
-          duration
-        FROM track_cache
-        WHERE 
-          url ILIKE $1 
-          OR title ILIKE $2
-        LIMIT 10
-      `;
-      
-      try {
-        const { rows: debugRows } = await query(debugQuery, [
-          `%${lastPart}%`,
-          `%${lastPart.replace(/-/g, ' ')}%`
-        ]);
-        
-        if (debugRows.length > 0) {
-          console.log(`[DB/Debug] 🔍 Найдено ${debugRows.length} похожих записей для "${lastPart}":`);
-          debugRows.forEach((row, i) => {
-            console.log(`  ${i + 1}. URL: ${row.url.substring(0, 60)}...`);
-            console.log(`     Title: ${row.title} | Artist: ${row.artist} | Duration: ${row.duration}s`);
-          });
-        } else {
-          console.log(`[DB/Debug] ❌ Похожих записей для "${lastPart}" не найдено в БД`);
-        }
-      } catch (debugErr) {
-        console.warn('[DB/Debug] Ошибка диагностического запроса:', debugErr.message);
-      }
-    }
-    
-    // ========================================
-    // ОСНОВНОЙ ЗАПРОС
-    // ========================================
-    const { rows } = await query(
-      `SELECT 
-        file_id, 
-        title, 
-        artist, 
-        duration 
-      FROM track_cache 
-      WHERE url = $1 
-      LIMIT 1`,
+    const { rows: direct } = await query(
+      `SELECT file_id, title, artist, duration 
+       FROM track_cache 
+       WHERE url = $1 
+       LIMIT 1`,
       [trackUrl]
     );
     
-    if (rows.length > 0) {
-      console.log(`[✓ Cache HIT] ${rows[0].title} (по URL)`);
+    if (direct.length > 0) {
+      console.log(`[✓ Cache HIT] ${direct[0].title} (прямое совпадение)`);
       return {
-        fileId: rows[0].file_id,
-        trackName: rows[0].title,
-        artist: rows[0].artist,
-        duration: rows[0].duration
+        fileId: direct[0].file_id,
+        trackName: direct[0].title,
+        artist: direct[0].artist,
+        duration: direct[0].duration
       };
     }
     
-    console.log(`[✗ Cache MISS] Точного совпадения для URL не найдено: ${trackUrl.substring(0, 80)}...`);
+    // ========================================
+    // 2. ПОИСК ПО АЛИАСАМ
+    // ========================================
+    const { rows: aliased } = await query(
+      `SELECT tc.file_id, tc.title, tc.artist, tc.duration
+       FROM track_url_aliases tua
+       JOIN track_cache tc ON tua.canonical_url = tc.url
+       WHERE tua.alias_url = $1
+       LIMIT 1`,
+      [trackUrl]
+    );
+    
+    if (aliased.length > 0) {
+      console.log(`[✓ Cache HIT] ${aliased[0].title} (через алиас)`);
+      return {
+        fileId: aliased[0].file_id,
+        trackName: aliased[0].title,
+        artist: aliased[0].artist,
+        duration: aliased[0].duration
+      };
+    }
+    
+    // ========================================
+    // 3. ДИАГНОСТИКА (если не нашли)
+    // ========================================
+    const urlParts = trackUrl.split('/').filter(p => p && p.length > 3);
+    const lastPart = urlParts[urlParts.length - 1];
+    
+    if (lastPart) {
+      const { rows: debugRows } = await query(
+        `SELECT url, title, artist, duration
+         FROM track_cache
+         WHERE url ILIKE $1 OR title ILIKE $2
+         LIMIT 5`,
+        [`%${lastPart}%`, `%${lastPart.replace(/-/g, ' ')}%`]
+      );
+      
+      if (debugRows.length > 0) {
+        console.log(`[DB/Debug] 🔍 Найдено ${debugRows.length} похожих записей для "${lastPart}"`);
+      } else {
+        console.log(`[DB/Debug] ❌ Похожих записей не найдено`);
+      }
+    }
+    
+    console.log(`[✗ Cache MISS] ${trackUrl.substring(0, 80)}...`);
     return null;
     
   } catch (e) {
@@ -1400,23 +1423,25 @@ export async function incrementDownloadsAndLogPg(userId, trackTitle, fileId, url
  * @description Получает пользователей, у которых премиум-подписка истекает в ближайшие 3 дня.
  * @returns {Promise<Array<{id: number, username: string, first_name: string, premium_until: string, premium_limit: number}>>}
  */
+/**
+ * Получает пользователей с истекающей подпиской (0-3 дня)
+ */
 export async function getExpiringUsers() {
   try {
-    const query = `
+    const sql = `
       SELECT id, username, first_name, premium_until, premium_limit
       FROM users
       WHERE premium_until IS NOT NULL
         AND premium_until BETWEEN NOW() AND NOW() + interval '3 days'
-      ORDER BY premium_until ASC;
+      ORDER BY premium_until ASC
     `;
-    const { rows } = await pool.query(query);
+    const { rows } = await query(sql); // ⬅️ Используем глобальную функцию query
     return rows;
   } catch (error) {
-    console.error('Ошибка при получении пользователей с истекающей подпиской:', error);
-    return []; // Возвращаем пустой массив, чтобы приложение не падало
+    console.error('[DB] Ошибка при получении истекающих подписок:', error);
+    return [];
   }
 }
-
 /**
  * Получает все настройки из таблицы app_settings
  */
