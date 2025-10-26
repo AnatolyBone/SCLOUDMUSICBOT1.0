@@ -8,7 +8,7 @@ import { updateUserField, getUser, createUser, setPremium, getAllUsers, resetDai
 import { T, allTextsSync } from './config/texts.js';
 import { performInlineSearch } from './services/searchManager.js';
 import { spotifyEnqueue } from './services/spotifyManager.js';
-import { downloadQueue } from './services/downloadManager.js';
+import { downloadQueue, enqueue } from './services/downloadManager.js';
 import execYoutubeDl from 'youtube-dl-exec';
 import { handleReferralCommand, processNewUserReferral } from './services/referralManager.js';
 import { isShuttingDown, isMaintenanceMode, setMaintenanceMode } from './services/appState.js';
@@ -827,7 +827,73 @@ async function processUrlInBackground(ctx, url) {
 }
 
 async function handleSoundCloudUrl(ctx, url) {
-    processUrlInBackground(ctx, url);
+    // Для одиночных треков используем enqueue (с ранней проверкой кэша)
+    // Для плейлистов оставляем старую логику
+    
+    let loadingMessage;
+    try {
+        loadingMessage = await ctx.reply('🔍 Анализирую ссылку...');
+        const youtubeDl = getYoutubeDl();
+        
+        let data;
+        try {
+            data = await youtubeDl(url, {
+                dumpSingleJson: true,
+                flatPlaylist: true
+            });
+        } catch (ytdlError) {
+            console.error(`[youtube-dl] Ошибка:`, ytdlError.stderr || ytdlError.message);
+            throw new Error('Не удалось получить метаданные.');
+        }
+        
+        if (!data) {
+            throw new Error('Не удалось получить метаданные.');
+        }
+        
+        // === ПРОВЕРКА: ПЛЕЙЛИСТ ИЛИ ОДИНОЧНЫЙ ТРЕК ===
+        if (data.entries && data.entries.length > 1) {
+            // === ЭТО ПЛЕЙЛИСТ — используем старую логику ===
+            await ctx.deleteMessage(loadingMessage.message_id).catch(() => {});
+            
+            const playlistId = `pl_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+            playlistSessions.set(ctx.from.id, {
+                playlistId,
+                title: data.title,
+                tracks: data.entries,
+                originalUrl: url,
+                selected: new Set(),
+                currentPage: 0,
+                fullTracks: false
+            });
+            
+            const message = `🎶 В плейлисте <b>"${escapeHtml(data.title)}"</b> найдено <b>${data.entries.length}</b> треков.\n\nЧто делаем?`;
+            await ctx.reply(message, {
+                parse_mode: 'HTML',
+                ...generateInitialPlaylistMenu(playlistId, data.entries.length)
+            });
+            
+        } else {
+            // === ЭТО ОДИНОЧНЫЙ ТРЕК — используем enqueue ===
+            await ctx.deleteMessage(loadingMessage.message_id).catch(() => {});
+            
+            // ✅ ВЫЗЫВАЕМ ФУНКЦИЮ С РАННЕЙ ПРОВЕРКОЙ КЭША
+            enqueue(ctx, ctx.from.id, url);
+        }
+        
+    } catch (error) {
+        console.error('Ошибка при обработке URL:', error.message);
+        const userMessage = '❌ Не удалось обработать ссылку.';
+        if (loadingMessage) {
+            await ctx.telegram.editMessageText(
+                ctx.chat.id,
+                loadingMessage.message_id,
+                undefined,
+                userMessage
+            ).catch(() => {});
+        } else {
+            await ctx.reply(userMessage);
+        }
+    }
 }
 bot.on('text', async (ctx) => {
                 // =====> ПРАВИЛЬНЫЙ ВАРИАНТ <=====
