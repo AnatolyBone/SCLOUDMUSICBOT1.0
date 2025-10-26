@@ -682,7 +682,11 @@ export function enqueue(ctx, userId, url) {
           console.log(`[Enqueue] 🔗 Начинаю резолв URL...`);
           
           // Резолвим короткую ссылку в полную
-          const canonicalUrl = await resolveCanonicalUrl(url);
+         // Сохраняем оригинальную ссылку (может быть короткой)
+const originalShortUrl = url;
+
+// Резолвим короткую ссылку в полную
+const canonicalUrl = await resolveCanonicalUrl(url);
           
           console.log(`[Enqueue] ✅ Резолв завершён: ${canonicalUrl}`);
 
