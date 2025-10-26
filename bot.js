@@ -849,7 +849,7 @@ async function handleSoundCloudUrl(ctx, url) {
         
         // === ПРОВЕРКА: ПЛЕЙЛИСТ ИЛИ ОДИНОЧНЫЙ ТРЕК ===
         if (data.entries && data.entries.length > 1) {
-            // === ЭТО ПЛЕЙЛИСТ — используем старую логику ===
+            // ЭТО ПЛЕЙЛИСТ
             await ctx.deleteMessage(loadingMessage.message_id).catch(() => {});
             
             const playlistId = `pl_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
@@ -870,11 +870,11 @@ async function handleSoundCloudUrl(ctx, url) {
             });
             
         } else {
-            // === ЭТО ОДИНОЧНЫЙ ТРЕК ===
-            // ✅ УДАЛЯЕМ СООБЩЕНИЕ ИЗ bot.js
+            // ЭТО ОДИНОЧНЫЙ ТРЕК
+            // ✅ УДАЛЯЕМ СООБЩЕНИЕ И ПЕРЕДАЁМ УПРАВЛЕНИЕ enqueue
             await ctx.deleteMessage(loadingMessage.message_id).catch(() => {});
             
-            // ✅ ВЫЗЫВАЕМ enqueue - ОНО ПОКАЖЕТ СВОЁ СООБЩЕНИЕ
+            // enqueue САМ проверит кэш, покажет сообщения и обработает трек
             enqueue(ctx, ctx.from.id, url);
         }
         
