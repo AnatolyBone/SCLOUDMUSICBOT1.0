@@ -554,16 +554,24 @@ export function enqueue(ctx, userId, url) {
         return;
       }
 
-      if (url.includes('spotify.com')) {
-        await safeSendMessage(userId, '🛠 К сожалению, скачивание из Spotify временно на техническом обслуживании.');
-        return;
-      }
+    if (url.includes('spotify.com')) {
+  await safeSendMessage(userId, '🛠 К сожалению, скачивание из Spotify временно на техническом обслуживании.');
+  return;
+}
 
-      // ========================================
 // ========================================
-// ✅ РАННЯЯ ПРОВЕРКА КЭША ПО URL
+// ✅ РАННЯЯ ПРОВЕРКА КЭША (ДОБАВЬТЕ СЮДА!)
 // ========================================
+console.log(`[Enqueue/Debug] 🔍 Получен URL от ${userId}: ${url}`);
+
 const quickCached = await db.findCachedTrack(url);
+
+console.log(`[Enqueue/Debug] 📦 Результат findCachedTrack:`, {
+  found: !!quickCached,
+  fileId: quickCached?.fileId ? 'Есть' : 'Нет',
+  trackName: quickCached?.trackName
+});
+
 if (quickCached?.fileId) {
   console.log(`[⚡ FAST CACHE HIT] Мгновенная отправка: ${quickCached.trackName}`);
   
@@ -580,31 +588,24 @@ if (quickCached?.fileId) {
     
     await incrementDownload(userId, quickCached.trackName, quickCached.fileId, url);
     
-    const duration = (Date.now() - startTime) / 1000;
-    console.log(`[⚡ Cache] Трек отправлен за ${duration.toFixed(2)}с`);
-    return; // ← ВЫХОД!
+    console.log(`[⚡ Cache] Трек отправлен за ${(Date.now() - startTime) / 1000}с`);
+    return; // ← КРИТИЧЕСКИ ВАЖНО!
     
   } catch (sendErr) {
-    // Если file_id устарел — продолжаем обычную загрузку
-    if (sendErr?.description?.includes('FILE_REFERENCE_EXPIRED') ||
-      sendErr?.description?.includes('file_id')) {
-      console.warn('[Cache] file_id устарел, перезагружаю трек...');
-      
-      // ✅ ИСПРАВЛЕНО: используем функцию из db.js
-      if (typeof db.deleteCachedTrack === 'function') {
-        await db.deleteCachedTrack(url);
-      } else if (typeof db.query === 'function') {
-        await db.query('DELETE FROM track_cache WHERE url = $1', [url]);
-      }
-      // Продолжаем выполнение (не делаем return)
-      
+    console.error('[Enqueue/Debug] ❌ Ошибка отправки:', sendErr.message);
+    
+    if (sendErr?.description?.includes('FILE_REFERENCE_EXPIRED')) {
+      console.warn('[Cache] file_id устарел, перезагружаю...');
+      await db.deleteCachedTrack(url);
+      // Продолжаем дальше (НЕ делаем return)
     } else {
-      throw sendErr; // Другие ошибки пробрасываем
+      throw sendErr;
     }
   }
+} else {
+  console.log(`[Enqueue/Debug] ❌ Кэш не найден, продолжаю обычную загрузку`);
 }
 
-      // --- Сброс дневного лимита если нужно ---
       await db.resetDailyLimitIfNeeded(userId);
 
       // --- Получение данных пользователя ---
