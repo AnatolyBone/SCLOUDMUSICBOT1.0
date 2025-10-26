@@ -512,7 +512,7 @@ export async function cacheTrack(trackData) {
          artist = EXCLUDED.artist,
          duration = EXCLUDED.duration,
          thumbnail = EXCLUDED.thumbnail,
-         cached_at = NOW()`,
+         created_at = NOW()`,
             [url, fileId, title, artist, duration, thumbnail]
         );
         console.log(`[✓ Cache Saved] ${title} - ${artist}`);
