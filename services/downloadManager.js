@@ -62,23 +62,50 @@ function sanitizeFilename(name) {
   if (!name || typeof name !== 'string') return 'track';
   return name.replace(/[<>:"/\\|?*]+/g, '').trim() || 'track';
 }
+
+/**
+ * Очищает URL от параметров (utm, ref, si и т.д.)
+ */
+function cleanUrl(url) {
+  if (!url || typeof url !== 'string') return url;
+  
+  try {
+    const parsed = new URL(url);
+    
+    // Для SoundCloud оставляем только протокол + хост + путь (БЕЗ query-параметров)
+    if (parsed.hostname.includes('soundcloud.com')) {
+      return `${parsed.protocol}//${parsed.hostname}${parsed.pathname}`;
+    }
+    
+    // Для других URL возвращаем как есть
+    return url;
+  } catch (e) {
+    // Если URL невалидный, возвращаем оригинал
+    return url;
+  }
+}
+
 async function resolveCanonicalUrl(url) {
-  // Если это уже полная ссылка — возвращаем как есть
+  // 1. Сначала очищаем от параметров
+  url = cleanUrl(url);
+  
+  // 2. Если это уже полная ссылка — возвращаем как есть
   if (!url.includes('on.soundcloud.com')) {
     return url;
   }
   
   try {
     console.log(`[resolveUrl] Резолвлю короткую ссылку: ${url}`);
-    const info = await ytdl(url, { 
-      'dump-single-json': true, 
+    const info = await ytdl(url, {
+      'dump-single-json': true,
       'no-playlist': true,
-      ...YTDL_COMMON 
+      ...YTDL_COMMON
     });
     
     const canonical = info.webpage_url || info.url || url;
-    console.log(`[resolveUrl] Канонический URL: ${canonical}`);
-    return canonical;
+    const cleaned = cleanUrl(canonical); // 3. Очищаем результат от параметров
+    console.log(`[resolveUrl] Канонический URL: ${cleaned}`);
+    return cleaned;
     
   } catch (e) {
     console.warn('[resolveUrl] Не удалось резолвить, использую оригинальный:', e.message);
