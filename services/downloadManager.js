@@ -66,13 +66,25 @@ function sanitizeFilename(name) {
 /**
  * Очищает URL от параметров (utm, ref, si и т.д.)
  */
+/**
+ * Очищает URL от параметров (utm, ref, si и т.д.)
+ */
 function cleanUrl(url) {
   if (!url || typeof url !== 'string') return url;
   
   try {
     const parsed = new URL(url);
     
-    // Для SoundCloud оставляем только протокол + хост + путь (БЕЗ query-параметров)
+    // ========================================
+    // ✅ ИСПРАВЛЕНО: НЕ трогаем короткие ссылки
+    // ========================================
+    
+    // Короткие ссылки (on.soundcloud.com) НЕ трогаем - пусть yt-dlp сам их резолвит
+    if (parsed.hostname === 'on.soundcloud.com') {
+      return url; // Возвращаем как есть (с параметрами!)
+    }
+    
+    // Для ПОЛНЫХ ссылок soundcloud.com убираем параметры
     if (parsed.hostname.includes('soundcloud.com')) {
       return `${parsed.protocol}//${parsed.hostname}${parsed.pathname}`;
     }
@@ -81,35 +93,54 @@ function cleanUrl(url) {
     return url;
   } catch (e) {
     // Если URL невалидный, возвращаем оригинал
+    console.warn('[cleanUrl] Не удалось распарсить URL:', url, e.message);
     return url;
   }
 }
 
 async function resolveCanonicalUrl(url) {
+  console.log(`[resolveUrl/Debug] 📥 Входящий URL: ${url}`);
+  
   // 1. Сначала очищаем от параметров
-  url = cleanUrl(url);
+  const cleanedUrl = cleanUrl(url);
+  console.log(`[resolveUrl/Debug] 🧹 После cleanUrl: ${cleanedUrl}`);
   
   // 2. Если это уже полная ссылка — возвращаем как есть
-  if (!url.includes('on.soundcloud.com')) {
-    return url;
+  if (!cleanedUrl.includes('on.soundcloud.com')) {
+    console.log(`[resolveUrl/Debug] ✅ Полная ссылка, возвращаю: ${cleanedUrl}`);
+    return cleanedUrl;
   }
   
   try {
-    console.log(`[resolveUrl] Резолвлю короткую ссылку: ${url}`);
-    const info = await ytdl(url, {
+    console.log(`[resolveUrl] Резолвлю короткую ссылку: ${cleanedUrl}`);
+    
+    const info = await ytdl(cleanedUrl, {
       'dump-single-json': true,
       'no-playlist': true,
       ...YTDL_COMMON
     });
     
-    const canonical = info.webpage_url || info.url || url;
+    console.log(`[resolveUrl/Debug] 📊 Получены метаданные:`, {
+      webpage_url: info.webpage_url,
+      url: info.url,
+      id: info.id,
+      title: info.title
+    });
+    
+    const canonical = info.webpage_url || info.url || cleanedUrl;
     const cleaned = cleanUrl(canonical); // 3. Очищаем результат от параметров
     console.log(`[resolveUrl] Канонический URL: ${cleaned}`);
     return cleaned;
     
   } catch (e) {
-    console.warn('[resolveUrl] Не удалось резолвить, использую оригинальный:', e.message);
-    return url;
+    console.error('[resolveUrl] ❌ ОШИБКА резолва:', {
+      url: cleanedUrl,
+      error: e.message,
+      stderr: e.stderr,
+      code: e.code
+    });
+    console.warn('[resolveUrl] Использую оригинальный URL:', cleanedUrl);
+    return cleanedUrl;
   }
 }
 
@@ -627,12 +658,17 @@ export function enqueue(ctx, userId, url) {
         let statusMessage = null;
         const startTime = Date.now();
         
+        console.log(`[Enqueue/START] 🚀 Запуск для user ${userId}, URL: ${url}`);
+        
         try {
           // --- Валидация входных данных ---
           if (!url || typeof url !== 'string') {
-            console.error('[Enqueue] Некорректный URL:', url);
+            console.error('[Enqueue] ❌ Некорректный URL:', url);
+            await safeSendMessage(userId, '❌ Некорректная ссылка.');
             return;
           }
+          
+          console.log(`[Enqueue] ✅ URL валиден: ${url}`);
           
           if (url.includes('spotify.com')) {
             await safeSendMessage(userId, '🛠 К сожалению, скачивание из Spotify временно на техническом обслуживании.');
@@ -643,10 +679,13 @@ export function enqueue(ctx, userId, url) {
           // ✅ РАННЯЯ ПРОВЕРКА КЭША ПО URL
           // ========================================
           
+          console.log(`[Enqueue] 🔗 Начинаю резолв URL...`);
+          
           // Резолвим короткую ссылку в полную
           const canonicalUrl = await resolveCanonicalUrl(url);
           
-          console.log(`[Enqueue/Debug] 🔍 Проверяю кэш для URL: ${canonicalUrl}`);
+          console.log(`[Enqueue] ✅ Резолв завершён: ${canonicalUrl}`);
+
           
           const quickCached = await db.findCachedTrack(canonicalUrl);
           
