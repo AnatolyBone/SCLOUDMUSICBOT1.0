@@ -548,13 +548,7 @@ bot.action(/pl_download_all:|pl_download_10:/, async (ctx) => {
             source: 'soundcloud',
             url: track.webpage_url || track.url,
             originalUrl: track.webpage_url || track.url,
-            metadata: {
-                id: track.id,
-                title: track.title,
-                uploader: track.uploader,
-                duration: track.duration,
-                thumbnail: track.thumbnail
-            },
+            metadata: track, // <--- ИСПРАВЛЕНИЕ! Передаем ВЕСЬ объект track как metadata
         });
     }
     
@@ -700,13 +694,8 @@ bot.action(/pl_finish:(.+)/, async (ctx) => {
             source: 'soundcloud',
             url: track.webpage_url || track.url,
             originalUrl: track.webpage_url || track.url,
-            metadata: {
-                id: track.id,
-                title: track.title,
-                uploader: track.uploader,
-                duration: track.duration,
-                thumbnail: track.thumbnail
-            },
+            metadata: track,
+            
         });
     }
     
@@ -868,11 +857,18 @@ async function handleSoundCloudUrl(ctx, url) {
                 ...generateInitialPlaylistMenu(playlistId, data.entries.length)
             });
             
-        } else {
-            // ОДИНОЧНЫЙ ТРЕК — передаём в enqueue (там будет проверка кэша)
-            await ctx.deleteMessage(loadingMessage.message_id).catch(() => {});
-            enqueue(ctx, ctx.from.id, url);
-        }
+        // ...
+} else {
+    // ОДИНОЧНЫЙ ТРЕК — передаём в enqueue СРАЗУ С МЕТАДАННЫМИ
+    await ctx.deleteMessage(loadingMessage.message_id).catch(() => {});
+    
+    // Передаем в enqueue не просто URL, а объект с уже полученными данными!
+    enqueue(ctx, ctx.from.id, url, {
+        isSingleTrack: true,
+        metadata: data // <--- data уже содержит все, что нам нужно!
+    });
+}
+// ..
         
     } catch (error) {
         console.error('Ошибка handleSoundCloudUrl:', error.message);
