@@ -334,8 +334,15 @@ bot.command('fix', async (ctx) => {
     console.log(`[FIX_COMMAND] Шаг 4: Успех. Обновлено строк: ${updatedCount}`);
     
     if (updatedCount > 0) {
-        await ctx.telegram.editMessageText(ctx.chat.id, statusMessage.message_id, undefined, '✅ Готово! Файл в базе данных исправлен. Теперь при скачивании у него будет правильное имя.');
-    } else {
+    await ctx.telegram.editMessageText(ctx.chat.id, statusMessage.message_id, undefined, '✅ Готово! Файл в базе данных исправлен. Отправляю вам исправленную версию:');
+    
+    // ДОБАВЛЯЕМ ОТПРАВКУ ИСПРАВЛЕННОГО ФАЙЛА
+    await ctx.replyWithAudio(newFileId, {
+        title: trackInfo.title,
+        performer: trackInfo.artist
+    });
+    
+} else {
         await ctx.telegram.editMessageText(ctx.chat.id, statusMessage.message_id, undefined, '⚠️ Файл был перезалит, но что-то пошло не так при обновлении базы. Эффект может быть временным.');
     }
 
