@@ -4,7 +4,7 @@ import { Telegraf, Markup, TelegramError } from 'telegraf';
 import { HttpsProxyAgent } from 'https-proxy-agent';
 import { ADMIN_ID, BOT_TOKEN, WEBHOOK_URL, CHANNEL_USERNAME, STORAGE_CHANNEL_ID, PROXY_URL } from './config.js';
 import { updateUserField, getUser, createUser, setPremium, getAllUsers, resetDailyLimitIfNeeded, getCachedTracksCount, logUserAction, getTopFailedSearches, getTopRecentSearches, getNewUsersCount,findCachedTrack,           // <--- ДОБАВИТЬ
-    incrementDownloadsAndSaveTrack, getReferrerInfo, getReferredUsers, resetExpiredPremiumIfNeeded, getReferralStats} from './db.js';
+    incrementDownloadsAndSaveTrack, getReferrerInfo, getReferredUsers, resetExpiredPremiumIfNeeded, getReferralStats, findCachedTrackByFileId, updateFileId} from './db.js';
 import { T, allTextsSync } from './config/texts.js';
 import { performInlineSearch } from './services/searchManager.js';
 import { spotifyEnqueue } from './services/spotifyManager.js';
@@ -259,6 +259,76 @@ bot.start(async (ctx) => {
         ]).resize()
     });
 });
+
+function sanitizeFilename(name) {
+  if (!name || typeof name !== 'string') return 'track';
+  return name.replace(/[<>:"/\\|?*]+/g, '').trim() || 'track';
+}
+
+
+bot.command('fix', async (ctx) => {
+  // Проверяем, что это ответ на сообщение
+  if (!ctx.message.reply_to_message) {
+    return ctx.reply('ℹ️ Чтобы исправить файл, ответьте на сообщение с аудиозаписью этой командой.');
+  }
+
+  const repliedMessage = ctx.message.reply_to_message;
+
+  // Проверяем, что в сообщении есть аудио
+  if (!repliedMessage.audio) {
+    return ctx.reply('❌ Это не аудиофайл. Пожалуйста, ответьте на сообщение с музыкой.');
+  }
+  
+  // Проверяем, что есть канал-хранилище, без него магия не сработает
+  if (!STORAGE_CHANNEL_ID) {
+      return ctx.reply('🛠 К сожалению, эта функция временно недоступна (не настроено хранилище).');
+  }
+
+  const oldFileId = repliedMessage.audio.file_id;
+  let statusMessage;
+
+  try {
+    statusMessage = await ctx.reply('🔬 Начинаю процедуру "лечения" файла. Пожалуйста, подождите...');
+
+    // 1. Находим трек в нашей базе по старому file_id
+    const trackInfo = await findCachedTrackByFileId(oldFileId);
+    if (!trackInfo) {
+      return ctx.telegram.editMessageText(ctx.chat.id, statusMessage.message_id, undefined, '🤔 Не могу найти этот трек в своей базе. Возможно, он был скачан очень давно или не мной.');
+    }
+
+    // 2. Получаем временную ссылку на скачивание файла от Telegram
+    const fileLink = await ctx.telegram.getFileLink(oldFileId);
+
+    // 3. Загружаем этот же файл обратно в наш канал-хранилище, но с правильным именем
+    const title = trackInfo.title; // Берем идеальное название из нашей БД
+    
+    const sentToStorage = await bot.telegram.sendAudio(
+      STORAGE_CHANNEL_ID,
+      { url: fileLink.href, filename: `${sanitizeFilename(title)}.mp3` },
+      { title: title, performer: trackInfo.artist }
+    );
+    
+    const newFileId = sentToStorage?.audio?.file_id;
+    if (!newFileId) {
+        throw new Error('Не удалось получить новый file_id после загрузки в хранилище.');
+    }
+
+    // 4. Обновляем запись в базе данных
+    const updatedCount = await updateFileId(oldFileId, newFileId);
+    
+    if (updatedCount > 0) {
+        await ctx.telegram.editMessageText(ctx.chat.id, statusMessage.message_id, undefined, '✅ Готово! Файл в базе данных исправлен. Теперь при скачивании у него будет правильное имя. Вы можете запросить его по ссылке снова или найти в истории поиска.');
+    } else {
+        await ctx.telegram.editMessageText(ctx.chat.id, statusMessage.message_id, undefined, '⚠️ Файл был исправлен, но что-то пошло не так при обновлении базы. Эффект может быть временным.');
+    }
+
+  } catch (error) {
+    console.error('❌ Ошибка в команде /fix:', error);
+    if (statusMessage) {
+      await ctx.telegram.editMessageText(ctx.chat.id, statusMessage.message_id, undefined, '❌ Произошла ошибка во время исправления. Пожалуйста, попробуйте позже.');
+    }
+  }
+}); 
 bot.command('admin', async (ctx) => {
     if (ctx.from.id !== ADMIN_ID) return;
     try {
