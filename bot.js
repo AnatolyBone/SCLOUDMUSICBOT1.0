@@ -316,11 +316,17 @@ bot.command('fix', async (ctx) => {
     const title = trackInfo.title;
     console.log(`[FIX_COMMAND] Шаг 3: Перезагрузка в хранилище с именем "${title}.mp3"...`);
     
-    const sentToStorage = await bot.telegram.sendAudio(
-      STORAGE_CHANNEL_ID,
-      { url: fileLink.href, filename: `${sanitizeFilename(title)}.mp3` },
-      { title: title, performer: trackInfo.artist }
-    );
+    // Проверяем, заканчивается ли title на .mp3 (без учета регистра)
+const cleanTitle = sanitizeFilename(title);
+const filename = cleanTitle.toLowerCase().endsWith('.mp3') 
+    ? cleanTitle 
+    : `${cleanTitle}.mp3`;
+
+const sentToStorage = await bot.telegram.sendAudio(
+  STORAGE_CHANNEL_ID,
+  { url: fileLink.href, filename: filename }, // <-- Используем нашу умную переменную
+  //...
+);
     
     const newFileId = sentToStorage?.audio?.file_id;
     if (!newFileId) {
