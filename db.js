@@ -585,7 +585,7 @@ export async function findCachedTrack(trackUrl) {
       console.log(`[✓ Cache HIT] ${direct[0].title} (прямое совпадение)`);
       return {
         fileId: direct[0].file_id,
-        trackName: direct[0].title,
+        title: direct[0].title,
         artist: direct[0].artist,
         duration: direct[0].duration
       };
@@ -607,7 +607,7 @@ export async function findCachedTrack(trackUrl) {
       console.log(`[✓ Cache HIT] ${aliased[0].title} (через алиас)`);
       return {
         fileId: aliased[0].file_id,
-        trackName: aliased[0].title,
+        title: aliased[0].title,
         artist: aliased[0].artist,
         duration: aliased[0].duration
       };
@@ -677,7 +677,7 @@ export async function findCachedTrackByMeta({ title, artist, duration }) {
             console.log(`[✓ Cache HIT by Meta] ${rows[0].title} - ${rows[0].artist}`);
             return {
                 fileId: rows[0].file_id,
-                trackName: rows[0].title,
+                title: rows[0].title,
                 artist: rows[0].artist,
                 url: rows[0].url
             };
