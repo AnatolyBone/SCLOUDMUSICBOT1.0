@@ -147,15 +147,15 @@ export async function trackDownloadProcessor(task) {
       throw new Error(`Не удалось получить полную ссылку на трек из метаданных. Получено: ${fullUrl}`);
     }
     
-    let cached = await db.findCachedTrack(cacheKey) || await db.findCachedTrack(fullUrl);
-if (cached?.fileId) {
-  const options = { title: cached.title, performer: cached.artist };
-  console.log(`[DIAGNOSTIC-ENQUEUE] Отправка из кэша. Данные: ${JSON.stringify(cached)}`);
-  console.log(`[DIAGNOSTIC-ENQUEUE] Параметры для sendAudio: ${JSON.stringify(options)}`);
-  
-  console.log(`[Enqueue/FastPath] ⚡ КЭШ ХИТ! Отправляю "${cached.title}"`);
-  await bot.telegram.sendAudio(userId, cached.fileId, options);
-  await incrementDownload(userId, cached.title, cached.fileId, url);
+    // ... в функции trackDownloadProcessor
+let cached = await db.findCachedTrack(cacheKey) || await db.findCachedTrack(fullUrl);
+
+// VVV--------- ГЛАВНОЕ ИЗМЕНЕНИЕ ЗДЕСЬ ---------VVV
+if (cached?.fileId && cached.title) {
+  // ^^^-------------------------------------------^^^
+  console.log(`[Worker/Cache] УМНЫЙ КЭШ ХИТ! Отправляю "${cached.title}" из кэша.`);
+  await bot.telegram.sendAudio(userId, cached.fileId, { title: cached.title, performer: cached.artist || uploader, duration: roundedDuration });
+  await incrementDownload(userId, cached.title, cached.fileId, cacheKey);
   return;
 }
 
@@ -270,14 +270,17 @@ export function enqueue(ctx, userId, url, earlyData = {}) {
 
         const { webpage_url: fullUrl, id } = metadata;
         const cacheKey = id ? `sc:${id}` : null;
-        const cached = await db.findCachedTrack(url) || await db.findCachedTrack(fullUrl) || (cacheKey && await db.findCachedTrack(cacheKey));
+        // ... в функции enqueue
+const cached = await db.findCachedTrack(url) || await db.findCachedTrack(fullUrl) || (cacheKey && await db.findCachedTrack(cacheKey));
 
-        if (cached?.fileId) {
-            console.log(`[Enqueue/FastPath] ⚡ КЭШ ХИТ! Отправляю "${cached.trackName}"`);
-            await bot.telegram.sendAudio(userId, cached.fileId, { title: cached.trackName, performer: cached.artist });
-            await incrementDownload(userId, cached.trackName, cached.fileId, url);
-            return;
-        }
+// VVV--------- ГЛАВНОЕ ИЗМЕНЕНИЕ ЗДЕСЬ ---------VVV
+if (cached?.fileId && cached.title) {
+  // ^^^-------------------------------------------^^^
+  console.log(`[Enqueue/FastPath] ⚡ УМНЫЙ КЭШ ХИТ! Отправляю "${cached.title}"`);
+  await bot.telegram.sendAudio(userId, cached.fileId, { title: cached.title, performer: cached.artist });
+  await incrementDownload(userId, cached.title, cached.fileId, url);
+  return;
+}
 
         console.log('[Enqueue/FastPath] Кэш не найден. Ставлю задачу в очередь.');
         const task = { userId, url: fullUrl, originalUrl: url, source: 'soundcloud', cacheKey, metadata };
