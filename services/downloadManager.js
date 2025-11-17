@@ -149,11 +149,13 @@ export async function trackDownloadProcessor(task) {
     
     let cached = await db.findCachedTrack(cacheKey) || await db.findCachedTrack(fullUrl);
 if (cached?.fileId) {
-  // Используем cached.title, а если его нет, то title из метаданных как запасной вариант
-  const trackTitleToSend = cached.title || title;
-  console.log(`[Worker/Cache] ХИТ! Отправляю "${trackTitleToSend}" из кэша.`);
-  await bot.telegram.sendAudio(userId, cached.fileId, { title: trackTitleToSend, performer: cached.artist || uploader, duration: roundedDuration });
-  await incrementDownload(userId, trackTitleToSend, cached.fileId, cacheKey);
+  const options = { title: cached.title, performer: cached.artist };
+  console.log(`[DIAGNOSTIC-ENQUEUE] Отправка из кэша. Данные: ${JSON.stringify(cached)}`);
+  console.log(`[DIAGNOSTIC-ENQUEUE] Параметры для sendAudio: ${JSON.stringify(options)}`);
+  
+  console.log(`[Enqueue/FastPath] ⚡ КЭШ ХИТ! Отправляю "${cached.title}"`);
+  await bot.telegram.sendAudio(userId, cached.fileId, options);
+  await incrementDownload(userId, cached.title, cached.fileId, url);
   return;
 }
 
