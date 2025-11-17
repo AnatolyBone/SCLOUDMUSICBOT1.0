@@ -1464,3 +1464,36 @@ export async function setAppSetting(key, value) {
     [key, value]
   );
 }
+// db.js
+
+/**
+ * Находит запись в кэше по file_id
+ */
+export async function findCachedTrackByFileId(fileId) {
+  try {
+    const { rows } = await query(
+      'SELECT url, title, artist FROM track_cache WHERE file_id = $1 LIMIT 1',
+      [fileId]
+    );
+    return rows[0] || null;
+  } catch (e) {
+    console.error('[DB] Ошибка findCachedTrackByFileId:', e.message);
+    return null;
+  }
+}
+
+/**
+ * Обновляет file_id для записи в кэше, найденной по старому file_id
+ */
+export async function updateFileId(oldFileId, newFileId) {
+  try {
+    const { rowCount } = await query(
+      'UPDATE track_cache SET file_id = $1 WHERE file_id = $2',
+      [newFileId, oldFileId]
+    );
+    return rowCount;
+  } catch (e) {
+    console.error('[DB] Ошибка updateFileId:', e.message);
+    return 0;
+  }
+}
