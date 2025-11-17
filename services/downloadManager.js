@@ -169,10 +169,10 @@ if (cached?.fileId) {
       try {
         console.log(`[Worker/Stream] Передаю поток в канал-хранилище...`);
         const sentToStorage = await bot.telegram.sendAudio(
-          STORAGE_CHANNEL_ID,
-          { source: stream },
-          { title, performer: uploader, duration: roundedDuration }
-        );
+  STORAGE_CHANNEL_ID,
+  { source: stream, filename: `${sanitizeFilename(title)}.mp3` }, // <--- ДОБАВЛЕНО
+  { title, performer: uploader, duration: roundedDuration }
+);
         finalFileId = sentToStorage?.audio?.file_id;
         console.log(`[Worker/Stream] ✅ Успешно. file_id получен.`);
       } catch (e) {
@@ -196,9 +196,11 @@ if (cached?.fileId) {
     } else {
       console.warn('[Worker] Канал-хранилище не настроен. Повторно открываю поток...');
       const userStream = await scdl.default.download(fullUrl); // <--- ПРАВИЛЬНЫЙ ВЫЗОВ
-      const sentMsg = await bot.telegram.sendAudio(userId, { source: userStream }, { title, performer: uploader, duration: roundedDuration });
-      finalFileId = sentMsg?.audio?.file_id;
-    }
+      const sentMsg = await bot.telegram.sendAudio(
+    userId, 
+    { source: userStream, filename: `${sanitizeFilename(title)}.mp3` }, // <--- ДОБАВЛЕНО
+    { title, performer: uploader, duration: roundedDuration }
+);
 
     if (statusMessage) {
       await bot.telegram.deleteMessage(userId, statusMessage.message_id).catch(() => {});
@@ -207,7 +209,7 @@ if (cached?.fileId) {
     if (finalFileId) {
       await incrementDownload(userId, title, finalFileId, task.originalUrl || fullUrl);
     }
-
+}
   } catch (err) {
     const errorDetails = err?.stderr || err?.message || 'Неизвестная ошибка';
     const trackTitle = task?.metadata?.title ? `: "${task.metadata.title}"` : '';
