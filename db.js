@@ -1497,3 +1497,21 @@ export async function updateFileId(oldFileId, newFileId) {
     return 0;
   }
 }
+// db.js
+
+/**
+ * Получает все уникальные URL, которые когда-либо скачивал пользователь.
+ */
+export async function getUserUniqueDownloadedUrls(userId) {
+  try {
+    const { rows } = await query(
+      'SELECT DISTINCT url FROM downloads_log WHERE user_id = $1',
+      [userId]
+    );
+    // Возвращаем массив строк, а не объектов
+    return rows.map(row => row.url);
+  } catch (e) {
+    console.error(`[DB] Ошибка getUserUniqueDownloadedUrls для ${userId}:`, e.message);
+    return [];
+  }
+}
