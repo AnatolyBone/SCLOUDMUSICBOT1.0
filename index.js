@@ -19,6 +19,7 @@ import {
   resetDailyStats,
   getPaginatedUsers,
   getExpiringUsers,
+  resetCacheForUserHistory,
   setPremium,
   updateUserField,
   getDownloadsByUserId,
