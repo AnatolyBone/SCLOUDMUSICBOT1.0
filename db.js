@@ -313,8 +313,18 @@ export async function getPaginatedUsers(options) {
   else if (statusFilter === 'inactive') whereClauses.push('active = FALSE');
 
   // поиск
-  if (searchQuery) {
-    params.push(`%${searchQuery}%`);
+ if (searchQuery) {
+    // Очищаем запрос от лишних пробелов
+    let cleanQuery = searchQuery.trim();
+    
+    // Если запрос начинается с @, убираем этот символ для поиска по username
+    if (cleanQuery.startsWith('@')) {
+      cleanQuery = cleanQuery.substring(1);
+    }
+
+    params.push(`%${cleanQuery}%`);
+    
+    // Ищем совпадения по ID, Имени или Username (в Username уже без @)
     whereClauses.push(`(CAST(id AS TEXT) ILIKE $${i} OR first_name ILIKE $${i} OR username ILIKE $${i})`);
     i++;
   }
