@@ -1,4 +1,4 @@
-<%# views/user-profile.ejs (Final Fixed Version) %>
+<%# views/user-profile.ejs (Final Version with Date Picker) %>
 
 <%# === Хелперы и функции === %>
 <% 
@@ -71,8 +71,9 @@
 <%# Уведомление об успешном исправлении кэша %>
 <% if (qParams.fixedCount) { %>
   <div class="alert alert-success alert-dismissible fade show" role="alert">
-    <i class="bi bi-check-circle-fill me-2"></i>
-    <strong>Успешно!</strong> Сброшен кэш для <b><%= qParams.fixedCount %></b> треков. Теперь пользователь получит файлы с правильным именем.
+    <i class="bi bi-magic me-2"></i>
+    <strong>Успешно!</strong> Сброшен кэш для <b><%= qParams.fixedCount %></b> треков (до <%= qParams.fixedDate %>).
+    <br><small>Теперь при повторном скачивании названия файлов будут корректными.</small>
     <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
   </div>
 <% } %>
@@ -215,27 +216,40 @@
       </div>
     </div>
 
-    <%# === НОВЫЙ БЛОК: ИСПРАВЛЕНИЕ AUDIO.MP3 === %>
+    <%# === 🛑 БЛОК ИСПРАВЛЕНИЯ АУДИО (С ВЫБОРОМ ДАТЫ) === %>
     <div class="card shadow-sm border-warning mb-4">
       <div class="card-header bg-warning text-dark fw-bold">
-        <i class="bi bi-wrench-adjustable me-2"></i>Исправление (audio.mp3)
+        <i class="bi bi-wrench-adjustable me-2"></i>Управление кэшем
       </div>
       <div class="card-body">
         <p class="small text-muted mb-3">
-          Инструменты для пользователей, у которых старые треки (до 17.11) сохранились с неверным именем файла.
+          Если у пользователя старые треки скачиваются с именем <code>audio.mp3</code>, выберите дату (до какого числа сбрасывать) и нажмите исправить.
         </p>
-        <div class="d-grid gap-2">
-          <!-- 1. СКАЧАТЬ СПИСОК ССЫЛОК -->
-          <a href="/admin/user/<%= u.id %>/links" class="btn btn-sm btn-outline-primary d-flex align-items-center justify-content-center">
-            <i class="bi bi-file-earmark-text me-2"></i> Скачать историю ссылок (.txt)
-          </a>
+        
+        <form action="/admin/user/<%= u.id %>/fix-cache" method="POST">
+          <div class="mb-3">
+            <label for="fixDate" class="form-label small fw-bold text-muted">Сбросить треки, скачанные ДО:</label>
+            <input 
+              type="date" 
+              class="form-control form-control-sm" 
+              id="fixDate" 
+              name="fixDate" 
+              value="2024-11-17" 
+              required
+            >
+          </div>
+          
+          <button type="submit" class="btn btn-sm btn-danger w-100 d-flex align-items-center justify-content-center" onclick="return confirm('Вы уверены? Это заставит бота заново скачивать старые треки этого пользователя при следующем запросе.');">
+            <i class="bi bi-magic me-2"></i> Исправить кэш
+          </button>
+        </form>
 
-          <!-- 2. ПОЧИНИТЬ КЭШ -->
-          <form action="/admin/user/<%= u.id %>/fix-cache" method="POST" class="d-grid">
-            <button type="submit" class="btn btn-sm btn-outline-danger d-flex align-items-center justify-content-center" onclick="return confirm('Сбросить кэш для старых треков этого пользователя? Бот перезакачает их при следующем запросе.');">
-              <i class="bi bi-magic me-2"></i> Сбросить "плохой" кэш
-            </button>
-          </form>
+        <hr class="my-2 text-muted opacity-25">
+        
+        <div class="text-center">
+            <a href="/admin/user/<%= u.id %>/links" class="small text-decoration-none text-secondary">
+              <i class="bi bi-file-earmark-text me-1"></i>Скачать список ссылок (.txt)
+            </a>
         </div>
       </div>
     </div>
