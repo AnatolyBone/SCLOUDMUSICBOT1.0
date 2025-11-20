@@ -923,6 +923,46 @@ app.post('/tariffs/reset-others', requireAuth, async (req, res) => {
     res.redirect(back);
   });
 }
+// --- НОВЫЕ РОУТЫ ДЛЯ РАБОТЫ С ИСТОРИЕЙ ПОЛЬЗОВАТЕЛЯ ---
 
+// 1. Скачать список ссылок пользователя (txt файл)
+app.get('/admin/user/:id/links', requireAuth, async (req, res) => {
+  try {
+    const userId = req.params.id;
+    const urls = await getUserUniqueDownloadedUrls(userId); // Эта функция у тебя уже есть в конце db.js
+    
+    if (!urls || urls.length === 0) {
+      return res.send('История скачиваний пуста.');
+    }
+
+    const content = urls.join('\n');
+    res.setHeader('Content-Disposition', `attachment; filename="links_${userId}.txt"`);
+    res.setHeader('Content-Type', 'text/plain');
+    res.send(content);
+  } catch (e) {
+    console.error(e);
+    res.status(500).send('Ошибка при генерации списка ссылок');
+  }
+});
+
+// 2. Починить кэш для конкретного пользователя
+app.post('/admin/user/:id/fix-cache', requireAuth, async (req, res) => {
+  try {
+    const userId = req.params.id;
+    // Импортируем функцию (убедись, что добавил её в импорт db.js в начале файла index.js)
+    const { resetCacheForUserHistory } = await import('./db.js'); 
+    
+    const count = await resetCacheForUserHistory(userId);
+    
+    // Отправляем сообщение пользователю, если нужно
+    // await bot.telegram.sendMessage(userId, '✅ Мы обновили базу ваших треков. Теперь при скачивании старых песен названия будут корректными.');
+
+    // Возвращаем обратно на страницу профиля с уведомлением
+    res.redirect(`/user/${userId}?fixedCount=${count}`);
+  } catch (e) {
+    console.error(e);
+    res.status(500).send('Ошибка при сбросе кэша пользователя');
+  }
+});
 // Запускаем приложение
 startApp();
