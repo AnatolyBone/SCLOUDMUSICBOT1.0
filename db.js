@@ -1542,3 +1542,28 @@ export async function resetCacheForUserHistory(userId, beforeDate = '2024-11-17'
     return 0;
   }
 }
+export async function fixBadCacheForUser(userId, dateLimit) {
+  try {
+    // Если дата не передана, используем текущую (сброс всего прошлого)
+    const limit = dateLimit || new Date().toISOString().split('T')[0];
+
+    const sql = `
+      UPDATE track_cache
+      SET file_id = NULL
+      WHERE url IN (
+        SELECT DISTINCT url 
+        FROM downloads_log 
+        WHERE user_id = $1 
+          AND downloaded_at < $2::date
+      )
+      AND file_id IS NOT NULL
+    `;
+    
+    const { rowCount } = await query(sql, [userId, limit]);
+    console.log(`[DB Fix] User ${userId}: сброшен кэш для ${rowCount} треков (до ${limit}).`);
+    return rowCount;
+  } catch (e) {
+    console.error('[DB Fix Error]', e.message);
+    return 0;
+  }
+}
