@@ -811,9 +811,12 @@ export async function getActiveUsersByDate() {
   return rows.reduce((acc, row) => ({ ...acc, [row.date]: parseInt(row.count, 10) }), {});
 }
 
+// =================================================================
+// ЗАМЕНИТЬ СУЩЕСТВУЮЩУЮ ФУНКЦИЮ getDownloadsByUserId В db.js
+// =================================================================
 export async function getDownloadsByUserId(userId, limit = 50) {
   const { rows } = await query(
-    `SELECT track_title, downloaded_at
+    `SELECT track_title, downloaded_at, url 
      FROM downloads_log
      WHERE user_id = $1
      ORDER BY downloaded_at DESC
@@ -1513,5 +1516,29 @@ export async function getUserUniqueDownloadedUrls(userId) {
   } catch (e) {
     console.error(`[DB] Ошибка getUserUniqueDownloadedUrls для ${userId}:`, e.message);
     return [];
+  }
+}
+export async function resetCacheForUserHistory(userId, beforeDate = '2024-11-17') {
+  try {
+    // 1. Находим уникальные URL, которые качал юзер до даты фикса
+    // 2. Обновляем таблицу track_cache, обнуляя file_id для этих URL
+    const sql = `
+      UPDATE track_cache
+      SET file_id = NULL
+      WHERE url IN (
+        SELECT DISTINCT url 
+        FROM downloads_log 
+        WHERE user_id = $1 
+          AND downloaded_at < $2::date
+      )
+      AND file_id IS NOT NULL
+    `;
+    
+    const { rowCount } = await query(sql, [userId, beforeDate]);
+    console.log(`[DB Fix] Пользователь ${userId}: сброшен кэш для ${rowCount} треков.`);
+    return rowCount;
+  } catch (e) {
+    console.error('[DB Fix Error]', e.message);
+    return 0;
   }
 }
