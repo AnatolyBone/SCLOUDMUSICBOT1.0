@@ -947,22 +947,23 @@ app.get('/admin/user/:id/links', requireAuth, async (req, res) => {
 });
 
 // 2. Починить кэш для конкретного пользователя
+
 app.post('/admin/user/:id/fix-cache', requireAuth, async (req, res) => {
   try {
     const userId = req.params.id;
-    // Импортируем функцию (убедись, что добавил её в импорт db.js в начале файла index.js)
-    const { resetCacheForUserHistory } = await import('./db.js'); 
+    const { fixDate } = req.body; // Получаем дату из формы
     
-    const count = await resetCacheForUserHistory(userId);
-    
-    // Отправляем сообщение пользователю, если нужно
-    // await bot.telegram.sendMessage(userId, '✅ Мы обновили базу ваших треков. Теперь при скачивании старых песен названия будут корректными.');
+    // Импорт функции (если еще не импортирована вверху файла)
+    // import { fixBadCacheForUser } from './db.js'; 
+    // Или используем динамический импорт, если так удобнее:
+    const { fixBadCacheForUser } = await import('./db.js');
 
-    // Возвращаем обратно на страницу профиля с уведомлением
-    res.redirect(`/user/${userId}?fixedCount=${count}`);
+    const count = await fixBadCacheForUser(userId, fixDate);
+    
+    res.redirect(`/user/${userId}?fixedCount=${count}&fixedDate=${fixDate}`);
   } catch (e) {
     console.error(e);
-    res.status(500).send('Ошибка при сбросе кэша пользователя');
+    res.status(500).send('Ошибка при исправлении кэша: ' + e.message);
   }
 });
 // Запускаем приложение
