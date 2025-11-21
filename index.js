@@ -17,6 +17,8 @@ import {
   pool,
   getUserById,
   resetDailyStats,
+  getUserUniqueDownloadedUrls,
+  fixBadCacheForUser,
   getPaginatedUsers,
   getExpiringUsers,
   setPremium,
