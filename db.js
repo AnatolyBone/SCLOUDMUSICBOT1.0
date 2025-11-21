@@ -1587,28 +1587,6 @@ export async function fixBadCacheForUser(userId, dateLimit) {
     
     return updateRes.rowCount;
     
-
-    // 2. Проверим, сколько из этих ссылок есть в кэше (track_cache)
-    // Используем ANY($1) для передачи массива строк
-    const cacheCheck = await query(
-      `SELECT COUNT(*) FROM track_cache WHERE url = ANY($1)`,
-      [urls]
-    );
-    console.log(`[Debug] 🔗 Из них найдено в таблице кэша (точное совпадение): ${cacheCheck.rows[0].count}`);
-
-    // 3. Пробуем обновить
-    const updateSql = `
-      UPDATE track_cache
-      SET file_id = NULL
-      WHERE url = ANY($1)
-      AND file_id IS NOT NULL
-    `;
-    
-    const updateRes = await query(updateSql, [urls]);
-    console.log(`[Debug] ✅ Успешно очищено file_id у ${updateRes.rowCount} треков.`);
-    
-    return updateRes.rowCount;
-
   } catch (e) {
     console.error('[DB Fix Error]', e);
     return 0;
