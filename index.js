@@ -922,7 +922,42 @@ app.post('/tariffs/reset-others', requireAuth, async (req, res) => {
     const back = req.get('Referer') || '/users';
     res.redirect(back);
   });
-}
+// 1. Скачать список ссылок
+  app.get('/admin/user/:id/links', requireAuth, async (req, res) => {
+    try {
+      const userId = req.params.id;
+      const urls = await getUserUniqueDownloadedUrls(userId);
+      
+      if (!urls || urls.length === 0) {
+        res.setHeader('Content-Type', 'text/plain; charset=utf-8'); // Важно для корректного отображения текста
+        return res.send('История скачиваний пуста.');
+      }
 
+      const content = urls.join('\n');
+      res.setHeader('Content-Disposition', `attachment; filename="links_${userId}.txt"`);
+      res.setHeader('Content-Type', 'text/plain');
+      res.send(content);
+    } catch (e) {
+      console.error(e);
+      res.status(500).send('Ошибка при генерации списка ссылок');
+    }
+  });
+
+  // 2. Починить кэш
+  app.post('/admin/user/:id/fix-cache', requireAuth, async (req, res) => {
+    try {
+      const userId = req.params.id;
+      const { fixDate } = req.body;
+
+      const count = await fixBadCacheForUser(userId, fixDate);
+      
+      res.redirect(`/user/${userId}?fixedCount=${count}&fixedDate=${fixDate}`);
+    } catch (e) {
+      console.error(e);
+      res.status(500).send('Ошибка при исправлении кэша: ' + e.message);
+    }
+  });
+
+}
 // Запускаем приложение
 startApp();
