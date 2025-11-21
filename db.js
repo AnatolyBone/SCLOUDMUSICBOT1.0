@@ -1552,28 +1552,52 @@ export async function resetCacheForUserHistory(userId, beforeDate = '2024-11-17'
     return 0;
   }
 }
+// =================================================================
+// ЗАМЕНИТЬ ФУНКЦИЮ fixBadCacheForUser В db.js (ВЕРСИЯ С ОТЛАДКОЙ)
+// =================================================================
+
 export async function fixBadCacheForUser(userId, dateLimit) {
   try {
-    // Если дата не передана, используем текущую (сброс всего прошлого)
     const limit = dateLimit || new Date().toISOString().split('T')[0];
+    console.log(`[Debug] 🛠 Начинаю фикс для User ${userId}. Дата отсечки: ${limit}`);
 
-    const sql = `
+    // 1. Сначала посмотрим, что вообще есть в логах у юзера
+    const logRes = await query(
+      `SELECT DISTINCT url FROM downloads_log WHERE user_id = $1 AND downloaded_at < $2::date`,
+      [userId, limit]
+    );
+    
+    const urls = logRes.rows.map(r => r.url);
+    console.log(`[Debug] 📂 Найдено в истории пользователя: ${urls.length} ссылок.`);
+    
+    if (urls.length === 0) {
+      console.log('[Debug] ⚠️ История пуста за этот период.');
+      return 0;
+    }
+
+    // 2. Проверим, сколько из этих ссылок есть в кэше (track_cache)
+    // Используем ANY($1) для передачи массива строк
+    const cacheCheck = await query(
+      `SELECT COUNT(*) FROM track_cache WHERE url = ANY($1)`,
+      [urls]
+    );
+    console.log(`[Debug] 🔗 Из них найдено в таблице кэша (точное совпадение): ${cacheCheck.rows[0].count}`);
+
+    // 3. Пробуем обновить
+    const updateSql = `
       UPDATE track_cache
       SET file_id = NULL
-      WHERE url IN (
-        SELECT DISTINCT url 
-        FROM downloads_log 
-        WHERE user_id = $1 
-          AND downloaded_at < $2::date
-      )
+      WHERE url = ANY($1)
       AND file_id IS NOT NULL
     `;
     
-    const { rowCount } = await query(sql, [userId, limit]);
-    console.log(`[DB Fix] User ${userId}: сброшен кэш для ${rowCount} треков (до ${limit}).`);
-    return rowCount;
+    const updateRes = await query(updateSql, [urls]);
+    console.log(`[Debug] ✅ Успешно очищено file_id у ${updateRes.rowCount} треков.`);
+    
+    return updateRes.rowCount;
+
   } catch (e) {
-    console.error('[DB Fix Error]', e.message);
+    console.error('[DB Fix Error]', e);
     return 0;
   }
 }
