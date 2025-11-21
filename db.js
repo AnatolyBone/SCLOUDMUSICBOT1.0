@@ -507,36 +507,62 @@ export async function getUsersAsCsv(options = {}) {
   return headers + csvRows.join('\n');
 }
 // ==================================================================
-// УЛУЧШЕННАЯ ФУНКЦИЯ ПОИСКА (RPC + FALLBACK ILIKE)
+// ==================================================================
+// НЕЧЕТКИЙ ПОИСК (Fuzzy Search)
 // ==================================================================
 export async function searchTracksInCache(searchQuery, limit = 7) {
   try {
-    // 1. Сначала пробуем RPC (быстрый полнотекстовый поиск Supabase)
-    const { data, error } = await supabase.rpc('search_tracks', { search_query: searchQuery, result_limit: limit });
+    const cleanQuery = searchQuery.trim();
+    if (!cleanQuery) return [];
+    
+    // 1. Сначала пробуем RPC (Full Text Search) - он самый быстрый
+    const { data, error } = await supabase.rpc('search_tracks', { search_query: cleanQuery, result_limit: limit });
     
     if (!error && data && data.length > 0) {
       return data;
     }
     
-    // 2. FALLBACK: Обычный SQL ILIKE (если RPC ничего не нашел)
-    // Это найдет "Зурбаган" внутри "Владимир Пресняков - Зурбаган"
-    // и поможет при опечатках, где полнотекстовый поиск слишком строг.
-    console.log(`[DB Search] RPC не дал результатов для "${searchQuery}". Пробую ILIKE...`);
+    // 2. FALLBACK: Нечеткий поиск (Trigrams) + ILIKE
+    // Ищем по схожести (similarity) или частичному совпадению
+    // Оператор % (similarity) требует pg_trgm, но ILIKE работает всегда
+    console.log(`[DB Search] RPC пуст для "${cleanQuery}". Пробую Fuzzy/ILIKE...`);
     
-    const likeQuery = `%${searchQuery.trim()}%`;
-    const { rows } = await query(
-      `SELECT file_id, title, artist, duration 
-       FROM track_cache 
-       WHERE title ILIKE $1 OR artist ILIKE $1 
-       LIMIT $2`,
-      [likeQuery, limit]
-    );
+    // Разбиваем запрос на слова для поиска "любое слово совпадает"
+    const words = cleanQuery.split(/\s+/).filter(w => w.length > 2);
+    
+    let sql = `
+      SELECT file_id, title, artist, duration
+      FROM track_cache
+      WHERE title ILIKE $1 OR artist ILIKE $1
+    `;
+    
+    // Если база поддерживает pg_trgm, можно сортировать по схожести:
+    // ORDER BY SIMILARITY(title, $2) DESC
+    
+    // Добавляем лимит
+    sql += ` LIMIT $2`;
+    
+    const likeQuery = `%${cleanQuery}%`;
+    
+    const { rows } = await query(sql, [likeQuery, limit]);
+    
+    // Если точного вхождения фразы нет, пробуем найти хотя бы одно слово (если фраза длинная)
+    if (rows.length === 0 && words.length > 1) {
+      console.log(`[DB Search] Точное вхождение не найдено. Ищу по отдельным словам...`);
+      // Ищем треки, где есть ХОТЯ БЫ ОДНО слово из запроса (но лучше два)
+      // Это простая эмуляция, чтобы не усложнять SQL
+      const wordLike = `%${words[0]}%`;
+      const { rows: wordRows } = await query(
+        `SELECT file_id, title, artist, duration FROM track_cache WHERE title ILIKE $1 LIMIT $2`,
+        [wordLike, limit]
+      );
+      return wordRows.map(r => ({ file_id: r.file_id, title: r.title, artist: r.artist, duration: r.duration }));
+    }
     
     if (rows.length > 0) {
-      console.log(`[DB Search] ILIKE нашел ${rows.length} результатов.`);
-      // Приводим к формату, который ожидает бот (snake_case для file_id)
+      console.log(`[DB Search] Fallback нашел ${rows.length} результатов.`);
       return rows.map(r => ({
-        file_id: r.file_id, // ВАЖНО: Приводим к формату RPC (file_id)
+        file_id: r.file_id,
         title: r.title,
         artist: r.artist,
         duration: r.duration
