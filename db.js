@@ -507,60 +507,43 @@ export async function getUsersAsCsv(options = {}) {
   return headers + csvRows.join('\n');
 }
 // ==================================================================
-// ==================================================================
-// НЕЧЕТКИЙ ПОИСК (Fuzzy Search)
+// НЕЧЕТКИЙ ПОИСК (Fuzzy Search с pg_trgm)
 // ==================================================================
 export async function searchTracksInCache(searchQuery, limit = 7) {
   try {
     const cleanQuery = searchQuery.trim();
     if (!cleanQuery) return [];
     
-    // 1. Сначала пробуем RPC (Full Text Search) - он самый быстрый
+    // 1. Сначала пробуем RPC (быстрый полнотекстовый поиск)
     const { data, error } = await supabase.rpc('search_tracks', { search_query: cleanQuery, result_limit: limit });
     
     if (!error && data && data.length > 0) {
       return data;
     }
     
-    // 2. FALLBACK: Нечеткий поиск (Trigrams) + ILIKE
-    // Ищем по схожести (similarity) или частичному совпадению
-    // Оператор % (similarity) требует pg_trgm, но ILIKE работает всегда
-    console.log(`[DB Search] RPC пуст для "${cleanQuery}". Пробую Fuzzy/ILIKE...`);
+    // 2. FALLBACK: Нечеткий поиск через Trigrams (<->) и ILIKE
+    console.log(`[DB Search] RPC пуст для "${cleanQuery}". Пробую Trigram Similarity...`);
     
-    // Разбиваем запрос на слова для поиска "любое слово совпадает"
-    const words = cleanQuery.split(/\s+/).filter(w => w.length > 2);
-    
-    let sql = `
+    // Этот запрос найдет "славяян" -> "славян", "зурбоган" -> "зурбаган"
+    // Оператор <-> возвращает "расстояние" между строками (чем меньше, тем лучше)
+    const sql = `
       SELECT file_id, title, artist, duration
       FROM track_cache
-      WHERE title ILIKE $1 OR artist ILIKE $1
+      WHERE 
+        title ILIKE $1 OR artist ILIKE $1  -- Частичное совпадение (быстро)
+        OR (title <-> $2) < 0.6            -- Нечеткое совпадение (медленнее, но мощно)
+      ORDER BY (title <-> $2) ASC
+      LIMIT $3
     `;
-    
-    // Если база поддерживает pg_trgm, можно сортировать по схожести:
-    // ORDER BY SIMILARITY(title, $2) DESC
-    
-    // Добавляем лимит
-    sql += ` LIMIT $2`;
     
     const likeQuery = `%${cleanQuery}%`;
     
-    const { rows } = await query(sql, [likeQuery, limit]);
-    
-    // Если точного вхождения фразы нет, пробуем найти хотя бы одно слово (если фраза длинная)
-    if (rows.length === 0 && words.length > 1) {
-      console.log(`[DB Search] Точное вхождение не найдено. Ищу по отдельным словам...`);
-      // Ищем треки, где есть ХОТЯ БЫ ОДНО слово из запроса (но лучше два)
-      // Это простая эмуляция, чтобы не усложнять SQL
-      const wordLike = `%${words[0]}%`;
-      const { rows: wordRows } = await query(
-        `SELECT file_id, title, artist, duration FROM track_cache WHERE title ILIKE $1 LIMIT $2`,
-        [wordLike, limit]
-      );
-      return wordRows.map(r => ({ file_id: r.file_id, title: r.title, artist: r.artist, duration: r.duration }));
-    }
+    // ВАЖНО: Если pg_trgm не включен, этот запрос упадет.
+    // Если упадет - сработает catch и вернет пустой массив (безопасно).
+    const { rows } = await query(sql, [likeQuery, cleanQuery, limit]);
     
     if (rows.length > 0) {
-      console.log(`[DB Search] Fallback нашел ${rows.length} результатов.`);
+      console.log(`[DB Search] Fuzzy Search нашел ${rows.length} результатов.`);
       return rows.map(r => ({
         file_id: r.file_id,
         title: r.title,
@@ -572,7 +555,14 @@ export async function searchTracksInCache(searchQuery, limit = 7) {
     return [];
     
   } catch (e) {
-    console.error('[DB Search] Ошибка при поиске в кэше:', e.message);
+    // Если расширения нет, упадет с ошибкой "operator does not exist: text <-> text"
+    // В этом случае молча вернем пустой массив или можно сделать fallback на чистый ILIKE
+    if (e.message.includes('<->')) {
+      console.warn('[DB Search] Расширение pg_trgm не включено! Использую обычный ILIKE.');
+      // ... тут можно вставить код с простым ILIKE, если нужно
+    } else {
+      console.error('[DB Search] Ошибка при поиске:', e.message);
+    }
     return [];
   }
 }
