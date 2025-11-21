@@ -507,6 +507,7 @@ export async function getUsersAsCsv(options = {}) {
   return headers + csvRows.join('\n');
 }
 // ==================================================================
+// ==================================================================
 // НЕЧЕТКИЙ ПОИСК (Fuzzy Search с pg_trgm)
 // ==================================================================
 export async function searchTracksInCache(searchQuery, limit = 7) {
@@ -521,25 +522,23 @@ export async function searchTracksInCache(searchQuery, limit = 7) {
       return data;
     }
     
-    // 2. FALLBACK: Нечеткий поиск через Trigrams (<->) и ILIKE
+    // 2. FALLBACK: Умный нечеткий поиск (Trigram Similarity)
     console.log(`[DB Search] RPC пуст для "${cleanQuery}". Пробую Trigram Similarity...`);
     
-    // Этот запрос найдет "славяян" -> "славян", "зурбоган" -> "зурбаган"
-    // Оператор <-> возвращает "расстояние" между строками (чем меньше, тем лучше)
+    // <-> это оператор "расстояния". Чем меньше значение, тем больше строки похожи.
+    // Порог 0.8 позволяет находить даже грубые опечатки.
     const sql = `
       SELECT file_id, title, artist, duration
       FROM track_cache
       WHERE 
-        title ILIKE $1 OR artist ILIKE $1  -- Частичное совпадение (быстро)
-        OR (title <-> $2) < 0.6            -- Нечеткое совпадение (медленнее, но мощно)
-      ORDER BY (title <-> $2) ASC
+        title ILIKE $1 OR artist ILIKE $1  -- Сначала пробуем простое вхождение (быстро)
+        OR (title <-> $2) < 0.8            -- Если нет, ищем похожие по написанию (чуть медленнее)
+      ORDER BY (title <-> $2) ASC          -- Сортируем: самые похожие сверху
       LIMIT $3
     `;
     
     const likeQuery = `%${cleanQuery}%`;
     
-    // ВАЖНО: Если pg_trgm не включен, этот запрос упадет.
-    // Если упадет - сработает catch и вернет пустой массив (безопасно).
     const { rows } = await query(sql, [likeQuery, cleanQuery, limit]);
     
     if (rows.length > 0) {
@@ -555,14 +554,16 @@ export async function searchTracksInCache(searchQuery, limit = 7) {
     return [];
     
   } catch (e) {
-    // Если расширения нет, упадет с ошибкой "operator does not exist: text <-> text"
-    // В этом случае молча вернем пустой массив или можно сделать fallback на чистый ILIKE
-    if (e.message.includes('<->')) {
-      console.warn('[DB Search] Расширение pg_trgm не включено! Использую обычный ILIKE.');
-      // ... тут можно вставить код с простым ILIKE, если нужно
-    } else {
-      console.error('[DB Search] Ошибка при поиске:', e.message);
+    // Если расширение вдруг отключится, код не упадет, а напишет варнинг
+    if (e.message.includes('operator does not exist') && e.message.includes('<->')) {
+      console.warn('[DB Search] Расширение pg_trgm не работает! Откатываюсь на ILIKE.');
+      // Fallback на безопасный ILIKE
+      const safeSql = `SELECT file_id, title, artist, duration FROM track_cache WHERE title ILIKE $1 OR artist ILIKE $1 LIMIT $2`;
+      const { rows } = await query(safeSql, [`%${cleanQuery}%`, limit]);
+      return rows.map(r => ({ file_id: r.file_id, title: r.title, artist: r.artist, duration: r.duration }));
     }
+    
+    console.error('[DB Search] Ошибка при поиске:', e.message);
     return [];
   }
 }
