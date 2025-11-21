@@ -1573,7 +1573,7 @@ export async function fixBadCacheForUser(userId, dateLimit) {
       return 0;
     }
 
-    // ВАЖНО: Меняем NULL на пустую строку ''
+    // Исправление: ставим пустую строку вместо NULL
     const updateSql = `
       UPDATE track_cache
       SET file_id = ''
