@@ -506,20 +506,50 @@ export async function getUsersAsCsv(options = {}) {
 
   return headers + csvRows.join('\n');
 }
+// ==================================================================
+// УЛУЧШЕННАЯ ФУНКЦИЯ ПОИСКА (RPC + FALLBACK ILIKE)
+// ==================================================================
 export async function searchTracksInCache(searchQuery, limit = 7) {
   try {
+    // 1. Сначала пробуем RPC (быстрый полнотекстовый поиск Supabase)
     const { data, error } = await supabase.rpc('search_tracks', { search_query: searchQuery, result_limit: limit });
-    if (error) {
-      console.error('[DB Search] Ошибка при вызове RPC search_tracks:', error);
-      return [];
+    
+    if (!error && data && data.length > 0) {
+      return data;
     }
-    return data;
+    
+    // 2. FALLBACK: Обычный SQL ILIKE (если RPC ничего не нашел)
+    // Это найдет "Зурбаган" внутри "Владимир Пресняков - Зурбаган"
+    // и поможет при опечатках, где полнотекстовый поиск слишком строг.
+    console.log(`[DB Search] RPC не дал результатов для "${searchQuery}". Пробую ILIKE...`);
+    
+    const likeQuery = `%${searchQuery.trim()}%`;
+    const { rows } = await query(
+      `SELECT file_id, title, artist, duration 
+       FROM track_cache 
+       WHERE title ILIKE $1 OR artist ILIKE $1 
+       LIMIT $2`,
+      [likeQuery, limit]
+    );
+    
+    if (rows.length > 0) {
+      console.log(`[DB Search] ILIKE нашел ${rows.length} результатов.`);
+      // Приводим к формату, который ожидает бот (snake_case для file_id)
+      return rows.map(r => ({
+        file_id: r.file_id, // ВАЖНО: Приводим к формату RPC (file_id)
+        title: r.title,
+        artist: r.artist,
+        duration: r.duration
+      }));
+    }
+    
+    return [];
+    
   } catch (e) {
-    console.error('[DB Search] Критическая ошибка при поиске в кэше:', e);
+    console.error('[DB Search] Ошибка при поиске в кэше:', e.message);
     return [];
   }
 }
-
 // ========================================
 // СОХРАНЕНИЕ ТРЕКА В КЭШ
 // ========================================
