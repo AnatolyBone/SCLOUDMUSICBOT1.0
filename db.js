@@ -1561,7 +1561,6 @@ export async function fixBadCacheForUser(userId, dateLimit) {
     const limit = dateLimit || new Date().toISOString().split('T')[0];
     console.log(`[Debug] 🛠 Начинаю фикс для User ${userId}. Дата отсечки: ${limit}`);
 
-    // 1. Сначала посмотрим, что вообще есть в логах у юзера
     const logRes = await query(
       `SELECT DISTINCT url FROM downloads_log WHERE user_id = $1 AND downloaded_at < $2::date`,
       [userId, limit]
@@ -1571,10 +1570,28 @@ export async function fixBadCacheForUser(userId, dateLimit) {
     console.log(`[Debug] 📂 Найдено в истории пользователя: ${urls.length} ссылок.`);
     
     if (urls.length === 0) {
-      console.log('[Debug] ⚠️ История пуста за этот период.');
       return 0;
     }
 
+    // ВАЖНО: Меняем NULL на пустую строку ''
+    const updateSql = `
+      UPDATE track_cache
+      SET file_id = ''
+      WHERE url = ANY($1)
+      AND file_id IS NOT NULL 
+      AND file_id != ''
+    `;
+    
+    const updateRes = await query(updateSql, [urls]);
+    console.log(`[Debug] ✅ Успешно сброшено file_id у ${updateRes.rowCount} треков.`);
+    
+    return updateRes.rowCount;
+
+  } catch (e) {
+    console.error('[DB Fix Error]', e);
+    return 0;
+  }
+}
     // 2. Проверим, сколько из этих ссылок есть в кэше (track_cache)
     // Используем ANY($1) для передачи массива строк
     const cacheCheck = await query(
