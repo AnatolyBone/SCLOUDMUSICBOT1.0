@@ -511,56 +511,54 @@ export async function getUsersAsCsv(options = {}) {
 // НЕЧЕТКИЙ ПОИСК (Fuzzy Search с pg_trgm)
 // ==================================================================
 export async function searchTracksInCache(searchQuery, limit = 7) {
+  // 1. Объявляем переменную ЗДЕСЬ, чтобы она была видна и в try, и в catch
+  const cleanQuery = searchQuery ? searchQuery.trim() : '';
+  if (!cleanQuery) return [];
+
   try {
-    const cleanQuery = searchQuery.trim();
-    if (!cleanQuery) return [];
-    
-    // 1. Сначала пробуем RPC (быстрый полнотекстовый поиск)
+    // Сначала пробуем RPC (если вы его настроили)
     const { data, error } = await supabase.rpc('search_tracks', { search_query: cleanQuery, result_limit: limit });
     
     if (!error && data && data.length > 0) {
       return data;
     }
     
-    // 2. FALLBACK: Умный нечеткий поиск (Trigram Similarity)
-    console.log(`[DB Search] RPC пуст для "${cleanQuery}". Пробую Trigram Similarity...`);
+    // FALLBACK: Умный нечеткий поиск (Trigram Similarity)
+    // Теперь это будет работать, так как вы включили расширение pg_trgm
+    console.log(`[DB Search] Пробую Trigram Similarity для: "${cleanQuery}"`);
     
-    // <-> это оператор "расстояния". Чем меньше значение, тем больше строки похожи.
-    // Порог 0.8 позволяет находить даже грубые опечатки.
     const sql = `
-      SELECT file_id, title, artist, duration
+      SELECT file_id, title, artist, duration, url
       FROM track_cache
       WHERE 
-        title ILIKE $1 OR artist ILIKE $1  -- Сначала пробуем простое вхождение (быстро)
-        OR (title <-> $2) < 0.8            -- Если нет, ищем похожие по написанию (чуть медленнее)
-      ORDER BY (title <-> $2) ASC          -- Сортируем: самые похожие сверху
+        title ILIKE $1 OR artist ILIKE $1
+        OR (title <-> $2) < 0.8
+      ORDER BY (title <-> $2) ASC
       LIMIT $3
     `;
     
     const likeQuery = `%${cleanQuery}%`;
     
+    // Исправил порядок аргументов, чтобы совпадал с SQL ($1, $2, $3)
     const { rows } = await query(sql, [likeQuery, cleanQuery, limit]);
     
     if (rows.length > 0) {
-      console.log(`[DB Search] Fuzzy Search нашел ${rows.length} результатов.`);
-      return rows.map(r => ({
-        file_id: r.file_id,
-        title: r.title,
-        artist: r.artist,
-        duration: r.duration
-      }));
+      console.log(`[DB Search] Найдено ${rows.length} треков.`);
+      return rows;
     }
     
     return [];
     
   } catch (e) {
-    // Если расширение вдруг отключится, код не упадет, а напишет варнинг
+    // Если база данных все равно выдаст ошибку (например, расширение слетит)
+    // Код перейдет сюда. И теперь cleanQuery ЗДЕСЬ ВИДНА.
+    
     if (e.message.includes('operator does not exist') && e.message.includes('<->')) {
       console.warn('[DB Search] Расширение pg_trgm не работает! Откатываюсь на ILIKE.');
       // Fallback на безопасный ILIKE
-      const safeSql = `SELECT file_id, title, artist, duration FROM track_cache WHERE title ILIKE $1 OR artist ILIKE $1 LIMIT $2`;
+      const safeSql = `SELECT file_id, title, artist, duration, url FROM track_cache WHERE title ILIKE $1 OR artist ILIKE $1 LIMIT $2`;
       const { rows } = await query(safeSql, [`%${cleanQuery}%`, limit]);
-      return rows.map(r => ({ file_id: r.file_id, title: r.title, artist: r.artist, duration: r.duration }));
+      return rows;
     }
     
     console.error('[DB Search] Ошибка при поиске:', e.message);
