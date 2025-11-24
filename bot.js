@@ -1092,7 +1092,7 @@ const handleMediaForShazam = async (ctx) => {
             const buttons = [];
 
             if (cachedCount > 0) {
-                text += `\n\n📂 Нашел в кэше вариантов: <b>${cachedCount}</b>.`;
+                text += `\n\n📂 Нашел вариантов: <b>${cachedCount}</b>.`;
                 text += `\n👇 Нажми кнопку, чтобы выбрать нужную версию:`;
                 
                 // Кнопка открывает встроенный поиск с результатами из кэша
