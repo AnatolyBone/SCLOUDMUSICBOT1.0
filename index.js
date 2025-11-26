@@ -380,6 +380,59 @@ app.get('/settings', requireAuth, (req, res) => {
 
 app.post('/settings/update', requireAuth, async (req, res) => {
   try {
+    // 1. Сохраняем настройки в базу (как и было)
+    for (const [key, value] of Object.entries(req.body)) {
+      await setAppSetting(key, value);
+    }
+    await loadSettings(); // Обновляем кеш в памяти
+
+    // 2. === МАГИЯ: ПРИМЕНЯЕМ ЛИМИТЫ К ПОЛЬЗОВАТЕЛЯМ ===
+    const { playlist_limit_free, playlist_limit_plus, playlist_limit_pro } = req.body;
+
+    // Если изменили Free лимит
+    if (playlist_limit_free) {
+        const newLimit = parseInt(playlist_limit_free, 10);
+        console.log(`[Settings] Применяю Free лимит (${newLimit}) ко всем пользователям...`);
+        
+        // а) Обновляем дефолт для будущих юзеров
+        await db.query(`ALTER TABLE users ALTER COLUMN premium_limit SET DEFAULT ${newLimit}`);
+        
+        // б) Обновляем текущих фришников (тех, у кого лимит маленький или просрочен)
+        await db.query(`
+            UPDATE users 
+            SET premium_limit = $1 
+            WHERE (premium_limit <= 10 OR premium_limit IS NULL) 
+              AND (premium_until IS NULL OR premium_until < NOW())
+        `, [newLimit]);
+    }
+
+    // Если изменили Plus лимит (обновляем тех, у кого сейчас 30)
+    if (playlist_limit_plus) {
+        const newPlus = parseInt(playlist_limit_plus, 10);
+        await db.query(`
+            UPDATE users SET premium_limit = $1 
+            WHERE premium_limit = 30 AND premium_until > NOW()
+        `, [newPlus]);
+    }
+
+    // Если изменили Pro лимит (обновляем тех, у кого сейчас 100)
+    if (playlist_limit_pro) {
+        const newPro = parseInt(playlist_limit_pro, 10);
+        await db.query(`
+            UPDATE users SET premium_limit = $1 
+            WHERE premium_limit = 100 AND premium_until > NOW()
+        `, [newPro]);
+    }
+    
+    console.log('[Settings] Лимиты успешно применены к базе данных.');
+
+    res.redirect('/settings?success=true');
+  } catch (e) {
+    console.error('Ошибка сохранения настроек:', e);
+    res.status(500).send('Ошибка сохранения настроек: ' + e.message);
+  }
+});/update', requireAuth, async (req, res) => {
+  try {
     for (const [key, value] of Object.entries(req.body)) {
       await setAppSetting(key, value);
     }
