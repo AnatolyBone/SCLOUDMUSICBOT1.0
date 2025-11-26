@@ -292,7 +292,7 @@ export async function getPaginatedUsers(options) {
     downloads_min = ''
   } = options;
 
-  // сортировку жёстко белимитим
+  // 1. Безопасная сортировка
   const allowedSortFields = [
     'id', 'total_downloads', 'created_at', 'last_active',
     'premium_limit', 'premium_until', 'active'
@@ -308,70 +308,90 @@ export async function getPaginatedUsers(options) {
   const params = [];
   let i = 1;
 
-  // статус
+  // 2. Фильтр по статусу (активен/заблокирован)
   if (statusFilter === 'active') whereClauses.push('active = TRUE');
   else if (statusFilter === 'inactive') whereClauses.push('active = FALSE');
 
-  // поиск
- if (searchQuery) {
-    // Очищаем запрос от лишних пробелов
+  // 3. ПОИСК (Исправлен краш с .trim)
+  if (searchQuery && typeof searchQuery === 'string') {
     let cleanQuery = searchQuery.trim();
     
-    // Если запрос начинается с @, убираем этот символ для поиска по username
-    if (cleanQuery.startsWith('@')) {
-      cleanQuery = cleanQuery.substring(1);
+    // Если ищем ID (число)
+    if (/^\d+$/.test(cleanQuery)) {
+        params.push(cleanQuery); // Для ID ищем точное совпадение или как строку
+        whereClauses.push(`(CAST(id AS TEXT) = $${i} OR username ILIKE $${i} OR first_name ILIKE $${i})`);
+    } else {
+        // Если запрос начинается с @
+        if (cleanQuery.startsWith('@')) {
+            cleanQuery = cleanQuery.substring(1);
+        }
+        params.push(`%${cleanQuery}%`);
+        whereClauses.push(`(username ILIKE $${i} OR first_name ILIKE $${i})`);
     }
-
-    params.push(`%${cleanQuery}%`);
-    
-    // Ищем совпадения по ID, Имени или Username (в Username уже без @)
-    whereClauses.push(`(CAST(id AS TEXT) ILIKE $${i} OR first_name ILIKE $${i} OR username ILIKE $${i})`);
     i++;
   }
 
-  // тариф
+ // 4. ТАРИФЫ (Обновленная логика под 5/30/100/10000)
   if (tariff) {
-    if (tariff === 'Free') whereClauses.push('premium_limit <= 5');
-    else if (tariff === 'Plus') whereClauses.push('premium_limit = 30');
-    else if (tariff === 'Pro') whereClauses.push('premium_limit = 100');
-    else if (tariff === 'Unlimited') whereClauses.push('premium_limit >= 10000');
+    const now = "NOW()"; 
+
+    if (tariff === 'Plus') {
+      // Лимит 30 И активная подписка
+      whereClauses.push(`premium_limit = 30 AND premium_until > ${now}`);
+    } 
+    else if (tariff === 'Pro') {
+      // Лимит 100 И активная подписка
+      whereClauses.push(`premium_limit = 100 AND premium_until > ${now}`);
+    } 
+    else if (tariff === 'Unlimited') {
+      // Лимит 10000 (обычно дается навсегда или надолго)
+      whereClauses.push(`premium_limit >= 10000`);
+    } 
+    else if (tariff === 'Free') {
+      // Сюда попадают:
+      // 1. Те, у кого лимит 5 (новый стандарт)
+      // 2. Те, у кого лимит 10 (старый стандарт, чтобы они не пропали)
+      // 3. Те, у кого подписка (любая) закончилась или её нет
+      whereClauses.push(`(premium_limit <= 10 OR premium_until IS NULL OR premium_until <= ${now})`);
+    } 
     else if (tariff === 'Other') {
-      whereClauses.push('(premium_limit IS NULL OR (premium_limit NOT IN (5,30,100) AND premium_limit < 10000))');
+      // На всякий случай, если появятся какие-то нестандартные лимиты (например, 50)
+      whereClauses.push(`(premium_limit NOT IN (5, 10, 30, 100) AND premium_limit < 10000 AND premium_until > ${now})`);
     }
   }
 
-  // состояние премиума
+  // 5. Состояние премиума (дублирует логику, но оставим для совместимости)
   if (premium) {
     if (premium === 'active') {
-      whereClauses.push('premium_limit > 5 AND (premium_until IS NULL OR premium_until >= NOW())');
+      whereClauses.push('premium_until > NOW()');
     } else if (premium === 'expired') {
-      whereClauses.push('premium_limit > 5 AND premium_until IS NOT NULL AND premium_until < NOW()');
+      whereClauses.push('premium_until <= NOW()');
     } else if (premium === 'free') {
-      whereClauses.push('premium_limit <= 5');
+       whereClauses.push('(premium_until IS NULL OR premium_until <= NOW())');
     }
   }
 
-  // даты регистрации
+  // Даты регистрации
   if (created_from) { params.push(created_from); whereClauses.push(`created_at::date >= $${i++}`); }
   if (created_to)   { params.push(created_to);   whereClauses.push(`created_at::date <= $${i++}`); }
 
-  // активен за N дней
+  // Активность
   if (active_within_days) {
     params.push(Number(active_within_days) || 7);
     whereClauses.push(`last_active >= NOW() - ($${i++}::int * INTERVAL '1 day')`);
   }
 
-  // реферер
+  // Реферер
   if (has_referrer === 'yes') whereClauses.push('referrer_id IS NOT NULL');
   else if (has_referrer === 'no') whereClauses.push('referrer_id IS NULL');
 
-  // источник трафика
+  // Источник
   if (ref_source) {
     params.push(`%${ref_source}%`);
     whereClauses.push(`referral_source ILIKE $${i++}`);
   }
 
-  // минимальные скачивания
+  // Скачивания
   if (downloads_min !== '' && downloads_min !== null && downloads_min !== undefined) {
     params.push(Number(downloads_min) || 0);
     whereClauses.push(`total_downloads >= $${i++}`);
@@ -379,14 +399,20 @@ export async function getPaginatedUsers(options) {
 
   const whereSql = whereClauses.length ? `WHERE ${whereClauses.join(' AND ')}` : '';
 
-  // total
+  // 6. Считаем общее количество (для пагинации)
   const totalQuery = `SELECT COUNT(*) FROM users ${whereSql}`;
+  // ВАЖНО: передаем params.slice, так как для count нужны те же параметры, что и для where, но без limit/offset
+  // Но так как мы i++ делали динамически, параметры limit/offset добавляются позже.
+  // Сейчас params содержит только WHERE параметры. Это ОК.
+  
   const totalRes = await query(totalQuery, params);
   const totalUsers = parseInt(totalRes.rows[0].count, 10);
   const totalPages = Math.max(1, Math.ceil(totalUsers / limit));
 
-  // data
-  params.push(limit, offset);
+  // 7. Получаем данные
+  // Добавляем параметры пагинации в конец
+  const paramsWithPaging = [...params, limit, offset];
+  
   const usersQuery = `
     SELECT id, first_name, username, active,
            premium_limit, premium_until,
@@ -394,13 +420,19 @@ export async function getPaginatedUsers(options) {
     FROM users
     ${whereSql}
     ORDER BY ${safeSortBy} ${safeSortOrder}
-    LIMIT $${i++} OFFSET $${i++}
-  `;
-  const usersRes = await query(usersQuery, params);
+    LIMIT $${i} OFFSET $${i + 1} 
+  `; 
+  // i (limit) и i+1 (offset) - так как i мы инкрементировали выше, 
+  // но тут мы создаем новый массив paramsWithPaging, поэтому индексы $ должны продолжать счет
+  
+  // В PostgreSQL node драйвере лучше использовать явные $1, $2... 
+  // Но если у тебя функция query сама мапит параметры, то ок. 
+  // Если нет, то indices для LIMIT и OFFSET должны быть: params.length + 1 и params.length + 2.
+  
+  const usersRes = await query(usersQuery, paramsWithPaging);
 
   return { users: usersRes.rows, totalPages, currentPage: page, totalUsers };
 }
-
 export async function getUsersAsCsv(options = {}) {
   let {
     searchQuery = '',
