@@ -53,212 +53,129 @@
     <tbody>
       <% if (users && users.length > 0) { %>
         <% users.forEach(u => { 
-            // === Безопасное экранирование данных ===
+            // === 1. Безопасное экранирование ===
             const escapeHtml = (str) => {
               if (!str) return '';
-              return String(str)
-                .replace(/&/g, '&amp;')
-                .replace(/</g, '&lt;')
-                .replace(/>/g, '&gt;')
-                .replace(/"/g, '&quot;')
-                .replace(/'/g, '&#039;');
+              return String(str).replace(/[&<>"']/g, (m) => ({
+                '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;'
+              })[m]);
             };
             
             const safeName = escapeHtml(u.first_name) || 'Без имени';
             const safeUsername = u.username ? '@' + escapeHtml(u.username) : '';
             
-            // === Определение тарифа ===
-            const plan = (() => {
-              if (u.premium_limit <= 5) return 'Free';
-              if (u.premium_limit >= 10000) return 'Unlim';
-              if (u.premium_limit === 100) return 'Pro';
-              if (u.premium_limit === 30) return 'Plus';
-              return 'Other';
-            })();
+            // === 2. ЛОГИКА ТАРИФОВ (Исправленная) ===
+            const now = new Date();
+            const until = u.premium_until ? new Date(u.premium_until) : null;
+            const isActive = until && until > now; 
+            const limit = u.premium_limit || 5;
 
-            const planBadge = {
-              Free: 'bg-secondary',
-              Plus: 'bg-info text-dark',
-              Pro: 'bg-warning text-dark',
-              Unlim: 'bg-primary',
-              Other: 'bg-dark'
-            }[plan];
+            let plan = 'Free';
+            let planBadge = 'bg-secondary';
 
-            // === Проверка истечения премиума ===
-            const premiumUntilDate = u.premium_until ? new Date(u.premium_until) : null;
-            const isExpired = (u.premium_limit > 5) && premiumUntilDate && (premiumUntilDate < new Date());
-            
-            // === Форматирование дат ===
-            const formatDate = (date) => {
-              if (!date) return '—';
-              return new Date(date).toLocaleDateString('ru-RU', {
-                day: '2-digit',
-                month: '2-digit',
-                year: 'numeric'
-              });
-            };
-            
-            const formatDateTime = (date) => {
-              if (!date) return '—';
-              return new Date(date).toLocaleString('ru-RU', {
-                day: '2-digit',
-                month: '2-digit',
-                year: 'numeric',
-                hour: '2-digit',
-                minute: '2-digit'
-              });
-            };
+            if (isActive) {
+                // Если подписка АКТИВНА
+                if (limit >= 10000) { plan = '💎 Unlim'; planBadge = 'bg-primary'; }
+                else if (limit >= 100) { plan = '💪 Pro'; planBadge = 'bg-warning text-dark'; }
+                else if (limit >= 30) { plan = '🎯 Plus'; planBadge = 'bg-info text-dark'; }
+                else { plan = 'Premium'; planBadge = 'bg-success'; }
+            } else {
+                // Если подписка НЕАКТИВНА
+                if (limit > 10) { 
+                    // Лимит высокий, но время вышло = Истёк
+                    plan = '⌛ Истёк'; 
+                    planBadge = 'bg-danger'; 
+                } else {
+                    // Обычный Free
+                    plan = 'Free'; 
+                    planBadge = 'bg-secondary';
+                }
+            }
+
+            // Форматирование дат
+            const formatDate = (date) => date ? new Date(date).toLocaleDateString('ru-RU', {day:'2-digit',month:'2-digit',year:'2-digit'}) : '—';
+            const formatDateTime = (date) => date ? new Date(date).toLocaleString('ru-RU', {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '—';
         %>
           <tr>
             <%# === ID === %>
-            <td data-label="ID">
-              <a href="/user/<%= u.id %>" class="text-decoration-none fw-semibold">
-                <%= u.id %>
-              </a>
-            </td>
+            <td data-label="ID"><a href="/user/<%= u.id %>" class="text-decoration-none font-monospace"><%= u.id %></a></td>
 
             <%# === Пользователь === %>
             <td data-label="Пользователь">
-              <div class="fw-semibold"><%- safeName %></div>
-              <% if (safeUsername) { %>
-                <div class="text-muted small"><%- safeUsername %></div>
-              <% } %>
+              <div class="fw-bold"><%- safeName %></div>
+              <% if (safeUsername) { %><div class="text-muted small"><%- safeUsername %></div><% } %>
             </td>
 
             <%# === Статус === %>
             <td data-label="Статус">
-              <span class="badge <%= u.active ? 'bg-success' : 'bg-danger' %>">
-                <%= u.active ? '✓ Активен' : '✗ Заблокирован' %>
-              </span>
+              <% if (u.active) { %>
+                <span class="badge bg-success">✓ Активен</span>
+              <% } else { %>
+                <span class="badge bg-danger">✕ Блок</span>
+              <% } %>
             </td>
 
             <%# === Загрузок === %>
             <td data-label="Загрузок" class="text-center">
-              <span class="badge bg-light text-dark"><%= u.total_downloads || 0 %></span>
+              <span class="badge bg-light text-dark border"><%= u.total_downloads || 0 %></span>
             </td>
 
-            <%# === Тариф === %>
+            <%# === Тариф (Бейджик) === %>
             <td data-label="Тариф" class="text-center">
               <span class="badge <%= planBadge %>"><%= plan %></span>
             </td>
 
             <%# === Премиум до === %>
-            <td data-label="Премиум до" class="text-nowrap">
-              <% if (u.premium_limit <= 5) { %>
-                <span class="text-muted">—</span>
+            <td data-label="Премиум до" class="text-nowrap small">
+              <% if (isActive) { %>
+                <span class="text-success fw-bold"><%= formatDateTime(until) %></span>
+              <% } else if (until) { %>
+                <span class="text-muted text-decoration-line-through"><%= formatDateTime(until) %></span>
               <% } else { %>
-                <span class="<%= isExpired ? 'text-danger fw-semibold' : '' %>">
-                  <%= formatDateTime(u.premium_until) %>
-                </span>
-                <% if (isExpired) { %>
-                  <span class="badge bg-danger ms-1">⌛ истёк</span>
-                <% } %>
+                <span class="text-muted">—</span>
               <% } %>
             </td>
 
             <%# === Регистрация === %>
-            <td data-label="Регистрация" class="text-nowrap">
-              <%= formatDate(u.created_at) %>
-            </td>
+            <td data-label="Регистрация" class="text-nowrap small text-muted"><%= formatDate(u.created_at) %></td>
 
             <%# === Активность === %>
-            <td data-label="Активность" class="text-nowrap">
-              <%= formatDateTime(u.last_active) %>
-            </td>
+            <td data-label="Активность" class="text-nowrap small text-muted"><%= formatDateTime(u.last_active) %></td>
 
-            <%# === Смена тарифа === %>
+            <%# === Смена тарифа (Форма) === %>
             <td data-label="Смена тарифа">
-              <form class="d-flex flex-wrap gap-2 align-items-center tariff-form" 
-                    action="/set-tariff" 
-                    method="post">
+              <form class="d-flex gap-1 align-items-center tariff-form" action="/set-tariff" method="post">
                 <input type="hidden" name="userId" value="<%= u.id %>">
                 <input type="hidden" name="applyMode" value="set">
                 
-                <select name="limit" class="form-select form-select-sm" style="min-width: 110px;" required>
-                  <option value="5"     <%= u.premium_limit <= 5      ? 'selected' : '' %>>Free (5)</option>
-                  <option value="30"    <%= u.premium_limit === 30    ? 'selected' : '' %>>Plus (30)</option>
-                  <option value="100"   <%= u.premium_limit === 100   ? 'selected' : '' %>>Pro (100)</option>
-                  <option value="10000" <%= u.premium_limit >= 10000  ? 'selected' : '' %>>Unlim</option>
+                <select name="limit" class="form-select form-select-sm" style="width: 100px;" required>
+                  <option value="5"     <%= limit <= 5 ? 'selected' : '' %>>Free</option>
+                  <option value="30"    <%= limit === 30 ? 'selected' : '' %>>Plus</option>
+                  <option value="100"   <%= limit === 100 ? 'selected' : '' %>>Pro</option>
+                  <option value="10000" <%= limit >= 10000 ? 'selected' : '' %>>Unlim</option>
                 </select>
                 
-                <input type="number" 
-                       name="days" 
-                       class="form-control form-control-sm" 
-                       value="30" 
-                       style="width: 70px;" 
-                       placeholder="Дни" 
-                       min="1" 
-                       max="365"
-                       required>
+                <input type="number" name="days" class="form-control form-control-sm" value="30" style="width: 60px;" placeholder="Дни">
                 
-                <button type="submit" 
-                        class="btn btn-sm btn-primary" 
-                        title="Применить"
-                        data-confirm="Изменить тариф для <%= safeName %>?">
-                  ✓
-                </button>
+                <button type="submit" class="btn btn-sm btn-primary px-2">✓</button>
               </form>
             </td>
 
-            <%# === Действия === %>
-            <td data-label="Действия" class="text-nowrap text-center">
-              <div class="btn-group">
-                <button class="btn btn-sm btn-outline-secondary dropdown-toggle" 
-                        type="button" 
-                        data-bs-toggle="dropdown" 
-                        aria-expanded="false">
-                  ⋮
-                </button>
+            <%# === Меню действий === %>
+            <td data-label="Действия" class="text-center">
+               <!-- Твой старый код дропдауна (можно оставить как есть в твоем файле, или скопировать ниже) -->
+               <div class="btn-group">
+                <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="dropdown">⋮</button>
                 <ul class="dropdown-menu dropdown-menu-end">
-                  <li>
-                    <a class="dropdown-item" href="/user/<%= u.id %>">
-                      <i class="bi bi-person-circle me-2"></i>Профиль
-                    </a>
-                  </li>
-                  <li>
-                    <a class="dropdown-item" href="tg://user?id=<%= u.id %>">
-                      <i class="bi bi-telegram me-2"></i>Открыть в TG
-                    </a>
-                  </li>
+                  <li><a class="dropdown-item" href="/user/<%= u.id %>">👤 Профиль</a></li>
                   <li><hr class="dropdown-divider"></li>
                   <li>
-                    <form action="/reset-bonus" method="post" class="d-inline">
+                    <form action="/user/set-status" method="POST">
                       <input type="hidden" name="userId" value="<%= u.id %>">
-                      <button type="submit" 
-                              class="dropdown-item" 
-                              data-confirm="Сбросить бонус для <%= safeName %>?">
-                        <i class="bi bi-gift me-2"></i>Сбросить бонус
+                      <input type="hidden" name="newStatus" value="<%= !u.active %>">
+                      <button type="submit" class="dropdown-item <%= u.active ? 'text-danger' : 'text-success' %>">
+                        <%= u.active ? 'Заблокировать' : 'Разблокировать' %>
                       </button>
-                    </form>
-                  </li>
-                  <li>
-                    <form action="/reset-daily-limit" method="post" class="d-inline">
-                      <input type="hidden" name="userId" value="<%= u.id %>">
-                      <button type="submit" 
-                              class="dropdown-item" 
-                              data-confirm="Сбросить дневной лимит для <%= safeName %>?">
-                        <i class="bi bi-arrow-counterclockwise me-2"></i>Сбросить лимит
-                      </button>
-                    </form>
-                  </li>
-                  <li><hr class="dropdown-divider"></li>
-                  <li>
-                    <form action="/user/set-status" method="POST" class="d-inline">
-                      <input type="hidden" name="userId" value="<%= u.id %>">
-                      <% if (u.active) { %>
-                        <input type="hidden" name="newStatus" value="false">
-                        <button type="submit" 
-                                class="dropdown-item text-danger" 
-                                data-confirm="Заблокировать <%= safeName %>?">
-                          <i class="bi bi-ban me-2"></i>Заблокировать
-                        </button>
-                      <% } else { %>
-                        <input type="hidden" name="newStatus" value="true">
-                        <button type="submit" 
-                                class="dropdown-item text-success">
-                          <i class="bi bi-check-circle me-2"></i>Разблокировать
-                        </button>
-                      <% } %>
                     </form>
                   </li>
                 </ul>
@@ -267,143 +184,61 @@
           </tr>
         <% }) %>
       <% } else { %>
-        <tr>
-          <td colspan="10" class="text-center text-muted py-5">
-            <div class="mb-3">
-              <i class="bi bi-inbox" style="font-size: 3rem; opacity: 0.3;"></i>
-            </div>
-            <p class="mb-0">Пользователи не найдены</p>
-            <% if (queryParams?.q) { %>
-              <small class="text-muted">Попробуйте изменить поисковый запрос</small>
-            <% } %>
-          </td>
-        </tr>
+        <tr><td colspan="10" class="text-center py-5 text-muted">Пользователи не найдены</td></tr>
       <% } %>
-    </tbody>
-  </table>
-</div>
 
-<%# === PAGINATION === %>
-<% if (totalPages > 1) { 
-  const curr = Number(queryParams?.page || 1);
+<%# === PAGINATION (Safe Version) === %>
+<% if (typeof totalPages !== 'undefined' && totalPages > 0) { 
+  const curr = typeof queryParams !== 'undefined' ? Number(queryParams.page || 1) : 1;
   
   function buildPageUrl(pageNum) {
     const params = new URLSearchParams();
-    if (queryParams) {
+    if (typeof queryParams !== 'undefined') {
       Object.keys(queryParams).forEach(k => params.set(k, queryParams[k]));
     }
     params.set('page', pageNum);
     return '/users-table?' + params.toString();
   }
 %>
-<nav aria-label="Навигация по страницам">
-  <ul class="pagination justify-content-center mt-4">
-    <%# Предыдущая страница %>
+<nav aria-label="Навигация">
+  <ul class="pagination justify-content-center mt-4 pagination-sm">
+    
+    <%# Кнопка Назад %>
     <li class="page-item <%= (curr <= 1) ? 'disabled' : '' %>">
       <% if (curr > 1) { %>
-        <a class="page-link"
-           href="<%= buildPageUrl(curr - 1) %>"
-           hx-get="<%= buildPageUrl(curr - 1) %>"
-           hx-include="#usersFilterForm"
-           <%# views/partials/users-table.ejs (безопасная финальная версия) - ЧАСТЬ 2 (ПРОДОЛЖЕНИЕ) %>
-
-           hx-target="#users-table-container"
-           hx-swap="innerHTML"
-           aria-label="Предыдущая">
-          &laquo; Назад
+        <a class="page-link" href="<%= buildPageUrl(curr - 1) %>" 
+           hx-get="<%= buildPageUrl(curr - 1) %>" hx-include="#usersFilterForm" hx-target="#users-table-container">
+           &laquo;
         </a>
       <% } else { %>
-        <span class="page-link" aria-hidden="true">&laquo; Назад</span>
+        <span class="page-link">&laquo;</span>
       <% } %>
     </li>
 
-    <%# Генерация номеров страниц %>
-    <% 
-      const maxToShow = 7;
-      let start = Math.max(1, curr - 3);
-      let end = Math.min(totalPages, start + maxToShow - 1);
-      
-      // Корректируем start если недостаточно страниц
-      if (end - start + 1 < maxToShow) {
-        start = Math.max(1, end - maxToShow + 1);
-      }
+    <%# Текущая страница %>
+    <li class="page-item active">
+      <span class="page-link"><%= curr %> / <%= totalPages %></span>
+    </li>
 
-      // Первая страница (если не попала в диапазон)
-      if (start > 1) { %>
-        <li class="page-item">
-          <a class="page-link"
-             href="<%= buildPageUrl(1) %>"
-             hx-get="<%= buildPageUrl(1) %>"
-             hx-include="#usersFilterForm"
-             hx-target="#users-table-container"
-             hx-swap="innerHTML">
-            1
-          </a>
-        </li>
-        <% if (start > 2) { %>
-          <li class="page-item disabled"><span class="page-link">...</span></li>
-        <% } %>
-      <% } %>
-
-      <%# Основной диапазон страниц %>
-      <% for (let p = start; p <= end; p++) { %>
-        <li class="page-item <%= (p === curr) ? 'active' : '' %>" 
-            <%= (p === curr) ? 'aria-current="page"' : '' %>>
-          <% if (p === curr) { %>
-            <span class="page-link"><%= p %></span>
-          <% } else { %>
-            <a class="page-link"
-               href="<%= buildPageUrl(p) %>"
-               hx-get="<%= buildPageUrl(p) %>"
-               hx-include="#usersFilterForm"
-               hx-target="#users-table-container"
-               hx-swap="innerHTML">
-              <%= p %>
-            </a>
-          <% } %>
-        </li>
-      <% } %>
-
-      <%# Последняя страница (если не попала в диапазон) %>
-      <% if (end < totalPages) { %>
-        <% if (end < totalPages - 1) { %>
-          <li class="page-item disabled"><span class="page-link">...</span></li>
-        <% } %>
-        <li class="page-item">
-          <a class="page-link"
-             href="<%= buildPageUrl(totalPages) %>"
-             hx-get="<%= buildPageUrl(totalPages) %>"
-             hx-include="#usersFilterForm"
-             hx-target="#users-table-container"
-             hx-swap="innerHTML">
-            <%= totalPages %>
-          </a>
-        </li>
-      <% } %>
-    
-    <%# Следующая страница %>
+    <%# Кнопка Вперед %>
     <li class="page-item <%= (curr >= totalPages) ? 'disabled' : '' %>">
       <% if (curr < totalPages) { %>
-        <a class="page-link"
-           href="<%= buildPageUrl(curr + 1) %>"
-           hx-get="<%= buildPageUrl(curr + 1) %>"
-           hx-include="#usersFilterForm"
-           hx-target="#users-table-container"
-           hx-swap="innerHTML"
-           aria-label="Следующая">
-          Вперёд &raquo;
+        <a class="page-link" href="<%= buildPageUrl(curr + 1) %>"
+           hx-get="<%= buildPageUrl(curr + 1) %>" hx-include="#usersFilterForm" hx-target="#users-table-container">
+           &raquo;
         </a>
       <% } else { %>
-        <span class="page-link" aria-hidden="true">Вперёд &raquo;</span>
+        <span class="page-link">&raquo;</span>
       <% } %>
     </li>
   </ul>
   
-  <%# Информация о текущей странице %>
+  <%# ИНФОРМАЦИЯ (ИСПРАВЛЕННАЯ СТРОКА) %>
   <div class="text-center text-muted small mt-2">
-    Страница <%= curr %> из <%= totalPages %> 
-    <% if (totalUsers) { %>
-      (всего пользователей: <%= totalUsers.toLocaleString('ru-RU') %>)
+    <% if (typeof totalUsers !== 'undefined' && totalUsers !== null) { %>
+      (всего пользователей: <strong><%= totalUsers.toLocaleString('ru-RU') %></strong>)
+    <% } else { %>
+      Список пользователей
     <% } %>
   </div>
 </nav>
