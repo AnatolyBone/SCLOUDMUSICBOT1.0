@@ -603,7 +603,7 @@ const chartDataTariffs = {
   app.get('/users-table', requireAuth, async (req, res) => {
     try {
       const { q = '', status = '', page = 1, limit = 25, sort = 'created_at', order = 'desc' } = req.query;
-      const { users, totalPages } = await getPaginatedUsers({
+      const { users, totalPages, totalUsers } = await getPaginatedUsers({
         searchQuery: q, statusFilter: status, page: parseInt(page), limit: parseInt(limit), sortBy: sort, sortOrder: order
       });
       const queryParams = { q, status, page, limit, sort, order };
