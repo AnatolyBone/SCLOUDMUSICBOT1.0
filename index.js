@@ -607,7 +607,7 @@ const chartDataTariffs = {
         searchQuery: q, statusFilter: status, page: parseInt(page), limit: parseInt(limit), sortBy: sort, sortOrder: order
       });
       const queryParams = { q, status, page, limit, sort, order };
-      res.render('partials/users-table', { users, totalPages, currentPage: parseInt(page), queryParams, layout: false });
+      res.render('partials/users-table', { users, totalPages, totalUsers, currentPage: parseInt(page), queryParams, layout: false });
     } catch (error) {
       console.error('Ошибка при обновлении таблицы:', error);
       res.status(500).send('Ошибка сервера');
