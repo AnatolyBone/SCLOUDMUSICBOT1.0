@@ -380,24 +380,43 @@ app.get('/settings', requireAuth, (req, res) => {
 
 app.post('/settings/update', requireAuth, async (req, res) => {
   try {
-    // 1. Сохраняем настройки в базу (как и было)
+    // 1. Сохраняем настройки (это быстро, ждем выполнения)
     for (const [key, value] of Object.entries(req.body)) {
       await setAppSetting(key, value);
     }
-    await loadSettings(); // Обновляем кеш в памяти
+    await loadSettings(); // Обновляем кеш
 
-    // 2. === МАГИЯ: ПРИМЕНЯЕМ ЛИМИТЫ К ПОЛЬЗОВАТЕЛЯМ ===
-    const { playlist_limit_free, playlist_limit_plus, playlist_limit_pro } = req.body;
+    // 2. === ФОНОВАЯ ЗАДАЧА (Background Job) ===
+    // Мы НЕ ставим 'await' перед этой функцией. 
+    // Сервер сразу вернет ответ админу, а база будет обновляться параллельно.
+    applyLimitsToUsers(req.body).catch(err => {
+        console.error('❌ Ошибка в фоновом обновлении лимитов:', err);
+    });
 
-    // Если изменили Free лимит
+    // 3. Мгновенный ответ админу
+    res.redirect('/settings?success=true');
+
+  } catch (e) {
+    console.error('Ошибка сохранения настроек:', e);
+    res.status(500).send('Ошибка сохранения настроек');
+  }
+});
+
+// === ОТДЕЛЬНАЯ ФУНКЦИЯ ДЛЯ МАССОВОГО ОБНОВЛЕНИЯ ===
+async function applyLimitsToUsers(body) {
+    const { playlist_limit_free, playlist_limit_plus, playlist_limit_pro } = body;
+
+    console.log('🔄 Начинаю фоновое обновление лимитов...');
+    const start = Date.now();
+
+    // 1. Free (обновляем дефолт + существующих)
     if (playlist_limit_free) {
         const newLimit = parseInt(playlist_limit_free, 10);
-        console.log(`[Settings] Применяю Free лимит (${newLimit}) ко всем пользователям...`);
-        
-        // а) Обновляем дефолт для будущих юзеров
+        // Сначала меняем дефолт (очень быстро)
         await db.query(`ALTER TABLE users ALTER COLUMN premium_limit SET DEFAULT ${newLimit}`);
         
-        // б) Обновляем текущих фришников (тех, у кого лимит маленький или просрочен)
+        // Потом обновляем тысячи пользователей
+        // Для Supabase/Postgres 25k - это один "чих", но делаем это в фоне
         await db.query(`
             UPDATE users 
             SET premium_limit = $1 
@@ -406,24 +425,25 @@ app.post('/settings/update', requireAuth, async (req, res) => {
         `, [newLimit]);
     }
 
-    // Если изменили Plus лимит (обновляем тех, у кого сейчас 30)
+    // 2. Plus
     if (playlist_limit_plus) {
-        const newPlus = parseInt(playlist_limit_plus, 10);
         await db.query(`
             UPDATE users SET premium_limit = $1 
             WHERE premium_limit = 30 AND premium_until > NOW()
-        `, [newPlus]);
+        `, [parseInt(playlist_limit_plus, 10)]);
     }
 
-    // Если изменили Pro лимит (обновляем тех, у кого сейчас 100)
+    // 3. Pro
     if (playlist_limit_pro) {
-        const newPro = parseInt(playlist_limit_pro, 10);
         await db.query(`
             UPDATE users SET premium_limit = $1 
             WHERE premium_limit = 100 AND premium_until > NOW()
-        `, [newPro]);
+        `, [parseInt(playlist_limit_pro, 10)]);
     }
-    
+
+    const duration = (Date.now() - start) / 1000;
+    console.log(`✅ Лимиты обновлены. Заняло: ${duration} сек.`);
+}
     console.log('[Settings] Лимиты успешно применены к базе данных.');
 
     res.redirect('/settings?success=true');
