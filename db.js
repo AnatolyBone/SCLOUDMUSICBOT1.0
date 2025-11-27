@@ -282,27 +282,7 @@ export async function updateUserField(id, updates) {
     throw new Error('Не удалось обновить пользователя.');
   }
 }
-export async function updateUserField(id, updates) {
-  const fieldsToUpdate = (typeof updates === 'string')
-    ? { [updates]: arguments[2] }
-    : updates;
 
-  for (const field in fieldsToUpdate) {
-    if (!allowedFields.has(field)) {
-      throw new Error(`Недопустимое поле для обновления: ${field}`);
-    }
-  }
-
-  const { error } = await supabase
-    .from('users')
-    .update(fieldsToUpdate)
-    .eq('id', id);
-
-  if (error) {
-    console.error(`[DB] Ошибка при обновлении пользователя ${id}:`, error);
-    throw new Error('Не удалось обновить пользователя.');
-  }
-}
 
 export async function getAllUsers(includeInactive = true) {
   const sql = includeInactive
