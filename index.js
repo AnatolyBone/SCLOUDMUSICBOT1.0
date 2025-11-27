@@ -380,22 +380,18 @@ app.get('/settings', requireAuth, (req, res) => {
 
 app.post('/settings/update', requireAuth, async (req, res) => {
   try {
-    // 1. Сохраняем настройки (это быстро, ждем выполнения)
+    // 1. Сохраняем настройки
     for (const [key, value] of Object.entries(req.body)) {
       await setAppSetting(key, value);
     }
     await loadSettings(); // Обновляем кеш
 
-    // 2. === ФОНОВАЯ ЗАДАЧА (Background Job) ===
-    // Мы НЕ ставим 'await' перед этой функцией. 
-    // Сервер сразу вернет ответ админу, а база будет обновляться параллельно.
+    // 2. Запускаем фоновое обновление (без await, чтобы не ждать)
     applyLimitsToUsers(req.body).catch(err => {
         console.error('❌ Ошибка в фоновом обновлении лимитов:', err);
     });
 
-    // 3. Мгновенный ответ админу
     res.redirect('/settings?success=true');
-
   } catch (e) {
     console.error('Ошибка сохранения настроек:', e);
     res.status(500).send('Ошибка сохранения настроек');
@@ -403,20 +399,18 @@ app.post('/settings/update', requireAuth, async (req, res) => {
 });
 
 // === ОТДЕЛЬНАЯ ФУНКЦИЯ ДЛЯ МАССОВОГО ОБНОВЛЕНИЯ ===
-// === ОТДЕЛЬНАЯ ФУНКЦИЯ ДЛЯ МАССОВОГО ОБНОВЛЕНИЯ ===
 async function applyLimitsToUsers(body) {
     const { playlist_limit_free, playlist_limit_plus, playlist_limit_pro } = body;
 
     console.log('🔄 Начинаю фоновое обновление лимитов...');
     const start = Date.now();
 
-    // 1. Free (обновляем дефолт + существующих)
+    // ВАЖНО: Используем pool.query, а не db.query
+
+    // 1. Free
     if (playlist_limit_free) {
         const newLimit = parseInt(playlist_limit_free, 10);
-        
-        // ИСПОЛЬЗУЕМ pool ВМЕСТО db
         await pool.query(`ALTER TABLE users ALTER COLUMN premium_limit SET DEFAULT ${newLimit}`);
-        
         await pool.query(`
             UPDATE users 
             SET premium_limit = $1 
@@ -445,8 +439,10 @@ async function applyLimitsToUsers(body) {
     console.log(`✅ Лимиты обновлены. Заняло: ${duration} сек.`);
 }
 
-  // Дашборд — быстрые агрегаты
-  app.get('/dashboard', requireAuth, async (req, res) => {
+// ==================================================================
+// ДАШБОРД
+// ==================================================================
+app.get('/dashboard', requireAuth, async (req, res) => {
   try {
     let storageStatus = { available: false, error: '' };
     if (STORAGE_CHANNEL_ID) {
@@ -457,113 +453,119 @@ async function applyLimitsToUsers(body) {
         storageStatus.error = e.message;
       }
     }
-    
+
+    // Получаем даты из запроса (или undefined)
+    const startDate = req.query.startDate;
+    const endDate = req.query.endDate;
+
     const [
-  totals,
-  cachedTracksCount,
-  topSources,
-  dailyStats,
-  weekdayActivity,
-  topTracks,
-  topUsers,
-  hourlyActivity,
-  referralStats,
-  tariffsActiveResult, // активные тарифы (без просроченных)
-  othersResult, // другие (старые)
-  expiredCountResult // истёкшие (не Free)
-] = await Promise.all([
-  getUsersTotalsSnapshot(),
-  getCachedTracksCount(),
-  getTopReferralSources(),
-  getDailyStats({ startDate: req.query.startDate, endDate: req.query.endDate }),
-  getActivityByWeekday(),
-  getTopTracks(),
-  getTopUsers(),
-  getHourlyActivity(),
-  getReferralStats(),
-  // Активные тарифы: Free без даты, платные — только не истёкшие
-  pool.query(`
-    SELECT
-      COUNT(*) FILTER (WHERE premium_limit = 5) AS free,
-      COUNT(*) FILTER (WHERE premium_limit BETWEEN 6 AND 30 AND (premium_until IS NULL OR premium_until >= NOW())) AS plus,
-      COUNT(*) FILTER (WHERE premium_limit BETWEEN 31 AND 100 AND (premium_until IS NULL OR premium_until >= NOW())) AS pro,
-      COUNT(*) FILTER (WHERE premium_limit > 100 AND (premium_until IS NULL OR premium_until >= NOW())) AS unlimited
-    FROM users
-  `),
-  // Другие (старые): если хочешь считать всех (в т.ч. просроченных)
-  pool.query(`
-    SELECT COUNT(*)::int AS other
-    FROM users
-    WHERE premium_limit IS NULL
-       OR (
-         premium_limit <> 5
-         AND NOT (premium_limit BETWEEN 6 AND 30)
-         AND NOT (premium_limit BETWEEN 31 AND 100)
-         AND NOT (premium_limit > 100)
-       )
-  `),
-  // Истёкшие (не Free)
-  pool.query(`
-    SELECT COUNT(*)::int AS expired_count
-    FROM users
-    WHERE premium_until IS NOT NULL
-      AND premium_until < NOW()
-      AND premium_limit <> 5
-  `)
-]);
+      totals,
+      cachedTracksCount,
+      topSources,
+      dailyStats,
+      weekdayActivity,
+      topTracks,
+      topUsers,
+      hourlyActivity,
+      referralStats,
+      tariffsActiveResult,
+      othersResult,
+      expiredCountResult
+    ] = await Promise.all([
+      getUsersTotalsSnapshot(),
+      getCachedTracksCount(),
+      getTopReferralSources(),
+      getDailyStats({ startDate, endDate }),
+      
+      // 👇 ИСПРАВЛЕНО: Передаем даты в графики
+      getActivityByWeekday(startDate, endDate),
+      
+      getTopTracks(),
+      getTopUsers(),
+      
+      // 👇 ИСПРАВЛЕНО: Передаем даты в графики
+      getHourlyActivity(startDate, endDate),
+      
+      getReferralStats(),
+      
+      // Активные тарифы
+      pool.query(`
+        SELECT
+          COUNT(*) FILTER (WHERE premium_limit = 5) AS free,
+          COUNT(*) FILTER (WHERE premium_limit BETWEEN 6 AND 30 AND (premium_until IS NULL OR premium_until >= NOW())) AS plus,
+          COUNT(*) FILTER (WHERE premium_limit BETWEEN 31 AND 100 AND (premium_until IS NULL OR premium_until >= NOW())) AS pro,
+          COUNT(*) FILTER (WHERE premium_limit > 100 AND (premium_until IS NULL OR premium_until >= NOW())) AS unlimited
+        FROM users
+      `),
+      // Другие
+      pool.query(`
+        SELECT COUNT(*)::int AS other
+        FROM users
+        WHERE premium_limit IS NULL
+           OR (
+             premium_limit <> 5
+             AND NOT (premium_limit BETWEEN 6 AND 30)
+             AND NOT (premium_limit BETWEEN 31 AND 100)
+             AND NOT (premium_limit > 100)
+           )
+      `),
+      // Истёкшие
+      pool.query(`
+        SELECT COUNT(*)::int AS expired_count
+        FROM users
+        WHERE premium_until IS NOT NULL
+          AND premium_until < NOW()
+          AND premium_limit <> 5
+      `)
+    ]);
 
-const expiredCount = Number(expiredCountResult?.rows?.[0]?.expired_count ?? 0);
+    const expiredCount = Number(expiredCountResult?.rows?.[0]?.expired_count ?? 0);
+    const t = tariffsActiveResult?.rows?.[0] || {};
+    const othersCount = Number(othersResult?.rows?.[0]?.other ?? 0);
 
-const t = tariffsActiveResult?.rows?.[0] || {};
-const othersCount = Number(othersResult?.rows?.[0]?.other ?? 0);
+    const usersByTariff = {
+      Free: Number(t.free || 0),
+      Plus: Number(t.plus || 0),
+      Pro: Number(t.pro || 0),
+      Unlimited: Number(t.unlimited || 0),
+      Other: othersCount
+    };
 
-const usersByTariff = {
-  Free: Number(t.free || 0),
-  Plus: Number(t.plus || 0),
-  Pro: Number(t.pro || 0),
-  Unlimited: Number(t.unlimited || 0),
-  Other: othersCount
-};
+    const stats = {
+      total_users: totals.total_users,
+      active_users: totals.active_users,
+      total_downloads: Number(totals.total_downloads) || 0,
+      active_today: totals.active_today,
+      queueWaiting: downloadQueue.size,
+      queueActive: downloadQueue.pending,
+      cachedTracksCount: cachedTracksCount,
+      usersByTariff,
+      topSources: topSources || [],
+      totalReferred: referralStats.totalReferred,
+      topReferrers: referralStats.topReferrers
+    };
 
-const stats = {
-  total_users: totals.total_users,
-  active_users: totals.active_users,
-  total_downloads: Number(totals.total_downloads) || 0,
-  active_today: totals.active_today,
-  queueWaiting: downloadQueue.size,
-  queueActive: downloadQueue.pending,
-  cachedTracksCount: cachedTracksCount,
-  usersByTariff, // используем собранный объект
-  topSources: topSources || [],
-  totalReferred: referralStats.totalReferred,
-  topReferrers: referralStats.topReferrers
-};
-const chartDataCombined = {
-        labels: (dailyStats || []).map(d => new Date(d.day).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })),
-        datasets: [
-          { label: 'Регистрации', data: (dailyStats || []).map(d => d.registrations), borderColor: '#198754', tension: 0.1, fill: false },
-          { label: 'Активные юзеры', data: (dailyStats || []).map(d => d.active_users), borderColor: '#0d6efd', tension: 0.1, fill: false },
-          { label: 'Загрузки', data: (dailyStats || []).map(d => d.downloads), borderColor: '#fd7e14', tension: 0.1, fill: false }
-        ]
-      };
-// Для круговой — тоже берём usersByTariff
-const chartDataTariffs = {
-  labels: ['Free', 'Plus', 'Pro', 'Unlimited', 'Other'],
-  datasets: [{
-    data: [
-      usersByTariff.Free,
-      usersByTariff.Plus,
-      usersByTariff.Pro,
-      usersByTariff.Unlimited,
-      usersByTariff.Other
-    ],
-    backgroundColor: ['#6c757d', '#17a2b8', '#ffc107', '#007bff', '#dc3545']
-  }]
-};
+    const chartDataCombined = {
+      labels: (dailyStats || []).map(d => new Date(d.day).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })),
+      datasets: [
+        { label: 'Регистрации', data: (dailyStats || []).map(d => d.registrations), borderColor: '#198754', tension: 0.1, fill: false },
+        { label: 'Активные юзеры', data: (dailyStats || []).map(d => d.active_users), borderColor: '#0d6efd', tension: 0.1, fill: false },
+        { label: 'Загрузки', data: (dailyStats || []).map(d => d.downloads), borderColor: '#fd7e14', tension: 0.1, fill: false }
+      ]
+    };
+
+    const chartDataTariffs = {
+      labels: ['Free', 'Plus', 'Pro', 'Unlimited', 'Other'],
+      datasets: [{
+        data: [usersByTariff.Free, usersByTariff.Plus, usersByTariff.Pro, usersByTariff.Unlimited, usersByTariff.Other],
+        backgroundColor: ['#6c757d', '#17a2b8', '#ffc107', '#007bff', '#dc3545']
+      }]
+    };
+
     const chartDataWeekday = {
       labels: (weekdayActivity || []).map(d => (d.weekday || '').toString().trim()),
       datasets: [{
-        label: 'Загрузки',
+        label: 'Активные пользователи',
         data: (weekdayActivity || []).map(d => d.count),
         backgroundColor: 'rgba(13, 110, 253, 0.5)'
       }]
@@ -572,7 +574,7 @@ const chartDataTariffs = {
     const chartDataHourly = {
       labels: Array.from({ length: 24 }, (_, i) => `${i.toString().padStart(2, '0')}:00`),
       datasets: [{
-        label: 'Загрузки',
+        label: 'Активность',
         data: hourlyActivity,
         backgroundColor: 'rgba(255, 99, 132, 0.5)',
         borderColor: 'rgba(255, 99, 132, 1)',
@@ -586,17 +588,18 @@ const chartDataTariffs = {
       stats,
       storageStatus,
       startDate: req.query.startDate,
-      resetOthers: req.query.resetOthers || null,
       endDate: req.query.endDate,
+      resetOthers: req.query.resetOthers || null,
+      resetExpired: req.query.resetExpired || null,
       chartDataCombined,
       chartDataTariffs,
       chartDataWeekday,
-      topTracks,
-      resetExpired: req.query.resetExpired || null,
-      topUsers,
       chartDataHourly,
+      topTracks,
+      topUsers,
       expiredCount
     });
+
   } catch (error) {
     console.error('Ошибка дашборда:', error);
     res.status(500).send('Ошибка сервера');
