@@ -1,12 +1,19 @@
 // src/services/lyricsService.js
 import { Client } from "genius-lyrics";
 
-// Если есть ключ - вставь, если нет - оставь пустым (библиотека попробует работать так)
-const client = new Client(); 
+// Берем токен из переменных окружения
+const GENIUS_TOKEN = process.env.GENIUS_ACCESS_TOKEN;
+
+const client = new Client(GENIUS_TOKEN);
 
 export async function getLyrics(artist, title) {
     try {
-        const query = `${artist} ${title}`.replace(/\(Instrumental\)/gi, '').trim();
+        // Очищаем запрос от лишних слов
+        const query = `${artist} ${title}`
+            .replace(/\(Instrumental\)/gi, '')
+            .replace(/\(Minus\)/gi, '')
+            .replace(/\(Karaoke\)/gi, '')
+            .trim();
         
         // Ищем песни
         const searches = await client.songs.search(query);
