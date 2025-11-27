@@ -1,32 +1,28 @@
 // src/services/lyricsService.js
 import { Client } from "genius-lyrics";
 
-// Берем токен из переменных окружения
 const GENIUS_TOKEN = process.env.GENIUS_ACCESS_TOKEN;
 
-const client = new Client(GENIUS_TOKEN);
+// ВАЖНО: Отключаем оптимизацию, которая иногда вызывает сбои
+const client = new Client(GENIUS_TOKEN); 
 
 export async function getLyrics(artist, title) {
     try {
-        // Очищаем запрос от лишних слов
         const query = `${artist} ${title}`
             .replace(/\(Instrumental\)/gi, '')
             .replace(/\(Minus\)/gi, '')
             .replace(/\(Karaoke\)/gi, '')
             .trim();
         
-        // Ищем песни
-        const searches = await client.songs.search(query);
+        // Ищем песни (добавляем { optimizeQuery: true })
+        const searches = await client.songs.search(query, { optimizeQuery: true });
         
         if (!searches || searches.length === 0) {
             return null;
         }
 
-        // Берем первый результат
         const firstSong = searches[0];
-        
-        // Получаем текст
-        const lyrics = await firstSong.lyrics();
+        const lyrics = await firstSong.lyrics(); // Библиотека сама делает парсинг
         
         if (!lyrics) return null;
 
@@ -38,6 +34,7 @@ export async function getLyrics(artist, title) {
             url: firstSong.url
         };
     } catch (e) {
+        // Если ошибка про throwOnError, значит библиотека сбоит, но мы просто вернем null
         console.error('[Lyrics] Error:', e.message);
         return null;
     }
