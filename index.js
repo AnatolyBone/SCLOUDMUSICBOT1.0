@@ -444,24 +444,8 @@ async function applyLimitsToUsers(body) {
     const duration = (Date.now() - start) / 1000;
     console.log(`✅ Лимиты обновлены. Заняло: ${duration} сек.`);
 }
-    console.log('[Settings] Лимиты успешно применены к базе данных.');
 
-    res.redirect('/settings?success=true');
-  } catch (e) {
-    console.error('Ошибка сохранения настроек:', e);
-    res.status(500).send('Ошибка сохранения настроек: ' + e.message);
-  }
-});/update', requireAuth, async (req, res) => {
-  try {
-    for (const [key, value] of Object.entries(req.body)) {
-      await setAppSetting(key, value);
-    }
-    await loadSettings(); // Обновляем кеш
-    res.redirect('/settings?success=true');
-  } catch (e) {
-    res.status(500).send('Ошибка сохранения настроек');
-  }
-});
+
   // Дашборд — быстрые агрегаты
   app.get('/dashboard', requireAuth, async (req, res) => {
   try {
