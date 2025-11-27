@@ -189,6 +189,20 @@ export async function createUser(id, firstName, username, referrerId = null) {
   await query(sql, [id, firstName, username, referrerId]);
 }
 
+export async function createUser(id, firstName, username, referrerId = null, referralSource = null) {
+  const sql = `
+    INSERT INTO users (
+      id, first_name, username, referrer_id, referral_source, 
+      last_active, last_reset_date, premium_limit
+    )
+    VALUES ($1, $2, $3, $4, $5, NOW(), CURRENT_DATE, 3)
+    ON CONFLICT (id) DO NOTHING
+  `;
+  // Обрезаем источник до 50 символов
+  const safeSource = referralSource ? referralSource.substring(0, 50) : null;
+  await query(sql, [id, firstName, username, referrerId, safeSource]);
+}
+
 export async function getUser(id, firstName = '', username = '', startPayload = null) {
   const sqlSelect = `
     SELECT 
@@ -200,7 +214,13 @@ export async function getUser(id, firstName = '', username = '', startPayload = 
 
   if (rows.length > 0) {
     const user = rows[0];
+    
+    // Обновляем активность
+    if (user.active) {
+      await query('UPDATE users SET last_active = NOW() WHERE id = $1', [id]);
+    }
 
+    // Если пользователь перешел по рефке ПОЗЖЕ (и у него нет реферера), добавляем
     if (startPayload && startPayload.startsWith('ref_') && !user.referrer_id) {
       const parsedId = parseInt(startPayload.split('_')[1], 10);
       if (!isNaN(parsedId) && parsedId !== id) {
@@ -213,25 +233,33 @@ export async function getUser(id, firstName = '', username = '', startPayload = 
         }
       }
     }
-
-    if (user.active) {
-      await query('UPDATE users SET last_active = NOW() WHERE id = $1', [id]);
-    }
     return user;
   } else {
+    // === НОВЫЙ ПОЛЬЗОВАТЕЛЬ ===
     let referrerId = null;
-    if (startPayload && startPayload.startsWith('ref_')) {
-      const parsedId = parseInt(startPayload.split('_')[1], 10);
-      if (!isNaN(parsedId) && parsedId !== id) {
-        referrerId = parsedId;
-      }
+    let referralSource = null;
+
+    if (startPayload) {
+        if (startPayload.startsWith('ref_')) {
+             const parsedId = parseInt(startPayload.split('_')[1], 10);
+             if (!isNaN(parsedId) && parsedId !== id) referrerId = parsedId;
+        } else if (/^\d+$/.test(startPayload)) {
+             // Старый формат рефок (просто цифры)
+             const parsedId = parseInt(startPayload, 10);
+             if (parsedId !== id) referrerId = parsedId;
+        } else {
+             // Если это текст (google, ad1, tiktok) - значит это ИСТОЧНИК
+             referralSource = startPayload;
+        }
     }
-    await createUser(id, firstName, username, referrerId);
+
+    // ВАЖНО: Передаем referralSource в создание
+    await createUser(id, firstName, username, referrerId, referralSource);
+    
     const newUserResult = await query(sqlSelect, [id]);
     return newUserResult.rows[0];
   }
 }
-
 /* Поля разрешённые для updateUserField (Supabase update) */
 const allowedFields = new Set([
   'premium_limit', 'downloads_today', 'total_downloads', 'first_name', 'username',
@@ -242,6 +270,27 @@ const allowedFields = new Set([
   'can_receive_broadcasts'
 ]);
 
+export async function updateUserField(id, updates) {
+  const fieldsToUpdate = (typeof updates === 'string')
+    ? { [updates]: arguments[2] }
+    : updates;
+
+  for (const field in fieldsToUpdate) {
+    if (!allowedFields.has(field)) {
+      throw new Error(`Недопустимое поле для обновления: ${field}`);
+    }
+  }
+
+  const { error } = await supabase
+    .from('users')
+    .update(fieldsToUpdate)
+    .eq('id', id);
+
+  if (error) {
+    console.error(`[DB] Ошибка при обновлении пользователя ${id}:`, error);
+    throw new Error('Не удалось обновить пользователя.');
+  }
+}
 export async function updateUserField(id, updates) {
   const fieldsToUpdate = (typeof updates === 'string')
     ? { [updates]: arguments[2] }
@@ -989,28 +1038,45 @@ export async function getDailyStats(options = {}) {
   return rows;
 }
 
-export async function getActivityByWeekday() {
+// В db.js
+
+export async function getActivityByWeekday(startDate, endDate) {
+  // Берем даты из аргументов или ставим дефолт (30 дней)
+  const end = endDate ? new Date(endDate) : new Date();
+  const start = startDate ? new Date(startDate) : new Date(new Date().setDate(end.getDate() - 30));
+
   const { rows } = await query(
-    `SELECT TO_CHAR(downloaded_at, 'ID') as weekday_num, COUNT(*) as count
+    `SELECT EXTRACT(ISODOW FROM downloaded_at) as weekday_num, COUNT(DISTINCT user_id) as count
      FROM downloads_log
-     WHERE downloaded_at >= NOW() - INTERVAL '90 days'
+     WHERE downloaded_at >= $1 AND downloaded_at <= $2
      GROUP BY 1
-     ORDER BY 1`
+     ORDER BY 1`,
+    [start, end]
   );
+  
   const weekdays = ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота', 'Воскресенье'];
   const result = Array(7).fill(0).map((_, i) => ({ weekday: weekdays[i], count: 0 }));
-  rows.forEach(row => { result[parseInt(row.weekday_num, 10) - 1].count = parseInt(row.count, 10); });
+  
+  rows.forEach(row => { 
+      const idx = parseInt(row.weekday_num, 10) - 1;
+      if (result[idx]) result[idx].count = parseInt(row.count, 10); 
+  });
   return result;
 }
 
-export async function getHourlyActivity(days = 7) {
+export async function getHourlyActivity(startDate, endDate) {
+  const end = endDate ? new Date(endDate) : new Date();
+  const start = startDate ? new Date(startDate) : new Date(new Date().setDate(end.getDate() - 7));
+
   const { rows } = await query(
     `SELECT EXTRACT(HOUR FROM downloaded_at AT TIME ZONE 'UTC') as hour, COUNT(*) as count
      FROM downloads_log
-     WHERE downloaded_at >= NOW() - INTERVAL '${days} days'
+     WHERE downloaded_at >= $1 AND downloaded_at <= $2
      GROUP BY hour
-     ORDER BY hour`
+     ORDER BY hour`,
+    [start, end]
   );
+  
   const hourlyCounts = Array(24).fill(0);
   rows.forEach(row => { hourlyCounts[parseInt(row.hour, 10)] = parseInt(row.count, 10); });
   return hourlyCounts;
@@ -1371,15 +1437,31 @@ export async function getReferredUsers(referrerId) {
   return error ? [] : data;
 }
 
+// В db.js замени getReferralStats на это:
+
 export async function getReferralStats() {
-  const { data: topReferrers, error: topError } = await supabase.rpc('get_top_referrers', { limit_count: 5 });
-  const { count: totalReferred, error: countError } = await supabase
-    .from('users')
-    .select('*', { count: 'exact', head: true })
-    .not('referrer_id', 'is', null);
+  // 1. Топ рефоводов (с правильными ID для ссылок)
+  const { rows: topReferrers } = await query(`
+    SELECT 
+      r.id, 
+      r.first_name, 
+      r.username,
+      COUNT(u.id) as referral_count
+    FROM users u
+    JOIN users r ON u.referrer_id = r.id
+    GROUP BY r.id, r.first_name, r.username
+    ORDER BY referral_count DESC
+    LIMIT 5
+  `);
+
+  // 2. Всего приглашено
+  const { rows: totalCount } = await query(
+    `SELECT COUNT(*) as count FROM users WHERE referrer_id IS NOT NULL`
+  );
+
   return {
-    topReferrers: topError ? [] : topReferrers,
-    totalReferred: countError ? 0 : totalReferred
+    topReferrers: topReferrers || [],
+    totalReferred: parseInt(totalCount[0]?.count || 0, 10)
   };
 }
 
