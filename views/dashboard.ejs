@@ -64,7 +64,19 @@
   <form id="periodForm" class="d-flex align-items-center flex-wrap gap-2">
     <input type="hidden" name="startDate" id="startDateInput">
     <input type="hidden" name="endDate" id="endDateInput">
-    <div class="btn-group btn-group-sm" role="group"><a href="#" class="btn btn-outline-secondary" data-days="7">7 дней</a><a href="#" class="btn btn-outline-secondary active" data-days="30">30 дней</a><a href="#" class="btn btn-outline-secondary" data-days="90">90 дней</a></div>
+   <% 
+  // Вычисляем разницу дней для подсветки кнопок
+  const startD = locals.startDate ? new Date(locals.startDate) : new Date();
+  const endD = locals.endDate ? new Date(locals.endDate) : new Date();
+  const diffTime = Math.abs(endD - startD);
+  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
+%>
+
+<div class="btn-group btn-group-sm" role="group">
+  <a href="#" class="btn btn-outline-secondary <%= diffDays <= 8 ? 'active' : '' %>" data-days="7">7 дней</a>
+  <a href="#" class="btn btn-outline-secondary <%= diffDays > 8 && diffDays <= 31 ? 'active' : '' %>" data-days="30">30 дней</a>
+  <a href="#" class="btn btn-outline-secondary <%= diffDays > 31 ? 'active' : '' %>" data-days="90">90 дней</a>
+</div>
     <input type="text" id="date-range-picker" class="form-control form-control-sm" style="width: 220px; text-align: center;">
     <button type="submit" class="btn btn-sm btn-primary"><i class="bi bi-arrow-clockwise"></i> Обновить</button>
   </form>
@@ -337,21 +349,22 @@
       <div class="card-header fw-semibold"><i class="bi bi-person-plus-fill me-2"></i>Топ-5 рефоводов</div>
       <div class="card-body">
         <% if (stats.topReferrers?.length > 0) { %>
-          <ul class="list-group list-group-flush">
-            <% stats.topReferrers.forEach((user, index) => { %>
-              <li class="list-group-item d-flex justify-content-between align-items-center">
-                <div class="text-truncate">
-                  <span class="text-muted"><%= index + 1 %>.</span>
-                  <a href="/user/<%= user.referrer_id %>" class="text-decoration-none">
-                    <%- escapeHtml(user.first_name) || `ID: ${user.referrer_id}` %>
-                  </a>
-                </div>
-                <span class="badge bg-info text-dark rounded-pill">
-                  <%= formatNumber(user.referral_count) %> <%= user.referral_count === 1 ? 'приглашение' : 'приглашений' %>
-                </span>
-              </li>
-            <% }) %>
-          </ul>
+<ul class="list-group list-group-flush">
+  <% stats.topReferrers.forEach((user, index) => { %>
+    <li class="list-group-item d-flex justify-content-between align-items-center">
+      <div class="text-truncate">
+        <span class="text-muted"><%= index + 1 %>.</span>
+        <!-- 👇 ИСПРАВЛЕННАЯ ССЫЛКА (user.id) -->
+        <a href="/user/<%= user.id %>" class="text-decoration-none">
+          <%- escapeHtml(user.first_name) || `ID: ${user.id}` %>
+        </a>
+      </div>
+      <span class="badge bg-info text-dark rounded-pill">
+        <%= formatNumber(user.referral_count) %>
+      </span>
+    </li>
+  <% }) %>
+</ul>
         <% } else { %>
           <div class="text-muted text-center my-4">Нет данных</div>
         <% } %>
