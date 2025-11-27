@@ -180,15 +180,6 @@ export async function getUserById(id) {
   return rows[0] || null;
 }
 
-export async function createUser(id, firstName, username, referrerId = null) {
-  const sql = `
-    INSERT INTO users (id, first_name, username, referrer_id, last_active, last_reset_date)
-    VALUES ($1, $2, $3, $4, NOW(), CURRENT_DATE)
-    ON CONFLICT (id) DO NOTHING
-  `;
-  await query(sql, [id, firstName, username, referrerId]);
-}
-
 export async function createUser(id, firstName, username, referrerId = null, referralSource = null) {
   const sql = `
     INSERT INTO users (
