@@ -1,8 +1,8 @@
 # 🎵 SCloudMusicBot — Умный музыкальный бот
 
-![Status](https://img.shields.org/badge/Status-Active-success)
+![Status]([https://img.shields.org/badge/Status-Active-success](https://stats.uptimerobot.com/ZBel1EfCbk))
 ![Node](https://img.shields.org/badge/Node.js-v20+-green)
-![DB](https://img.shields.org/badge/DB-Supabase-blue)
+![DB]([https://img.shields.org/badge/DB-Supabase-blue](https://supabase.com/))
 
 Продвинутый Telegram-бот для поиска и скачивания музыки с SoundCloud (и в будущем других платформ). Бот отличается высокой стабильностью, умным поиском с исправлением опечаток и собственной системой кэширования.
 
