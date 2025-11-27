@@ -403,6 +403,7 @@ app.post('/settings/update', requireAuth, async (req, res) => {
 });
 
 // === ОТДЕЛЬНАЯ ФУНКЦИЯ ДЛЯ МАССОВОГО ОБНОВЛЕНИЯ ===
+// === ОТДЕЛЬНАЯ ФУНКЦИЯ ДЛЯ МАССОВОГО ОБНОВЛЕНИЯ ===
 async function applyLimitsToUsers(body) {
     const { playlist_limit_free, playlist_limit_plus, playlist_limit_pro } = body;
 
@@ -412,12 +413,11 @@ async function applyLimitsToUsers(body) {
     // 1. Free (обновляем дефолт + существующих)
     if (playlist_limit_free) {
         const newLimit = parseInt(playlist_limit_free, 10);
-        // Сначала меняем дефолт (очень быстро)
-        await db.query(`ALTER TABLE users ALTER COLUMN premium_limit SET DEFAULT ${newLimit}`);
         
-        // Потом обновляем тысячи пользователей
-        // Для Supabase/Postgres 25k - это один "чих", но делаем это в фоне
-        await db.query(`
+        // ИСПОЛЬЗУЕМ pool ВМЕСТО db
+        await pool.query(`ALTER TABLE users ALTER COLUMN premium_limit SET DEFAULT ${newLimit}`);
+        
+        await pool.query(`
             UPDATE users 
             SET premium_limit = $1 
             WHERE (premium_limit <= 10 OR premium_limit IS NULL) 
@@ -427,7 +427,7 @@ async function applyLimitsToUsers(body) {
 
     // 2. Plus
     if (playlist_limit_plus) {
-        await db.query(`
+        await pool.query(`
             UPDATE users SET premium_limit = $1 
             WHERE premium_limit = 30 AND premium_until > NOW()
         `, [parseInt(playlist_limit_plus, 10)]);
@@ -435,7 +435,7 @@ async function applyLimitsToUsers(body) {
 
     // 3. Pro
     if (playlist_limit_pro) {
-        await db.query(`
+        await pool.query(`
             UPDATE users SET premium_limit = $1 
             WHERE premium_limit = 100 AND premium_until > NOW()
         `, [parseInt(playlist_limit_pro, 10)]);
@@ -444,7 +444,6 @@ async function applyLimitsToUsers(body) {
     const duration = (Date.now() - start) / 1000;
     console.log(`✅ Лимиты обновлены. Заняло: ${duration} сек.`);
 }
-
 
   // Дашборд — быстрые агрегаты
   app.get('/dashboard', requireAuth, async (req, res) => {
