@@ -218,7 +218,8 @@ export const CONFIG = Object.freeze({
   // --- Spotify (опционально) ---
   SPOTIPY_CLIENT_ID: process.env.SPOTIPY_CLIENT_ID || '',
   SPOTIPY_CLIENT_SECRET: process.env.SPOTIPY_CLIENT_SECRET || '',
-  
+   // --- MVSEP (Караоке) ---
+  MVSEP_API_KEY: process.env.MVSEP_API_KEY || '',
   // --- Meta ---
   isDev,
   isProduction: !isDev,
@@ -245,6 +246,8 @@ export const STORAGE_CHANNEL_ID = CONFIG.STORAGE_CHANNEL_ID;
 export const BROADCAST_STORAGE_ID = CONFIG.BROADCAST_STORAGE_ID;
 export const SPOTIPY_CLIENT_ID = CONFIG.SPOTIPY_CLIENT_ID;
 export const SPOTIPY_CLIENT_SECRET = CONFIG.SPOTIPY_CLIENT_SECRET;
+export const MVSEP_API_KEY = CONFIG.MVSEP_API_KEY; 
+
 
 // ========================= UTILITY FUNCTIONS =========================
 
