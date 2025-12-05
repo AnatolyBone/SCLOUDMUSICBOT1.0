@@ -251,6 +251,7 @@ export async function getUser(id, firstName = '', username = '', startPayload = 
     return newUserResult.rows[0];
   }
 }
+
 /* Поля разрешённые для updateUserField (Supabase update) */
 const allowedFields = new Set([
   'premium_limit', 'downloads_today', 'total_downloads', 'first_name', 'username',
@@ -282,7 +283,6 @@ export async function updateUserField(id, updates) {
     throw new Error('Не удалось обновить пользователя.');
   }
 }
-
 
 export async function getAllUsers(includeInactive = true) {
   const sql = includeInactive
@@ -1484,6 +1484,48 @@ export async function findUsersExpiringIn(days, flagField) {
   const { rows } = await query(sql, [Number(days) || 0]);
   return rows || [];
 }
+// --- НЕЧЕТКИЙ ПОИСК (V4 - Поиск по ключевым словам) ---
+export async function findKaraokeFuzzy(fullSearchString) {
+    if (!fullSearchString || fullSearchString.length < 2) return null;
+    
+    try {
+        const cleanQuery = fullSearchString.toLowerCase().trim();
+
+        // ЛОГИКА V4:
+        // Мы ищем запись, у которой:
+        // 1. Title из базы содержится в строке пользователя
+        // 2. ИЛИ строка пользователя содержится в Title базы
+        // 3. ИЛИ (Самое мощное) Исполнитель и Название совпадают по отдельности
+        
+        const res = await pool.query(
+            `SELECT * FROM karaoke_cache 
+             WHERE length(title) > 1
+             AND (
+                -- Вариант А: Прямое вхождение названия
+                $1 ILIKE '%' || title || '%' 
+                
+                OR 
+                
+                -- Вариант Б: Если у нас есть и Артист и Название в базе, 
+                -- проверяем, есть ли оба этих слова в строке пользователя
+                (
+                    performer IS NOT NULL 
+                    AND length(performer) > 2
+                    AND $1 ILIKE '%' || performer || '%' 
+                    AND $1 ILIKE '%' || title || '%'
+                )
+             )
+             ORDER BY length(title) DESC
+             LIMIT 1`,
+            [cleanQuery]
+        );
+        
+        return res.rows[0];
+    } catch (e) {
+        console.error('[DB] findKaraokeFuzzy error:', e.message);
+        return null;
+    }
+}
 export async function markStageNotified(userId, flagField) {
   const allowed = new Set(['notified_exp_3d', 'notified_exp_1d', 'notified_exp_0d']);
   if (!allowed.has(flagField)) {
@@ -1685,7 +1727,88 @@ export async function resetCacheForUserHistory(userId, beforeDate = '2024-11-17'
 // =================================================================
 // ЗАМЕНИТЬ ФУНКЦИЮ fixBadCacheForUser В db.js (ВЕРСИЯ С ОТЛАДКОЙ)
 // =================================================================
+// --- KARAOKE CACHE FUNCTIONS ---
 
+// Получить запись из кэша
+export async function getKaraokeCache(uniqueId) {
+  try {
+    const res = await pool.query('SELECT * FROM karaoke_cache WHERE file_unique_id = $1', [uniqueId]);
+    return res.rows[0];
+  } catch (e) {
+    console.error('[DB] getKaraokeCache error:', e.message);
+    return null;
+  }
+}
+
+// 1. Сохраняем минус с названием и исполнителем
+export async function saveKaraokeCache(uniqueId, instrumentalId, vocalsId, performer = null, title = null) {
+  try {
+    // Очищаем строки и приводим к нижнему регистру для поиска
+    const p = performer ? performer.trim() : null;
+    const t = title ? title.trim() : null;
+
+    await pool.query(
+      `INSERT INTO karaoke_cache (file_unique_id, instrumental_file_id, vocals_file_id, performer, title)
+       VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (file_unique_id) DO UPDATE 
+       SET instrumental_file_id = EXCLUDED.instrumental_file_id, 
+           vocals_file_id = EXCLUDED.vocals_file_id,
+           performer = COALESCE(EXCLUDED.performer, karaoke_cache.performer),
+           title = COALESCE(EXCLUDED.title, karaoke_cache.title),
+           created_at = NOW()`,
+      [uniqueId, instrumentalId, vocalsId, p, t]
+    );
+    console.log(`[DB] Saved cache: ${t} by ${p}`);
+  } catch (e) {
+    console.error('[DB] saveKaraokeCache error:', e.message);
+  }
+}
+
+// 2. УМНЫЙ ПОИСК (Ищем по Исполнителю и Названию)
+export async function findKaraokeByMetadata(performer, title) {
+    if (!performer || !title) return null;
+    try {
+        // Используем ILIKE для поиска без учета регистра (Kygo = kygo)
+        const res = await pool.query(
+            `SELECT * FROM karaoke_cache 
+             WHERE performer ILIKE $1 AND title ILIKE $2 
+             AND instrumental_file_id IS NOT NULL 
+             LIMIT 1`,
+            [performer.trim(), title.trim()]
+        );
+        return res.rows[0];
+    } catch (e) {
+        console.error('[DB] findKaraokeByMetadata error:', e.message);
+        return null;
+    }
+}
+
+// --- ПОИСК МИНУСОВОК (ПО КЛЮЧЕВЫМ СЛОВАМ) ---
+export async function searchKaraoke(query) {
+    if (!query) return [];
+    try {
+        // Разбиваем запрос на слова (например "Eminem Lose" -> ["Eminem", "Lose"])
+        const terms = query.trim().split(/\s+/).filter(t => t.length > 0);
+        if (terms.length === 0) return [];
+
+        let sql = `SELECT * FROM karaoke_cache WHERE instrumental_file_id IS NOT NULL`;
+        const params = [];
+
+        // Для каждого слова добавляем условие: слово должно быть в названии ИЛИ исполнителе
+        terms.forEach((term, index) => {
+            sql += ` AND (performer ILIKE $${index + 1} OR title ILIKE $${index + 1})`;
+            params.push(`%${term}%`); 
+        });
+
+        sql += ` ORDER BY created_at DESC LIMIT 10`;
+
+        const res = await pool.query(sql, params);
+        return res.rows;
+    } catch (e) {
+        console.error('[DB] Search error:', e.message);
+        return [];
+    }
+}
 export async function fixBadCacheForUser(userId, dateLimit) {
   try {
     const limit = dateLimit || new Date().toISOString().split('T')[0];
