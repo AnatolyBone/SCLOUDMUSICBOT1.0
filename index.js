@@ -662,7 +662,7 @@ app.get('/dashboard', requireAuth, async (req, res) => {
   app.get('/users-table', requireAuth, async (req, res) => {
     try {
       const { q = '', status = '', page = 1, limit = 25, sort = 'created_at', order = 'desc' } = req.query;
-      const { users, totalPages, totalUsers } = await getPaginatedUsers({
+      const { users, totalPages } = await getPaginatedUsers({
         searchQuery: q, statusFilter: status, page: parseInt(page), limit: parseInt(limit), sortBy: sort, sortOrder: order
       });
       const queryParams = { q, status, page, limit, sort, order };
@@ -1009,7 +1009,7 @@ app.post('/tariffs/reset-others', requireAuth, async (req, res) => {
     }
   });
 
-  // 2. Починить кэш
+   // 2. Починить кэш
   app.post('/admin/user/:id/fix-cache', requireAuth, async (req, res) => {
     try {
       const userId = req.params.id;
@@ -1024,6 +1024,7 @@ app.post('/tariffs/reset-others', requireAuth, async (req, res) => {
     }
   });
 
-}
+} 
+
 // Запускаем приложение
 startApp();
