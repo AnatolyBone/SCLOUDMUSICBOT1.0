@@ -258,7 +258,13 @@ export async function trackDownloadProcessor(task) {
     if (tempFilePath && fs.existsSync(tempFilePath)) try { fs.unlinkSync(tempFilePath); } catch (e) {}
   }
 }
+// ВАЖНО: Здесь должен быть export, чтобы другие файлы видели downloadQueue
+export const downloadQueue = new TaskQueue({
+  maxConcurrent: MAX_CONCURRENT_DOWNLOADS,
+  taskProcessor: trackDownloadProcessor
+});
 
+console.log(`[DownloadManager] Очередь (threads=${MAX_CONCURRENT_DOWNLOADS})`);
 // =====================================================================================
 //                                 ФУНКЦИЯ ENQUEUE
 // =====================================================================================
