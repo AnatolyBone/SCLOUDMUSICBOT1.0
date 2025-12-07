@@ -659,12 +659,15 @@ app.get('/dashboard', requireAuth, async (req, res) => {
     res.status(500).send('Не удалось сгенерировать CSV-файл');
   }
 });
-  app.get('/users-table', requireAuth, async (req, res) => {
+    app.get('/users-table', requireAuth, async (req, res) => {
     try {
       const { q = '', status = '', page = 1, limit = 25, sort = 'created_at', order = 'desc' } = req.query;
-      const { users, totalPages } = await getPaginatedUsers({
+      
+      // ✅ ДОБАВЛЕНО totalUsers сюда
+      const { users, totalPages, totalUsers } = await getPaginatedUsers({
         searchQuery: q, statusFilter: status, page: parseInt(page), limit: parseInt(limit), sortBy: sort, sortOrder: order
       });
+      
       const queryParams = { q, status, page, limit, sort, order };
       res.render('partials/users-table', { users, totalPages, totalUsers, currentPage: parseInt(page), queryParams, layout: false });
     } catch (error) {
@@ -672,8 +675,6 @@ app.get('/dashboard', requireAuth, async (req, res) => {
       res.status(500).send('Ошибка сервера');
     }
   });
-
-  // ЗАМЕНИ СТАРЫЙ ОБРАБОТЧИК app.get('/user/:id', ...) НА ЭТОТ В index.js
 
 app.get('/user/:id', requireAuth, async (req, res) => {
     try {
