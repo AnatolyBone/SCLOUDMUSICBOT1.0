@@ -178,13 +178,13 @@
 </div>
 
 <script>
+  // 1. Функция сбора фильтров для CSV
   function collectFilters() {
     const form = document.getElementById('usersFilterForm');
     if (!form) return {};
     const data = new FormData(form);
     const params = new URLSearchParams();
 
-    // Список полей, которые учитываем в экспорте
     const fields = [
       'q','status','limit','tariff','premium',
       'created_from','created_to','active_within_days',
@@ -197,6 +197,7 @@
     return params;
   }
 
+  // 2. Обновление ссылки экспорта
   function updateExportLink() {
     const exportLink = document.getElementById('export-link');
     if (!exportLink) return;
@@ -209,14 +210,37 @@
     const form = document.getElementById('usersFilterForm');
     if (!form) return;
     form.reset();
-    // сброс hx-параметров и обновление таблицы
     htmx.trigger(form, 'change');
     updateExportLink();
   }
 
+  // При первой загрузке
   document.addEventListener('DOMContentLoaded', updateExportLink);
 
-  // После завершения любого HTMX-запроса от формы — обновим ссылку экспорта
+  // === ГЛАВНОЕ ИСПРАВЛЕНИЕ ===
+  // Слушаем событие HTMX после того, как контент был заменен (afterSwap)
+  document.addEventListener('htmx:afterSwap', function(event) {
+    
+    // Проверяем, что обновился именно контейнер таблицы
+    if (event.detail.target.id === 'users-table-container') {
+      console.log('HTMX: Таблица обновлена, перезапускаем Bootstrap компоненты...');
+
+      // 1. Перезапускаем Dropdowns (выпадающие меню в "Действиях")
+      // Ищем все элементы с data-bs-toggle="dropdown" внутри контейнера
+      var dropdowns = event.detail.target.querySelectorAll('[data-bs-toggle="dropdown"]');
+      dropdowns.forEach(function (el) {
+        new bootstrap.Dropdown(el);
+      });
+
+      // 2. Перезапускаем Tooltips (всплывающие подсказки), если есть
+      var tooltips = event.detail.target.querySelectorAll('[data-bs-toggle="tooltip"]');
+      tooltips.forEach(function (el) {
+        new bootstrap.Tooltip(el);
+      });
+    }
+  });
+
+  // Обновляем ссылку экспорта после завершения запроса
   document.body.addEventListener('htmx:afterSettle', function (evt) {
     const form = document.getElementById('usersFilterForm');
     if (evt?.detail?.elt === form || evt?.target?.id === 'usersFilterForm') {
