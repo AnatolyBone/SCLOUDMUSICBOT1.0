@@ -270,7 +270,7 @@ function sanitizeFilename(name) {
 // handlers/commands.js - добавьте команду для теста
 
 bot.command('testdl', async (ctx) => {
-  if (!ADMIN_IDS.includes(ctx.from.id)) return;
+  if (!ADMIN_ID.includes(ctx.from.id)) return;
   
   const url = ctx.message.text.split(' ')[1];
   if (!url) {
