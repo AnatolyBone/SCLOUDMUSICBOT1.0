@@ -267,7 +267,90 @@ function sanitizeFilename(name) {
   return name.replace(/[<>:"/\\|?*]+/g, '').trim() || 'track';
 }
 // bot.js
+// handlers/commands.js - добавьте команду для теста
 
+bot.command('testdl', async (ctx) => {
+  if (!ADMIN_IDS.includes(ctx.from.id)) return;
+  
+  const url = ctx.message.text.split(' ')[1];
+  if (!url) {
+    return ctx.reply('Использование: /testdl <soundcloud_url>');
+  }
+  
+  try {
+    await ctx.reply('🔍 Тестирую скачивание...');
+    
+    // Получаем метаданные
+    const info = await ytdl(url, { 
+      'dump-single-json': true, 
+      'no-playlist': true,
+      ...YTDL_COMMON 
+    });
+    
+    const expectedDuration = Math.round(info.duration || 0);
+    
+    await ctx.reply(
+      `📊 Метаданные:\n` +
+      `• Название: ${info.title}\n` +
+      `• Исполнитель: ${info.uploader}\n` +
+      `• Ожидаемая длительность: ${expectedDuration}s\n` +
+      `• ID: ${info.id}\n\n` +
+      `Пробую скачать через SCDL...`
+    );
+    
+    // Пробуем SCDL
+    try {
+      const stream = await scdl.default.download(url);
+      const testMsg = await bot.telegram.sendAudio(
+        STORAGE_CHANNEL_ID,
+        { source: stream, filename: 'test.mp3' },
+        { title: info.title, performer: info.uploader }
+      );
+      
+      const realDuration = testMsg.audio?.duration || 0;
+      
+      await ctx.reply(
+        `📦 SCDL результат:\n` +
+        `• Реальная длительность: ${realDuration}s\n` +
+        `• Ожидалось: ${expectedDuration}s\n` +
+        `• Статус: ${realDuration < expectedDuration * 0.5 ? '❌ ПРЕВЬЮ' : '✅ ПОЛНЫЙ'}`
+      );
+      
+      // Удаляем тестовый файл
+      await bot.telegram.deleteMessage(STORAGE_CHANNEL_ID, testMsg.message_id).catch(() => {});
+      
+    } catch (scdlErr) {
+      await ctx.reply(`❌ SCDL ошибка: ${scdlErr.message}\n\nПробую YT-DLP...`);
+      
+      // Пробуем YT-DLP
+      const tempFile = `/tmp/test_${Date.now()}.mp3`;
+      await ytdl(url, { output: tempFile, format: 'bestaudio', ...YTDL_COMMON });
+      
+      if (fs.existsSync(tempFile)) {
+        const testMsg = await bot.telegram.sendAudio(
+          STORAGE_CHANNEL_ID,
+          { source: fs.createReadStream(tempFile) },
+          { title: info.title }
+        );
+        
+        const realDuration = testMsg.audio?.duration || 0;
+        
+        await ctx.reply(
+          `📦 YT-DLP результат:\n` +
+          `• Реальная длительность: ${realDuration}s\n` +
+          `• Ожидалось: ${expectedDuration}s\n` +
+          `• Статус: ${realDuration < expectedDuration * 0.5 ? '❌ ПРЕВЬЮ (трек защищён!)' : '✅ ПОЛНЫЙ'}`
+        );
+        
+        await bot.telegram.deleteMessage(STORAGE_CHANNEL_ID, testMsg.message_id).catch(() => {});
+        fs.unlinkSync(tempFile);
+      }
+    }
+    
+  } catch (err) {
+    await ctx.reply(`❌ Ошибка: ${err.message}`);
+  }
+});
 bot.command('fixuser', async (ctx) => {
   // 1. Проверяем, что это админ
   if (ctx.from.id !== ADMIN_ID) {
