@@ -807,14 +807,7 @@ export async function getCachedTracksCount() {
     return 0;
   }
 }
-export async function deleteCachedTrack(url) {
-  try {
-    await query('DELETE FROM track_cache WHERE url = $1', [url]);
-    console.log(`[Cache] Удалён устаревший file_id для: ${url}`);
-  } catch (e) {
-    console.error('[DB Error] deleteCachedTrack:', e.message);
-  }
-}
+
 /* ========================= Логирование ========================= */
 
 export async function incrementDownloadsAndSaveTrack(userId, trackName, fileId, url) {
@@ -1683,25 +1676,29 @@ export async function resetCacheForUserHistory(userId, beforeDate = '2024-11-17'
   }
 }
 
+// db.js - ЗАМЕНИТЕ существующую функцию deleteCachedTrack на эту:
+
 export async function deleteCachedTrack(urlOrKey) {
   if (!urlOrKey) return false;
   
   try {
-    // Удаляем из таблицы tracks
-    const { error } = await supabase
-      .from('tracks')
-      .delete()
-      .or(`url.eq.${urlOrKey},cache_key.eq.${urlOrKey}`);
+    // Удаляем из таблицы track_cache (не tracks!)
+    const { rowCount } = await query(
+      `DELETE FROM track_cache WHERE url = $1`,
+      [urlOrKey]
+    );
     
-    if (error) throw error;
+    // Также пробуем удалить из алиасов
+    await query(
+      `DELETE FROM track_url_aliases WHERE canonical_url = $1 OR alias_url = $1`,
+      [urlOrKey]
+    ).catch(() => {}); // Игнорируем если таблица не существует
     
-    // Также удаляем из Redis если используется
-    if (redis) {
-      await redis.del(`track:${urlOrKey}`).catch(() => {});
+    if (rowCount > 0) {
+      console.log(`[DB] Удалён кэш для: ${urlOrKey}`);
     }
     
-    console.log(`[DB] Удалён кэш для: ${urlOrKey}`);
-    return true;
+    return rowCount > 0;
   } catch (e) {
     console.error('[DB] Ошибка удаления кэша:', e.message);
     return false;
