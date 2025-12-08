@@ -160,23 +160,35 @@ export async function trackDownloadProcessor(task) {
       return;
     }
 
-    // 2. Метаданные
+        // 2. Метаданные
     const ensured = await ensureTaskMetadata(task);
     const { metadata, cacheKey } = ensured;
     const { title, uploader, duration, webpage_url: fullUrl } = metadata;
     const roundedDuration = duration ? Math.round(duration) : undefined;
     
-    console.log(`[Worker] Обработка: "${title}" (ожидаемая длительность: ${roundedDuration || 'N/A'}s)`);
+    console.log(`[Worker] ====== НАЧАЛО ОБРАБОТКИ ======`);
+    console.log(`[Worker] Трек: "${title}" by ${uploader}`);
+    console.log(`[Worker] URL: ${fullUrl}`);
+    console.log(`[Worker] Ожидаемая длительность: ${roundedDuration || 'N/A'}s`);
+    console.log(`[Worker] CacheKey: ${cacheKey}`);
     
     if (!fullUrl) throw new Error(`Нет ссылки на трек: ${title}`);
 
     // 3. КЭШ С ПРОВЕРКОЙ НА ПРЕВЬЮ
     let cached = await db.findCachedTrack(cacheKey) || await db.findCachedTrack(fullUrl);
     
+    console.log(`[Worker] Результат поиска в кэше:`, cached ? {
+      title: cached.title,
+      duration: cached.duration,
+      hasFileId: !!cached.fileId
+    } : 'НЕ НАЙДЕН');
+    
     if (cached?.fileId) {
+      console.log(`[Worker] Проверка валидности кэша: cachedDuration=${cached.duration}, expectedDuration=${roundedDuration}`);
+      
       // === ПРОВЕРКА ВАЛИДНОСТИ КЭША ===
       if (isCacheValid(cached, roundedDuration)) {
-        console.log(`[Worker/Cache] ХИТ! Отправляю "${cached.title}" из кэша.`);
+        console.log(`[Worker/Cache] ✅ Кэш валиден, отправляю из кэша`);
         await bot.telegram.sendAudio(userId, cached.fileId, { 
           title: cached.title, 
           performer: cached.artist || uploader, 
@@ -186,10 +198,12 @@ export async function trackDownloadProcessor(task) {
         return;
       } else {
         // Это превью! Удаляем из кэша и качаем заново
-        console.warn(`[Worker/Cache] В кэше превью! Удаляю и качаю заново...`);
+        console.warn(`[Worker/Cache] ❌ В кэше превью! Удаляю и качаю заново...`);
         await invalidateCache(fullUrl, cacheKey);
-        cached = null; // Сбрасываем, чтобы пойти на скачивание
+        cached = null;
       }
+    } else {
+      console.log(`[Worker] Кэш пуст, будем скачивать`);
     }
 
     statusMessage = await safeSendMessage(userId, `⏳ Скачиваю: "${title}"`);
