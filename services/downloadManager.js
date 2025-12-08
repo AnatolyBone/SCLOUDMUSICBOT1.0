@@ -1,5 +1,6 @@
 // =====================================================================================
 //      ОБНОВЛЁННАЯ ВЕРСИЯ С ПРОВЕРКОЙ ПРЕВЬЮ В КЭШЕ
+//                       services/downloadManager.js
 // =====================================================================================
 
 import { STORAGE_CHANNEL_ID, CHANNEL_USERNAME, PROXY_URL } from '../config.js';
@@ -49,18 +50,24 @@ function getCacheKey(meta, fallbackUrl) {
 
 /**
  * Проверяет, является ли закэшированный трек полноценным (не превью)
+ * @param {Object} cached - закэшированный трек
+ * @param {number} expectedDuration - ожидаемая длительность в секундах
+ * @returns {boolean} true если кэш валиден, false если это превью
  */
 function isCacheValid(cached, expectedDuration) {
   if (!cached) return false;
+  
+  // Если нет информации о длительности - используем кэш (доверяем)
   if (!cached.duration || !expectedDuration) return true;
   
-  // Превью обычно 30 секунд
+  // Превью обычно ~30 секунд
+  // Если ожидаемая длительность > 60 сек, а в кэше < 35 сек - это превью
   if (expectedDuration > 60 && cached.duration < 35) {
     console.warn(`[Cache] ПРЕВЬЮ обнаружено! cached=${cached.duration}s, expected=${expectedDuration}s`);
     return false;
   }
   
-  // Если меньше 50% от ожидаемой длительности
+  // Если кэшированная версия меньше 50% от ожидаемой - подозрительно
   if (cached.duration < expectedDuration * 0.5) {
     console.warn(`[Cache] Подозрительно короткий: ${cached.duration}s vs ${expectedDuration}s`);
     return false;
@@ -70,13 +77,17 @@ function isCacheValid(cached, expectedDuration) {
 }
 
 /**
- * Удаляет невалидный кэш
+ * Удаляет невалидный кэш (превью)
  */
 async function invalidateCache(url, cacheKey) {
   try {
-    if (url) await db.deleteCachedTrack?.(url);
-    if (cacheKey && cacheKey !== url) await db.deleteCachedTrack?.(cacheKey);
-    console.log(`[Cache] Инвалидирован: ${url}`);
+    if (url) {
+      await db.deleteCachedTrack(url);
+    }
+    if (cacheKey && cacheKey !== url) {
+      await db.deleteCachedTrack(cacheKey);
+    }
+    console.log(`[Cache] Инвалидирован: ${url || cacheKey}`);
   } catch (e) {
     console.error('[Cache] Ошибка удаления:', e.message);
   }
@@ -155,7 +166,7 @@ export async function trackDownloadProcessor(task) {
     const { title, uploader, duration, webpage_url: fullUrl } = metadata;
     const roundedDuration = duration ? Math.round(duration) : undefined;
     
-    console.log(`[Worker] Обработка: "${title}" (ожидаемая длительность: ${roundedDuration}s)`);
+    console.log(`[Worker] Обработка: "${title}" (ожидаемая длительность: ${roundedDuration || 'N/A'}s)`);
     
     if (!fullUrl) throw new Error(`Нет ссылки на трек: ${title}`);
 
@@ -163,6 +174,7 @@ export async function trackDownloadProcessor(task) {
     let cached = await db.findCachedTrack(cacheKey) || await db.findCachedTrack(fullUrl);
     
     if (cached?.fileId) {
+      // === ПРОВЕРКА ВАЛИДНОСТИ КЭША ===
       if (isCacheValid(cached, roundedDuration)) {
         console.log(`[Worker/Cache] ХИТ! Отправляю "${cached.title}" из кэша.`);
         await bot.telegram.sendAudio(userId, cached.fileId, { 
@@ -173,9 +185,10 @@ export async function trackDownloadProcessor(task) {
         await incrementDownload(userId, cached.title, cached.fileId, cacheKey);
         return;
       } else {
+        // Это превью! Удаляем из кэша и качаем заново
         console.warn(`[Worker/Cache] В кэше превью! Удаляю и качаю заново...`);
         await invalidateCache(fullUrl, cacheKey);
-        cached = null;
+        cached = null; // Сбрасываем, чтобы пойти на скачивание
       }
     }
 
@@ -186,26 +199,28 @@ export async function trackDownloadProcessor(task) {
     let finalFileId = null;
 
     // ========================================================
-    // 4. СКАЧИВАНИЕ
+    // 4. СКАЧИВАНИЕ (SCDL STREAM - БЫСТРО)
     // ========================================================
     try {
         console.log(`[Worker/Stream] (SCDL) Пробую скачать: ${fullUrl}`);
         stream = await scdl.default.download(fullUrl);
         
         if (STORAGE_CHANNEL_ID) {
-            console.log(`[Worker/Stream] Отправка в хранилище...`);
+            console.log(`[Worker/Stream] Отправка в хранилище для проверки...`);
             const sentMsg = await bot.telegram.sendAudio(
                 STORAGE_CHANNEL_ID,
                 { source: stream, filename: `${sanitizeFilename(title)}.mp3` },
                 { title, performer: uploader, duration: roundedDuration }
             );
             
+            // ПРОВЕРКА ОБРУБКА СРЕДСТВАМИ ТЕЛЕГРАМА
             const realDuration = sentMsg.audio?.duration || 0;
-            console.log(`[Worker] Проверка: получено ${realDuration}s, ожидалось ${roundedDuration}s`);
+            console.log(`[Worker] Проверка: получено ${realDuration}s, ожидалось ${roundedDuration || 'N/A'}s`);
             
-            // ПРОВЕРКА НА ПРЕВЬЮ
+            // Если трек должен быть длинным (>60 сек), а пришло меньше 35 сек
             if (roundedDuration > 60 && realDuration < 35) {
                 console.warn(`[Worker] ПРЕВЬЮ DETECTED! ${realDuration}s вместо ${roundedDuration}s`);
+                // Удаляем плохой файл из канала
                 await bot.telegram.deleteMessage(STORAGE_CHANNEL_ID, sentMsg.message_id).catch(()=>{});
                 throw new Error('SCDL_INCOMPLETE_FILE');
             }
@@ -221,8 +236,10 @@ export async function trackDownloadProcessor(task) {
         }
         
     } catch (scdlError) {
+        // Если SCDL упал ИЛИ мы сами выбросили ошибку 'SCDL_INCOMPLETE_FILE'
         console.warn(`[Worker] Переключаюсь на YT-DLP (Причина: ${scdlError.message})...`);
         
+        // YT-DLP Fallback (Медленно, но надежно)
         tempFilePath = path.join(TEMP_DIR, `dl_${Date.now()}_${userId}.mp3`);
         usedFallback = true;
 
@@ -234,7 +251,7 @@ export async function trackDownloadProcessor(task) {
         });
 
         if (fs.existsSync(tempFilePath)) {
-            console.log(`[Worker/Fallback] YT-DLP скачал файл`);
+            console.log(`[Worker/Fallback] Файл скачан YT-DLP: ${tempFilePath}`);
             stream = fs.createReadStream(tempFilePath);
         } else {
             throw new Error(`YT-DLP не смог скачать файл.`);
@@ -242,11 +259,11 @@ export async function trackDownloadProcessor(task) {
     }
 
     // ========================================================
-    // 5. ОТПРАВКА И КЭШИРОВАНИЕ
+    // 5. ОТПРАВКА ПОЛЬЗОВАТЕЛЮ И КЭШИРОВАНИЕ
     // ========================================================
     
     if (finalFileId) {
-        // SCDL успешно скачал полную версию
+        // SCDL успешно скачал полную версию, уже в канале
         const urlAliases = [];
         if (task.originalUrl && task.originalUrl !== fullUrl) urlAliases.push(task.originalUrl);
         if (cacheKey) urlAliases.push(cacheKey);
@@ -277,6 +294,8 @@ export async function trackDownloadProcessor(task) {
              const realDuration = sentToStorage.audio?.duration || 0;
              finalFileId = sentToStorage?.audio?.file_id;
              
+             console.log(`[Worker/YT-DLP] Получено ${realDuration}s, ожидалось ${roundedDuration || 'N/A'}s`);
+             
              // Проверяем и YT-DLP результат!
              if (roundedDuration > 60 && realDuration < 35) {
                  console.error(`[Worker] YT-DLP тоже скачал превью! Трек недоступен.`);
@@ -284,7 +303,7 @@ export async function trackDownloadProcessor(task) {
                  throw new Error('TRACK_PREVIEW_ONLY');
              }
              
-             // Кэшируем хорошую версию
+             // Кэшируем "хорошую" версию с реальной длительностью
              if (finalFileId) {
                  await db.cacheTrack({ 
                    url: fullUrl, 
@@ -299,6 +318,7 @@ export async function trackDownloadProcessor(task) {
              await bot.telegram.sendAudio(userId, finalFileId, { title, performer: uploader, duration: realDuration });
              
         } else {
+             // Прямая отправка (без канала-хранилища)
              await bot.telegram.sendAudio(userId, { source: stream, filename: `${sanitizeFilename(title)}.mp3` }, { title, performer: uploader, duration: roundedDuration });
         }
         
@@ -346,6 +366,7 @@ export function enqueue(ctx, userId, url, earlyData = {}) {
     console.log(`[Enqueue] User ${userId}, URL: ${url}`);
     
     try {
+      // Проверка бонусов/лимитов
       const user = await db.getUser(userId);
       if ((user.downloads_today || 0) >= user.premium_limit) {
           const bonusAvailable = Boolean(CHANNEL_USERNAME && !user?.subscribed_bonus_used);
@@ -360,7 +381,7 @@ export function enqueue(ctx, userId, url, earlyData = {}) {
           return;
       }
 
-      // 1. FAST PATH
+      // 1. FAST PATH (если метаданные уже есть из поиска)
       if (earlyData.isSingleTrack && earlyData.metadata) {
         console.log('[Enqueue/Fast] Метаданные получены заранее.');
         const metadata = extractMetadataFromInfo(earlyData.metadata);
@@ -368,38 +389,47 @@ export function enqueue(ctx, userId, url, earlyData = {}) {
         const cacheKey = id ? `sc:${id}` : null;
         const expectedDuration = duration ? Math.round(duration) : null;
 
-        // Проверка кэша С ВАЛИДАЦИЕЙ
+        // Проверка кэша С ВАЛИДАЦИЕЙ НА ПРЕВЬЮ
         const cached = await db.findCachedTrack(url) || await db.findCachedTrack(fullUrl) || (cacheKey && await db.findCachedTrack(cacheKey));
         
         if (cached?.fileId) {
+          // === ПРОВЕРКА НА ПРЕВЬЮ ===
           if (isCacheValid(cached, expectedDuration)) {
             console.log(`[Enqueue/Fast] ХИТ КЭША!`);
             await bot.telegram.sendAudio(userId, cached.fileId, { 
               title: cached.title, 
               performer: cached.artist,
-              duration: cached.duration 
+              duration: cached.duration
             });
             await incrementDownload(userId, cached.title, cached.fileId, url);
             return;
           } else {
             console.warn(`[Enqueue/Fast] Кэш = превью! Качаем заново...`);
             await invalidateCache(url, cacheKey);
+            // НЕ делаем return, продолжаем добавлять в очередь
           }
         }
 
+        // Добавляем в очередь
         const task = { userId, url: fullUrl, originalUrl: url, source: 'soundcloud', cacheKey, metadata };
         downloadQueue.add({ ...task, priority: user.premium_limit || 5 });
         await safeSendMessage(userId, `✅ Трек "${metadata.title}" добавлен в очередь.`);
         return;
       }
 
-      // 2. SLOW PATH
+      // 2. SLOW PATH (Если просто кинули ссылку)
+      // Сначала проверим кэш по URL
       const quickCache = await db.findCachedTrack(url);
       if (quickCache?.fileId) {
-          // Для slow path у нас нет expectedDuration, поэтому просто проверяем на очень короткие
+          // Для slow path у нас нет expectedDuration, 
+          // поэтому просто проверяем на очень короткие (< 35 сек)
           if (!quickCache.duration || quickCache.duration > 35) {
             console.log(`[Enqueue/Slow] ХИТ КЭША по URL!`);
-            await bot.telegram.sendAudio(userId, quickCache.fileId, { title: quickCache.title, performer: quickCache.artist });
+            await bot.telegram.sendAudio(userId, quickCache.fileId, { 
+              title: quickCache.title, 
+              performer: quickCache.artist,
+              duration: quickCache.duration
+            });
             await incrementDownload(userId, quickCache.title, quickCache.fileId, url);
             return;
           } else {
@@ -410,14 +440,17 @@ export function enqueue(ctx, userId, url, earlyData = {}) {
 
       statusMessage = await safeSendMessage(userId, '🔍 Анализирую ссылку...');
       
+      // Получаем инфо через yt-dlp
       const info = await ytdl(url, { 'dump-single-json': true, 'flat-playlist': true, ...YTDL_COMMON });
       
+      // Удаляем сообщение "Анализирую..."
       if (statusMessage) {
         await bot.telegram.deleteMessage(userId, statusMessage.message_id).catch(() => {});
       }
 
+      // Это плейлист?
       if (info.entries && info.entries.length > 0) {
-          await safeSendMessage(userId, `📂 Найден плейлист: "${info.title || 'Playlist'}".\nДобавляю ${info.entries.length} треков...`);
+          await safeSendMessage(userId, `📂 Найден плейлист/альбом: "${info.title || 'Playlist'}".\nДобавляю ${info.entries.length} треков...`);
           
           let addedCount = 0;
           for (const entry of info.entries) {
@@ -430,6 +463,7 @@ export function enqueue(ctx, userId, url, earlyData = {}) {
           }
           await safeSendMessage(userId, `✅ Добавлено в очередь: ${addedCount} треков.`);
       } else {
+          // Одиночный трек
           const meta = extractMetadataFromInfo(info);
           if (meta) {
               const task = { userId, url: meta.webpage_url, originalUrl: url, source: 'soundcloud', metadata: meta };
