@@ -1682,10 +1682,31 @@ export async function resetCacheForUserHistory(userId, beforeDate = '2024-11-17'
     return 0;
   }
 }
-// =================================================================
-// ЗАМЕНИТЬ ФУНКЦИЮ fixBadCacheForUser В db.js (ВЕРСИЯ С ОТЛАДКОЙ)
-// =================================================================
 
+export async function deleteCachedTrack(urlOrKey) {
+  if (!urlOrKey) return false;
+  
+  try {
+    // Удаляем из таблицы tracks
+    const { error } = await supabase
+      .from('tracks')
+      .delete()
+      .or(`url.eq.${urlOrKey},cache_key.eq.${urlOrKey}`);
+    
+    if (error) throw error;
+    
+    // Также удаляем из Redis если используется
+    if (redis) {
+      await redis.del(`track:${urlOrKey}`).catch(() => {});
+    }
+    
+    console.log(`[DB] Удалён кэш для: ${urlOrKey}`);
+    return true;
+  } catch (e) {
+    console.error('[DB] Ошибка удаления кэша:', e.message);
+    return false;
+  }
+}
 export async function fixBadCacheForUser(userId, dateLimit) {
   try {
     const limit = dateLimit || new Date().toISOString().split('T')[0];
