@@ -1704,6 +1704,33 @@ export async function deleteCachedTrack(urlOrKey) {
     return false;
   }
 }
+// Функция для экстренной очистки базы от проблемных треков
+export async function cleanUpDatabase() {
+    try {
+        console.log('[DB Clean] Начинаю очистку...');
+
+        // 1. Удаляем проблемный трек "Wrong Side of Heaven" по части названия
+        const { rowCount: count1 } = await query(
+            "DELETE FROM track_cache WHERE title ILIKE '%wrong%side%of%heaven%' OR url ILIKE '%wrong-side-of-heaven%'"
+        );
+
+        // 2. Удаляем короткие треки (меньше 20 секунд), так как это обычно превью
+        const { rowCount: count2 } = await query(
+            "DELETE FROM track_cache WHERE duration < 20"
+        );
+        
+        // 3. Также удаляем алиасы для этих треков (опционально, если есть внешние ключи, они удалятся сами, но на всякий случай)
+        await query(
+             "DELETE FROM track_url_aliases WHERE canonical_url NOT IN (SELECT url FROM track_cache)"
+        ).catch(() => {});
+
+        console.log(`[DB Clean] Готово. Удалено specific: ${count1}, short: ${count2}`);
+        return true;
+    } catch (e) {
+        console.error('[DB Clean] Критическая ошибка:', e);
+        return false;
+    }
+}
 export async function fixBadCacheForUser(userId, dateLimit) {
   try {
     const limit = dateLimit || new Date().toISOString().split('T')[0];
