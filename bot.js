@@ -5,7 +5,7 @@ import axios from 'axios';
 import { HttpsProxyAgent } from 'https-proxy-agent';
 import { ADMIN_ID, BOT_TOKEN, WEBHOOK_URL, CHANNEL_USERNAME, STORAGE_CHANNEL_ID, PROXY_URL } from './config.js';
 import { updateUserField, getUser, createUser, setPremium, getAllUsers, resetDailyLimitIfNeeded, getCachedTracksCount, logUserAction, getTopFailedSearches, getTopRecentSearches, getNewUsersCount,findCachedTrack,           // <--- ДОБАВИТЬ
-    incrementDownloadsAndSaveTrack, getReferrerInfo, getReferredUsers, resetExpiredPremiumIfNeeded, getReferralStats, getUserUniqueDownloadedUrls, findCachedTrackByFileId, updateFileId} from './db.js';
+    incrementDownloadsAndSaveTrack, getReferrerInfo, getReferredUsers, resetExpiredPremiumIfNeeded, getReferralStats, getUserUniqueDownloadedUrls, findCachedTrackByFileId, cleanUpDatabase, updateFileId} from './db.js';
 import { T, allTextsSync } from './config/texts.js';
 import { performInlineSearch } from './services/searchManager.js';
 import { spotifyEnqueue } from './services/spotifyManager.js';
@@ -272,6 +272,21 @@ function sanitizeFilename(name) {
 }
 // bot.js
 // handlers/commands.js - добавьте команду для теста
+bot.command('cleantrash', async (ctx) => {
+    // Проверка на админа
+    if (ctx.from.id !== ADMIN_ID) return;
+
+    await ctx.reply('🧹 Начинаю очистку базы от битых треков...');
+    
+    // Вызываем функцию из db.js
+    const success = await cleanUpDatabase();
+    
+    if (success) {
+        await ctx.reply('✅ База очищена:\n1. Трек "Wrong Side of Heaven" удален.\n2. Все треки короче 20 сек удалены.\n\nПопробуйте скачать ссылку снова.');
+    } else {
+        await ctx.reply('❌ Произошла ошибка при очистке. Проверьте логи.');
+    }
+});
 
 bot.command('testdl', async (ctx) => {
   if (ctx.from.id !== ADMIN_ID) return;
