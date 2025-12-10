@@ -219,13 +219,13 @@ export async function trackDownloadProcessor(task) {
         console.log(`[Worker/Stream] (SCDL) Пробую скачать: ${fullUrl}`);
         stream = await scdl.default.download(fullUrl);
         
-        if (STORAGE_CHANNEL_ID) {
-            console.log(`[Worker/Stream] Отправка в хранилище для проверки...`);
-            const sentMsg = await bot.telegram.sendAudio(
-                STORAGE_CHANNEL_ID,
-                { source: stream, filename: `${sanitizeFilename(title)}.mp3` },
-                { title, performer: uploader, duration: roundedDuration }
-            );
+       if (STORAGE_CHANNEL_ID) {
+    console.log(`[Worker/Stream] Отправка в хранилище БЕЗ duration для проверки...`);
+    const sentMsg = await bot.telegram.sendAudio(
+        STORAGE_CHANNEL_ID,
+        { source: stream, filename: `${sanitizeFilename(title)}.mp3` },
+        { title, performer: uploader }
+    );
             
             // ПРОВЕРКА ОБРУБКА СРЕДСТВАМИ ТЕЛЕГРАМА
             const realDuration = sentMsg.audio?.duration || 0;
@@ -302,7 +302,7 @@ export async function trackDownloadProcessor(task) {
              const sentToStorage = await bot.telegram.sendAudio(
                 STORAGE_CHANNEL_ID, 
                 { source: stream, filename: `${sanitizeFilename(title)}.mp3` },
-                { title, performer: uploader, duration: roundedDuration }
+                { title, performer: uploader }
              );
              
              const realDuration = sentToStorage.audio?.duration || 0;
