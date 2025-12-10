@@ -27,9 +27,8 @@ function getYoutubeDl() {
         options.proxy = PROXY_URL;
     }
     
-    // Флаги, которые будут добавляться к КАЖДОМУ вызову youtube-dl из этого файла
+    // ИСПРАВЛЕНО: Убрали 'extractor-args', так как строка "CLIENT_ID" ломала запрос
     const defaultFlags = {
-        'extractor-args': 'soundcloud:player_client_id=CLIENT_ID',
         'no-warnings': true
     };
     
