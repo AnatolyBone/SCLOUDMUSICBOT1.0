@@ -27,12 +27,17 @@ function getYoutubeDl() {
         options.proxy = PROXY_URL;
     }
     
-    // ИСПРАВЛЕНО: Убрали 'extractor-args', так как строка "CLIENT_ID" ломала запрос
+    // ДОБАВЛЕНЫ: Заголовки, чтобы притвориться обычным браузером Chrome
     const defaultFlags = {
-        'no-warnings': true
+        'no-warnings': true,
+        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'referer': 'https://soundcloud.com/',
+        'add-header': [
+            'Accept-Language:en-US,en;q=0.9',
+            'Accept:text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8'
+        ]
     };
     
-    // Возвращаем функцию, которая объединяет дефолтные флаги с теми, что передаются при вызове
     return (url, flags) => execYoutubeDl(url, { ...defaultFlags, ...flags }, options);
 }
 /**
@@ -1138,11 +1143,14 @@ async function handleSoundCloudUrl(ctx, url) {
             // Используем расшифрованную ссылку
             data = await youtubeDl(resolvedUrl, { dumpSingleJson: true, flatPlaylist: true });
         } catch (ytdlError) {
-            console.error(`[youtube-dl] Ошибка:`, ytdlError.stderr || ytdlError.message);
-            throw new Error('Не удалось получить метаданные.');
+            // ВАЖНОЕ ИЗМЕНЕНИЕ: Логируем ПОЛНЫЙ текст ошибки от youtube-dl
+            console.error(`[youtube-dl] ДЕТАЛИ ОШИБКИ для ${resolvedUrl}:`);
+            console.error(ytdlError.stderr || ytdlError.message || ytdlError);
+            
+            throw new Error('Ошибка при запросе к SoundCloud (см. логи)');
         }
         
-        if (!data) throw new Error('Не удалось получить метаданные.');
+        if (!data) throw new Error('Пустой ответ от yt-dlp.');
         
         if (data.entries && data.entries.length > 1) {
             // Плейлист
@@ -1153,7 +1161,7 @@ async function handleSoundCloudUrl(ctx, url) {
                 playlistId,
                 title: data.title,
                 tracks: data.entries,
-                originalUrl: resolvedUrl, // Сохраняем полную ссылку
+                originalUrl: resolvedUrl, 
                 selected: new Set(),
                 currentPage: 0,
                 fullTracks: false
@@ -1171,7 +1179,7 @@ async function handleSoundCloudUrl(ctx, url) {
         
     } catch (error) {
         console.error('Ошибка handleSoundCloudUrl:', error.message);
-        const userMessage = '❌ Не удалось обработать ссылку.';
+        const userMessage = '❌ Не удалось обработать ссылку. Возможно, SoundCloud заблокировал IP сервера.';
         if (loadingMessage) {
             await ctx.telegram.editMessageText(ctx.chat.id, loadingMessage.message_id, undefined, userMessage).catch(() => {});
         } else {
@@ -1179,7 +1187,6 @@ async function handleSoundCloudUrl(ctx, url) {
         }
     }
 }
-
 const handleMediaForShazam = async (ctx) => {
     const message = ctx.message;
 
