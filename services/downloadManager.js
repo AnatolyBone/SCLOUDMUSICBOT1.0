@@ -147,6 +147,10 @@ async function ensureTaskMetadata(task) {
 //                             ГЛАВНЫЙ ПРОЦЕССОР ЗАГРУЗКИ
 // =====================================================================================
 
+// =====================================================================================
+//                             ГЛАВНЫЙ ПРОЦЕССОР ЗАГРУЗКИ
+// =====================================================================================
+
 export async function trackDownloadProcessor(task) {
   let statusMessage = null;
   let tempFilePath = null;
@@ -160,7 +164,7 @@ export async function trackDownloadProcessor(task) {
       return;
     }
 
-        // 2. Метаданные
+    // 2. Метаданные
     const ensured = await ensureTaskMetadata(task);
     const { metadata, cacheKey } = ensured;
     const { title, uploader, duration, webpage_url: fullUrl } = metadata;
@@ -219,13 +223,13 @@ export async function trackDownloadProcessor(task) {
         console.log(`[Worker/Stream] (SCDL) Пробую скачать: ${fullUrl}`);
         stream = await scdl.default.download(fullUrl);
         
-       if (STORAGE_CHANNEL_ID) {
-    console.log(`[Worker/Stream] Отправка в хранилище БЕЗ duration для проверки...`);
-    const sentMsg = await bot.telegram.sendAudio(
-        STORAGE_CHANNEL_ID,
-        { source: stream, filename: `${sanitizeFilename(title)}.mp3` },
-        { title, performer: uploader }
-    );
+        if (STORAGE_CHANNEL_ID) {
+            console.log(`[Worker/Stream] Отправка в хранилище БЕЗ duration для проверки...`);
+            const sentMsg = await bot.telegram.sendAudio(
+                STORAGE_CHANNEL_ID,
+                { source: stream, filename: `${sanitizeFilename(title)}.mp3` },
+                { title, performer: uploader }
+            );
             
             // ПРОВЕРКА ОБРУБКА СРЕДСТВАМИ ТЕЛЕГРАМА
             const realDuration = sentMsg.audio?.duration || 0;
@@ -236,13 +240,10 @@ export async function trackDownloadProcessor(task) {
                 console.warn(`[Worker] ПРЕВЬЮ DETECTED! ${realDuration}s вместо ${roundedDuration}s`);
                 // Удаляем плохой файл из канала
                 await bot.telegram.deleteMessage(STORAGE_CHANNEL_ID, sentMsg.message_id).catch(()=>{});
-                throw new Error('SCDL_INCOMPLETE_FILE');
-            }
-            
-            // Дополнительная проверка - если меньше 50% от ожидаемой
-            if (roundedDuration && realDuration < roundedDuration * 0.5) {
-                console.warn(`[Worker] Подозрительно короткий файл! ${realDuration}s vs ${roundedDuration}s`);
-                await bot.telegram.deleteMessage(STORAGE_CHANNEL_ID, sentMsg.message_id).catch(()=>{});
+                
+                // ЗАПИСЬ В РЕЕСТР ОШИБОК (ПРЕВЬЮ)
+                try { await db.logBrokenTrack(fullUrl, title, userId, 'PREVIEW_ONLY'); } catch (e) {}
+                
                 throw new Error('SCDL_INCOMPLETE_FILE');
             }
             
@@ -314,6 +315,10 @@ export async function trackDownloadProcessor(task) {
              if (roundedDuration > 60 && realDuration < 35) {
                  console.error(`[Worker] YT-DLP тоже скачал превью! Трек недоступен.`);
                  await bot.telegram.deleteMessage(STORAGE_CHANNEL_ID, sentToStorage.message_id).catch(()=>{});
+                 
+                 // ЗАПИСЬ В РЕЕСТР ОШИБОК (ПРЕВЬЮ ЧЕРЕЗ YTDL)
+                 try { await db.logBrokenTrack(fullUrl, title, userId, 'PREVIEW_ONLY_YTDL'); } catch (e) {}
+                 
                  throw new Error('TRACK_PREVIEW_ONLY');
              }
              
@@ -340,6 +345,30 @@ export async function trackDownloadProcessor(task) {
     }
 
   } catch (err) {
+    // ==========================================
+    // ЛОГИРОВАНИЕ В РЕЕСТР (БИТЫЕ ТРЕКИ)
+    // ==========================================
+    let failureReason = 'UNKNOWN_ERROR';
+    if (err.message === 'TRACK_PREVIEW_ONLY' || err.message === 'SCDL_INCOMPLETE_FILE') {
+        failureReason = 'PREVIEW_ONLY';
+    } else if (err.message.includes('HTTP Error 403') || err.message.includes('Forbidden')) {
+        failureReason = '403_FORBIDDEN'; // Скорее всего бан IP или Geo-Block
+    } else if (err.message.includes('YT-DLP не смог скачать')) {
+        failureReason = 'DOWNLOAD_ERROR';
+    }
+
+    try {
+        await db.logBrokenTrack(
+            task.originalUrl || task.url || 'Unknown URL', 
+            task.metadata?.title || 'Unknown Title', 
+            userId, 
+            failureReason
+        );
+    } catch (dbErr) {
+        console.error('Ошибка записи в реестр broken tracks:', dbErr);
+    }
+    // ==========================================
+
     console.error(`❌ Ошибка (User ${userId}):`, err.message);
     
     // Специальное сообщение для превью
