@@ -38,7 +38,12 @@
           <li class="nav-item"><a class="nav-link <%= locals.page === 'texts' ? 'active fw-semibold' : '' %>" href="/texts"><i class="bi bi-file-text-fill me-1"></i>Тексты</a></li>
           <li class="nav-item"><a class="nav-link <%= locals.page === 'expiring-users' ? 'active fw-semibold' : '' %>" href="/expiring-users"><i class="bi bi-clock-history me-1"></i>Истекающие</a></li>
           <li class="nav-item"><a class="nav-link <%= locals.page === 'settings' ? 'active fw-semibold' : '' %>" href="/settings"><i class="bi bi-gear-fill me-1"></i>Настройки</a></li>
-        </ul>
+<li class="nav-item">
+  <a class="nav-link <%= page === 'broken-tracks' ? 'active' : '' %>" href="/broken-tracks">
+    <span data-feather="alert-triangle"></span>
+    Проблемные треки
+  </a>
+</li>
         <div class="d-flex align-items-center gap-2">
           <button id="themeToggle" class="btn btn-sm btn-outline-secondary" type="button" title="Переключить тему"><i class="bi"></i></button>
           <a class="btn btn-sm btn-outline-danger" href="/logout"><i class="bi bi-box-arrow-right me-1"></i>Выход</a>
