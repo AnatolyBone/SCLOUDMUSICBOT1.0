@@ -1731,6 +1731,38 @@ export async function cleanUpDatabase() {
         return false;
     }
 }
+// db.js
+
+// 1. Получение списка проблемных треков
+export async function getBrokenTracks(limit = 50) {
+  const { data, error } = await supabase
+    .from('failed_tracks')
+    .select('*')
+    .eq('is_fixed', false) // Показываем только неисправленные
+    .order('created_at', { ascending: false })
+    .limit(limit);
+
+  if (error) {
+    console.error('[DB] Ошибка получения broken tracks:', error);
+    return [];
+  }
+  return data;
+}
+
+// 2. Пометить трек как исправленный (или удалить из списка)
+export async function resolveBrokenTrack(id) {
+  // Можно либо удалять запись:
+  // const { error } = await supabase.from('failed_tracks').delete().eq('id', id);
+  
+  // Либо помечать как fixed (лучше для истории):
+  const { error } = await supabase
+    .from('failed_tracks')
+    .update({ is_fixed: true })
+    .eq('id', id);
+
+  if (error) console.error('[DB] Ошибка resolveBrokenTrack:', error);
+  return !error;
+}
 export async function fixBadCacheForUser(userId, dateLimit) {
   try {
     const limit = dateLimit || new Date().toISOString().split('T')[0];
