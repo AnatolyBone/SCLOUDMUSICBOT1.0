@@ -345,7 +345,66 @@ app.get('/health', async (req, res) => {
   }
 });
   app.get('/', requireAuth, (req, res) => res.redirect('/dashboard'));
-app.get('/broken-track
+
+// === УПРАВЛЕНИЕ ПРОБЛЕМНЫМИ ТРЕКАМИ ===
+
+// Страница списка с пагинацией
+app.get('/broken-tracks', requireAuth, async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = 25;
+    
+    const { tracks, totalTracks, totalPages, currentPage } = 
+      await getBrokenTracksWithPagination({ page, limit });
+    
+    res.render('broken-tracks', { 
+      title: 'Проблемные треки', 
+      page: 'broken-tracks',
+      tracks,
+      totalTracks,
+      totalPages,
+      currentPage
+    });
+  } catch (e) {
+    console.error('[BrokenTracks] Ошибка загрузки:', e);
+    res.status(500).send('Ошибка сервера');
+  }
+});
+
+// Действие: Исправить (форма)
+app.post('/broken-tracks/fix', requireAuth, async (req, res) => {
+  const { id, url } = req.body;
+  try {
+    if (url) await deleteCachedTrack(url);
+    await resolveBrokenTrack(id);
+    res.redirect('/broken-tracks');
+  } catch (e) {
+    console.error('[BrokenTracks] Ошибка fix:', e);
+    res.status(500).send('Ошибка при исправлении');
+  }
+});
+
+// API: Пометить исправленным
+app.post('/api/broken-tracks/fix', requireAuth, async (req, res) => {
+  try {
+    const { id, url } = req.body;
+    if (url) await deleteCachedTrack(url);
+    await resolveBrokenTrack(id);
+    res.json({ success: true });
+  } catch (e) {
+    console.error('[API BrokenTracks] fix error:', e);
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// API: Повторить загрузку (сбросить кэш)
+app.post('/api/broken-tracks/retry', requireAuth, async (req, res) => {
+  try {
+    const { id, url } = req.body;
+    
+    if (!url) {
+      return res.status(400).json({ success: false, error: 'URL не указан' });
+    }
     
     // Увеличиваем счетчик попыток
     await incrementBrokenTrackRetry(id);
@@ -353,35 +412,13 @@ app.get('/broken-track
     // Удаляем старый кэш
     await deleteCachedTrack(url);
     
-    // Пробуем скачать заново через downloadManager
-    // Это упрощенная версия - можно расширить
-    const { downloadTrack } = await import('./services/downloadManager.js');
+    // Помечаем как исправленное
+    await resolveBrokenTrack(id);
     
-    try {
-      // Пытаемся скачать (без отправки пользователю)
-      const result = await downloadTrack(url, { 
-        skipCache: true,
-        testMode: true // если поддерживается
-      });
-      
-      if (result && result.success) {
-        // Успех! Помечаем как исправленное
-        await resolveBrokenTrack(id);
-        return res.json({ success: true, message: 'Трек успешно загружен' });
-      } else {
-        return res.json({ 
-          success: false, 
-          error: result?.error || 'Не удалось загрузить трек' 
-        });
-      }
-    } catch (downloadError) {
-      console.error('[API BrokenTracks] retry download error:', downloadError);
-      return res.json({ 
-        success: false, 
-        error: downloadError.message || 'Ошибка загрузки' 
-      });
-    }
-    
+    res.json({ 
+      success: true, 
+      message: 'Кэш сброшен. Трек будет скачан заново при следующем запросе.' 
+    });
   } catch (e) {
     console.error('[API BrokenTracks] retry error:', e);
     res.status(500).json({ success: false, error: e.message });
@@ -392,7 +429,7 @@ app.get('/broken-track
 app.delete('/api/broken-tracks/:id', requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
-    await deleteBrokenTrack(id);
+    await deleteBrokenTrack(parseInt(id));
     res.json({ success: true });
   } catch (e) {
     console.error('[API BrokenTracks] delete error:', e);
@@ -414,24 +451,6 @@ app.post('/api/broken-tracks/bulk-delete', requireAuth, async (req, res) => {
   } catch (e) {
     console.error('[API BrokenTracks] bulk-delete error:', e);
     res.status(500).json({ success: false, error: e.message });
-  }
-});
-
-// Действие: "Исправить" (Удалить кэш + пометить fixed)
-app.post('/broken-tracks/fix', requireAuth, async (req, res) => {
-  const { id, url } = req.body;
-  
-  try {
-    // 1. Удаляем "битую" версию из кэша, чтобы она перекачалась заново
-    await deleteCachedTrack(url);
-    
-    // 2. Помечаем в базе как исправленное
-    await resolveBrokenTrack(id);
-    
-    res.redirect('/broken-tracks');
-  } catch (e) {
-    console.error(e);
-    res.status(500).send('Ошибка при исправлении');
   }
 });
   app.get('/admin', (req, res) => {
