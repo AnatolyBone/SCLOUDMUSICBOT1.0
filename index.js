@@ -347,7 +347,6 @@ app.get('/health', async (req, res) => {
   app.get('/', requireAuth, (req, res) => res.redirect('/dashboard'));
 // === УПРАВЛЕНИЕ ПРОБЛЕМНЫМИ ТРЕКАМИ ===
 
-// Страница списка
 // === УПРАВЛЕНИЕ ПРОБЛЕМНЫМИ ТРЕКАМИ ===
 
 // Страница списка с пагинацией
@@ -373,7 +372,7 @@ app.get('/broken-tracks', requireAuth, async (req, res) => {
   }
 });
 
-// Действие: "Исправить" (форма - для совместимости)
+// Действие: "Исправить" (форма - для совместимости со старым кодом)
 app.post('/broken-tracks/fix', requireAuth, async (req, res) => {
   const { id, url } = req.body;
   
@@ -404,7 +403,7 @@ app.post('/api/broken-tracks/fix', requireAuth, async (req, res) => {
   }
 });
 
-// API: Повторить загрузку
+// API: Повторить загрузку (упрощенная версия - только сбрасывает кэш)
 app.post('/api/broken-tracks/retry', requireAuth, async (req, res) => {
   try {
     const { id, url } = req.body;
@@ -412,6 +411,55 @@ app.post('/api/broken-tracks/retry', requireAuth, async (req, res) => {
     if (!url) {
       return res.status(400).json({ success: false, error: 'URL не указан' });
     }
+    
+    // Увеличиваем счетчик попыток
+    await incrementBrokenTrackRetry(id);
+    
+    // Удаляем старый кэш, чтобы при следующем запросе скачалось заново
+    await deleteCachedTrack(url);
+    
+    // Помечаем как исправленное (кэш сброшен, при следующем запросе перекачается)
+    await resolveBrokenTrack(id);
+    
+    res.json({ 
+      success: true, 
+      message: 'Кэш сброшен. Трек будет скачан заново при следующем запросе.' 
+    });
+    
+  } catch (e) {
+    console.error('[API BrokenTracks] retry error:', e);
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// API: Удалить одну запись
+app.delete('/api/broken-tracks/:id', requireAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    await deleteBrokenTrack(parseInt(id));
+    res.json({ success: true });
+  } catch (e) {
+    console.error('[API BrokenTracks] delete error:', e);
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// API: Массовое удаление
+app.post('/api/broken-tracks/bulk-delete', requireAuth, async (req, res) => {
+  try {
+    const { ids } = req.body;
+    
+    if (!ids || !Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ success: false, error: 'Не выбраны записи' });
+    }
+    
+    const count = await deleteBrokenTracksBulk(ids.map(id => parseInt(id)));
+    res.json({ success: true, deleted: count });
+  } catch (e) {
+    console.error('[API BrokenTracks] bulk-delete error:', e);
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
     
     // Увеличиваем счетчик попыток
     await incrementBrokenTrackRetry(id);
