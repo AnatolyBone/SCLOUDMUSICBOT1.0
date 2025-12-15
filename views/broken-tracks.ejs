@@ -1,0 +1,52 @@
+<div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+  <h1 class="h2">🚨 Проблемные треки</h1>
+  <div class="btn-toolbar mb-2 mb-md-0">
+    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="location.reload()">🔄 Обновить</button>
+  </div>
+</div>
+
+<% if (tracks.length === 0) { %>
+  <div class="alert alert-success" role="alert">
+    🎉 Отлично! Проблемных треков не обнаружено.
+  </div>
+<% } else { %>
+  <div class="table-responsive">
+    <table class="table table-striped table-hover">
+      <thead>
+        <tr>
+          <th>Дата</th>
+          <th>User ID</th>
+          <th>Трек / Ошибка</th>
+          <th>Ссылка</th>
+          <th>Действие</th>
+        </tr>
+      </thead>
+      <tbody>
+        <% tracks.forEach(track => { %>
+          <tr>
+            <td><%= new Date(track.created_at).toLocaleString('ru-RU') %></td>
+            <td><a href="/user/<%= track.user_id %>"><%= track.user_id %></a></td>
+            <td>
+              <strong><%= track.title %></strong><br>
+              <span class="badge bg-danger"><%= track.reason %></span>
+            </td>
+            <td>
+              <a href="<%= track.url %>" target="_blank" class="text-truncate d-inline-block" style="max-width: 200px;">
+                <%= track.url %>
+              </a>
+            </td>
+            <td>
+              <form action="/broken-tracks/fix" method="POST" class="d-inline">
+                <input type="hidden" name="id" value="<%= track.id %>">
+                <input type="hidden" name="url" value="<%= track.url %>">
+                <button type="submit" class="btn btn-sm btn-success" title="Удалить кэш и убрать из списка">
+                  ✅ Исправлено
+                </button>
+              </form>
+            </td>
+          </tr>
+        <% }) %>
+      </tbody>
+    </table>
+  </div>
+<% } %>
