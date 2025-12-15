@@ -1731,14 +1731,41 @@ export async function cleanUpDatabase() {
         return false;
     }
 }
-// db.js
 
-// 1. Получение списка проблемных треков
+// === УПРАВЛЕНИЕ ПРОБЛЕМНЫМИ ТРЕКАМИ ===
+
+/**
+ * Логирует проблемный трек в базу для админки
+ */
+export async function logBrokenTrack(url, title, userId, reason) {
+  try {
+    const { error } = await supabase
+      .from('failed_tracks')
+      .upsert({ 
+        url: url, 
+        title: title || 'Unknown', 
+        user_id: userId, 
+        reason: reason,
+        is_fixed: false,
+        created_at: new Date()
+      }, { onConflict: 'url' });
+
+    if (error) console.error('[DB] Ошибка записи broken track:', error.message);
+    else console.log(`[DB] 📝 Трек добавлен в реестр ошибок: ${title}`);
+    
+  } catch (e) {
+    console.error('[DB] Ошибка logBrokenTrack:', e.message);
+  }
+}
+
+/**
+ * Получение списка проблемных треков для админки
+ */
 export async function getBrokenTracks(limit = 50) {
   const { data, error } = await supabase
     .from('failed_tracks')
     .select('*')
-    .eq('is_fixed', false) // Показываем только неисправленные
+    .eq('is_fixed', false)
     .order('created_at', { ascending: false })
     .limit(limit);
 
@@ -1749,12 +1776,10 @@ export async function getBrokenTracks(limit = 50) {
   return data;
 }
 
-// 2. Пометить трек как исправленный (или удалить из списка)
+/**
+ * Пометить трек как исправленный
+ */
 export async function resolveBrokenTrack(id) {
-  // Можно либо удалять запись:
-  // const { error } = await supabase.from('failed_tracks').delete().eq('id', id);
-  
-  // Либо помечать как fixed (лучше для истории):
   const { error } = await supabase
     .from('failed_tracks')
     .update({ is_fixed: true })
