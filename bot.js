@@ -159,11 +159,11 @@ function formatMenuMessage(user, botUsername) {
 
 // --- Инициализация Telegraf ---
 const telegrafOptions = { handlerTimeout: 300_000 };
-if (PROXY_URL) {
-    const agent = new HttpsProxyAgent(PROXY_URL);
-    telegrafOptions.telegram = { agent };
-    console.log('[App] Использую прокси для подключения к Telegram API.');
-}
+// if (PROXY_URL) {
+   //  const agent = new HttpsProxyAgent(PROXY_URL);
+   //  telegrafOptions.telegram = { agent };
+   //  console.log('[App] Использую прокси для подключения к Telegram API.');
+// }
 export const bot = new Telegraf(BOT_TOKEN, telegrafOptions);
 
 // --- Middleware ---
