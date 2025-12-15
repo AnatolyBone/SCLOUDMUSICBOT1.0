@@ -1,3 +1,4 @@
+
 // index.js (продакшен-вебхук с диагностикой, быстрый дашборд, /tmp для загрузок, Referer)
 
 import express from 'express';
@@ -48,6 +49,10 @@ import {
   resetExpiredPremiumsBulk,
   getUsersTotalsSnapshot,
   setTariffAdmin,
+  logBrokenTrack, 
+  getBrokenTracks, 
+  resolveBrokenTrack,
+  deleteCachedTrack,
   setAppSetting
 } from './db.js';
 import { initializeWorkers } from './services/workerManager.js';
