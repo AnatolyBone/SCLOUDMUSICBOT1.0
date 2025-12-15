@@ -1788,6 +1788,145 @@ export async function resolveBrokenTrack(id) {
   if (error) console.error('[DB] Ошибка resolveBrokenTrack:', error);
   return !error;
 }
+// ============================================
+// ПРОБЛЕМНЫЕ ТРЕКИ - РАСШИРЕННЫЕ ФУНКЦИИ
+// ============================================
+
+/**
+ * Получить проблемные треки с пагинацией и статистикой
+ */
+export async function getBrokenTracksWithPagination({ page = 1, limit = 25 } = {}) {
+  const offset = (page - 1) * limit;
+  
+  try {
+    // Общее количество неисправленных
+    const { count: totalTracks, error: countError } = await supabase
+      .from('failed_tracks')
+      .select('*', { count: 'exact', head: true })
+      .eq('is_fixed', false);
+    
+    if (countError) throw countError;
+    
+    // Треки с пагинацией
+    const { data: tracks, error } = await supabase
+      .from('failed_tracks')
+      .select('*')
+      .eq('is_fixed', false)
+      .order('created_at', { ascending: false })
+      .range(offset, offset + limit - 1);
+    
+    if (error) throw error;
+    
+    // Получаем информацию о пользователях отдельно
+    const userIds = [...new Set(tracks.map(t => t.user_id).filter(Boolean))];
+    
+    let usersMap = {};
+    if (userIds.length > 0) {
+      const { data: users } = await supabase
+        .from('users')
+        .select('id, username, first_name')
+        .in('id', userIds);
+      
+      if (users) {
+        users.forEach(u => { usersMap[u.id] = u; });
+      }
+    }
+    
+    // Добавляем инфо о пользователях к трекам
+    const tracksWithUsers = tracks.map(track => ({
+      ...track,
+      username: usersMap[track.user_id]?.username || null,
+      first_name: usersMap[track.user_id]?.first_name || null
+    }));
+    
+    return {
+      tracks: tracksWithUsers,
+      totalTracks: totalTracks || 0,
+      totalPages: Math.ceil((totalTracks || 0) / limit),
+      currentPage: page
+    };
+    
+  } catch (e) {
+    console.error('[DB] getBrokenTracksWithPagination error:', e);
+    return {
+      tracks: [],
+      totalTracks: 0,
+      totalPages: 0,
+      currentPage: page
+    };
+  }
+}
+
+/**
+ * Удалить запись о проблемном треке (полное удаление)
+ */
+export async function deleteBrokenTrack(id) {
+  try {
+    const { data, error } = await supabase
+      .from('failed_tracks')
+      .delete()
+      .eq('id', id)
+      .select()
+      .single();
+    
+    if (error) throw error;
+    return data;
+  } catch (e) {
+    console.error('[DB] deleteBrokenTrack error:', e);
+    return null;
+  }
+}
+
+/**
+ * Массовое удаление проблемных треков
+ */
+export async function deleteBrokenTracksBulk(ids) {
+  if (!ids || ids.length === 0) return 0;
+  
+  try {
+    const { data, error } = await supabase
+      .from('failed_tracks')
+      .delete()
+      .in('id', ids)
+      .select();
+    
+    if (error) throw error;
+    return data?.length || 0;
+  } catch (e) {
+    console.error('[DB] deleteBrokenTracksBulk error:', e);
+    return 0;
+  }
+}
+
+/**
+ * Увеличить счетчик попыток для трека
+ */
+export async function incrementBrokenTrackRetry(id) {
+  try {
+    // Сначала получаем текущее значение
+    const { data: current } = await supabase
+      .from('failed_tracks')
+      .select('retry_count')
+      .eq('id', id)
+      .single();
+    
+    const newCount = (current?.retry_count || 0) + 1;
+    
+    const { error } = await supabase
+      .from('failed_tracks')
+      .update({ 
+        retry_count: newCount,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', id);
+    
+    if (error) throw error;
+    return newCount;
+  } catch (e) {
+    console.error('[DB] incrementBrokenTrackRetry error:', e);
+    return 0;
+  }
+}
 export async function fixBadCacheForUser(userId, dateLimit) {
   try {
     const limit = dateLimit || new Date().toISOString().split('T')[0];
