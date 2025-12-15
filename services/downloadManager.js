@@ -345,18 +345,23 @@ export async function trackDownloadProcessor(task) {
     }
 
   } catch (err) {
-    // ==========================================
-    // ЛОГИРОВАНИЕ В РЕЕСТР (БИТЫЕ ТРЕКИ)
+// ==========================================
+    // ЛОГИРОВАНИЕ В РЕЕСТР И ОБРАБОТКА ОШИБОК
     // ==========================================
     let failureReason = 'UNKNOWN_ERROR';
-    if (err.message === 'TRACK_PREVIEW_ONLY' || err.message === 'SCDL_INCOMPLETE_FILE') {
+    
+    // Определяем тип ошибки
+    if (err.message.includes('413') || err.message.includes('Too Large')) {
+        failureReason = 'FILE_TOO_LARGE';
+    } else if (err.message === 'TRACK_PREVIEW_ONLY' || err.message === 'SCDL_INCOMPLETE_FILE') {
         failureReason = 'PREVIEW_ONLY';
     } else if (err.message.includes('HTTP Error 403') || err.message.includes('Forbidden')) {
-        failureReason = '403_FORBIDDEN'; // Скорее всего бан IP или Geo-Block
+        failureReason = '403_FORBIDDEN'; 
     } else if (err.message.includes('YT-DLP не смог скачать')) {
         failureReason = 'DOWNLOAD_ERROR';
     }
 
+    // Записываем в БД
     try {
         await db.logBrokenTrack(
             task.originalUrl || task.url || 'Unknown URL', 
@@ -367,20 +372,27 @@ export async function trackDownloadProcessor(task) {
     } catch (dbErr) {
         console.error('Ошибка записи в реестр broken tracks:', dbErr);
     }
-    // ==========================================
 
     console.error(`❌ Ошибка (User ${userId}):`, err.message);
     
-    // Специальное сообщение для превью
-    if (err.message === 'TRACK_PREVIEW_ONLY' || err.message === 'SCDL_INCOMPLETE_FILE') {
-      await safeSendMessage(userId, 
-        `⚠️ <b>Трек доступен только как превью</b>\n\n` +
-        `Правообладатель ограничил доступ к полной версии на SoundCloud.\n\n` +
-        `💡 Попробуйте найти этот трек на другой платформе.`,
-        { parse_mode: 'HTML' }
-      );
+    // Отправляем сообщение пользователю
+    if (failureReason === 'FILE_TOO_LARGE') {
+        const durationMin = task.metadata?.duration ? Math.round(task.metadata.duration / 60) : '?';
+        await safeSendMessage(userId, 
+            `❌ <b>Файл слишком большой!</b>\n\n` +
+            `Telegram не позволяет ботам отправлять файлы больше 50 МБ.\n` +
+            `Этот трек (длительность: ${durationMin} мин) превышает лимит.`,
+            { parse_mode: 'HTML' }
+        );
+    } else if (failureReason === 'PREVIEW_ONLY') {
+        await safeSendMessage(userId, 
+            `⚠️ <b>Трек доступен только как превью</b>\n\n` +
+            `Правообладатель ограничил доступ к полной версии на SoundCloud.\n\n` +
+            `💡 Попробуйте найти этот трек на другой платформе.`,
+            { parse_mode: 'HTML' }
+        );
     } else {
-      await safeSendMessage(userId, `❌ Не удалось скачать трек. Возможно, он удален или недоступен.`);
+        await safeSendMessage(userId, `❌ Не удалось скачать трек. Возможно, он удален или недоступен.`);
     }
   } finally {
     if (statusMessage) try { await bot.telegram.deleteMessage(userId, statusMessage.message_id); } catch (e) {}
