@@ -1,52 +1,530 @@
+<!-- views/broken-tracks.ejs -->
+
 <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
   <h1 class="h2">🚨 Проблемные треки</h1>
-  <div class="btn-toolbar mb-2 mb-md-0">
-    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="location.reload()">🔄 Обновить</button>
+  <div class="btn-toolbar mb-2 mb-md-0 gap-2">
+    <button type="button" class="btn btn-sm btn-outline-danger" id="deleteSelectedBtn" disabled onclick="deleteSelected()">
+      🗑️ Удалить выбранные (<span id="selectedCount">0</span>)
+    </button>
+    <button type="button" class="btn btn-sm btn-outline-primary" onclick="exportCSV()">
+      📥 Экспорт CSV
+    </button>
+    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="location.reload()">
+      🔄 Обновить
+    </button>
   </div>
 </div>
 
+<!-- 📊 Статистика -->
+<% if (tracks.length > 0) { %>
+<div class="row mb-4">
+  <div class="col-md-3 col-6 mb-2">
+    <div class="card bg-danger text-white">
+      <div class="card-body text-center py-3">
+        <h3 class="mb-0"><%= totalTracks %></h3>
+        <small>Всего проблем</small>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-3 col-6 mb-2">
+    <div class="card bg-warning text-dark">
+      <div class="card-body text-center py-3">
+        <h3 class="mb-0"><%= tracks.filter(t => t.reason === 'download_failed').length %></h3>
+        <small>Ошибки загрузки</small>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-3 col-6 mb-2">
+    <div class="card bg-info text-white">
+      <div class="card-body text-center py-3">
+        <h3 class="mb-0"><%= tracks.filter(t => t.reason === 'not_found').length %></h3>
+        <small>Не найдено</small>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-3 col-6 mb-2">
+    <div class="card bg-secondary text-white">
+      <div class="card-body text-center py-3">
+        <h3 class="mb-0"><%= [...new Set(tracks.map(t => t.user_id))].length %></h3>
+        <small>Пользователей</small>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 🔍 Фильтры -->
+<div class="card mb-4">
+  <div class="card-body">
+    <div class="row g-3">
+      <div class="col-md-4">
+        <label class="form-label">🔎 Поиск</label>
+        <input type="text" class="form-control" id="searchInput" placeholder="Название трека или URL..." onkeyup="filterTable()">
+      </div>
+      <div class="col-md-3">
+        <label class="form-label">⚠️ Тип ошибки</label>
+        <select class="form-select" id="reasonFilter" onchange="filterTable()">
+          <option value="">Все ошибки</option>
+          <option value="download_failed">Ошибка загрузки</option>
+          <option value="not_found">Не найдено</option>
+          <option value="geo_blocked">Гео-блокировка</option>
+          <option value="timeout">Таймаут</option>
+          <option value="invalid_url">Неверный URL</option>
+        </select>
+      </div>
+      <div class="col-md-3">
+        <label class="form-label">📅 Период</label>
+        <select class="form-select" id="dateFilter" onchange="filterTable()">
+          <option value="">Все время</option>
+          <option value="today">Сегодня</option>
+          <option value="week">За неделю</option>
+          <option value="month">За месяц</option>
+        </select>
+      </div>
+      <div class="col-md-2 d-flex align-items-end">
+        <button class="btn btn-outline-secondary w-100" onclick="clearFilters()">Сбросить</button>
+      </div>
+    </div>
+  </div>
+</div>
+<% } %>
+
 <% if (tracks.length === 0) { %>
-  <div class="alert alert-success" role="alert">
-    🎉 Отлично! Проблемных треков не обнаружено.
+  <div class="alert alert-success d-flex align-items-center" role="alert">
+    <span style="font-size: 3rem; margin-right: 1rem;">🎉</span>
+    <div>
+      <h4 class="alert-heading mb-1">Отлично!</h4>
+      <p class="mb-0">Проблемных треков не обнаружено. Все работает как часы!</p>
+    </div>
   </div>
 <% } else { %>
+  <!-- 📋 Таблица -->
   <div class="table-responsive">
-    <table class="table table-striped table-hover">
-      <thead>
+    <table class="table table-striped table-hover" id="tracksTable">
+      <thead class="table-dark">
         <tr>
-          <th>Дата</th>
-          <th>User ID</th>
-          <th>Трек / Ошибка</th>
+          <th width="40">
+            <input type="checkbox" class="form-check-input" id="selectAll" onclick="toggleSelectAll()">
+          </th>
+          <th style="cursor: pointer" onclick="sortTable(0)">Дата ⇅</th>
+          <th>Пользователь</th>
+          <th style="cursor: pointer" onclick="sortTable(2)">Трек ⇅</th>
+          <th>Ошибка</th>
           <th>Ссылка</th>
-          <th>Действие</th>
+          <th width="150">Действия</th>
         </tr>
       </thead>
       <tbody>
-        <% tracks.forEach(track => { %>
-          <tr>
-            <td><%= new Date(track.created_at).toLocaleString('ru-RU') %></td>
-            <td><a href="/user/<%= track.user_id %>"><%= track.user_id %></a></td>
+        <% tracks.forEach((track) => { 
+          const reasonBadges = {
+            'download_failed': 'bg-danger',
+            'not_found': 'bg-warning text-dark',
+            'geo_blocked': 'bg-info',
+            'timeout': 'bg-secondary',
+            'invalid_url': 'bg-dark'
+          };
+          const reasonLabels = {
+            'download_failed': '❌ Ошибка загрузки',
+            'not_found': '🔍 Не найдено',
+            'geo_blocked': '🌍 Гео-блок',
+            'timeout': '⏱️ Таймаут',
+            'invalid_url': '🔗 Неверный URL'
+          };
+        %>
+          <tr data-id="<%= track.id %>" 
+              data-reason="<%= track.reason %>" 
+              data-date="<%= track.created_at %>"
+              data-title="<%= (track.title || '').toLowerCase() %>"
+              data-url="<%= (track.url || '').toLowerCase() %>">
             <td>
-              <strong><%= track.title %></strong><br>
-              <span class="badge bg-danger"><%= track.reason %></span>
+              <input type="checkbox" class="form-check-input row-checkbox" value="<%= track.id %>" onchange="updateSelectedCount()">
             </td>
             <td>
-              <a href="<%= track.url %>" target="_blank" class="text-truncate d-inline-block" style="max-width: 200px;">
-                <%= track.url %>
+              <span class="text-muted" title="<%= new Date(track.created_at).toLocaleString('ru-RU') %>">
+                <%= new Date(track.created_at).toLocaleDateString('ru-RU') %>
+              </span>
+              <br>
+              <small class="text-muted"><%= new Date(track.created_at).toLocaleTimeString('ru-RU', {hour: '2-digit', minute:'2-digit'}) %></small>
+            </td>
+            <td>
+              <a href="/user/<%= track.user_id %>" class="text-decoration-none">
+                <% if (track.username) { %>
+                  @<%= track.username %>
+                <% } else if (track.first_name) { %>
+                  <%= track.first_name %>
+                <% } else { %>
+                  <code><%= track.user_id %></code>
+                <% } %>
               </a>
             </td>
             <td>
-              <form action="/broken-tracks/fix" method="POST" class="d-inline">
-                <input type="hidden" name="id" value="<%= track.id %>">
-                <input type="hidden" name="url" value="<%= track.url %>">
-                <button type="submit" class="btn btn-sm btn-success" title="Удалить кэш и убрать из списка">
-                  ✅ Исправлено
+              <strong class="d-block text-truncate" style="max-width: 200px;" title="<%= track.title || '' %>">
+                <%= track.title || 'Без названия' %>
+              </strong>
+            </td>
+            <td>
+              <span class="badge <%= reasonBadges[track.reason] || 'bg-dark' %>" 
+                    title="<%= track.error_message || '' %>">
+                <%= reasonLabels[track.reason] || track.reason %>
+              </span>
+              <% if (track.retry_count > 0) { %>
+                <br><small class="text-muted">Попыток: <%= track.retry_count %></small>
+              <% } %>
+            </td>
+            <td>
+              <div class="d-flex align-items-center gap-1">
+                <a href="<%= track.url %>" target="_blank" class="text-truncate" style="max-width: 120px;" title="<%= track.url %>">
+                  🔗 Открыть
+                </a>
+                <button class="btn btn-sm btn-outline-secondary py-0 px-1" onclick="copyUrl('<%= track.url %>')" title="Копировать">
+                  📋
                 </button>
-              </form>
+              </div>
+            </td>
+            <td>
+              <div class="btn-group btn-group-sm" role="group">
+                <button type="button" class="btn btn-outline-primary" 
+                        onclick="retryDownload('<%= track.id %>', '<%= track.url %>')" 
+                        title="Повторить загрузку">
+                  🔄
+                </button>
+                <button type="button" class="btn btn-outline-success" 
+                        onclick="markFixed('<%= track.id %>', '<%= track.url %>')" 
+                        title="Исправлено">
+                  ✅
+                </button>
+                <button type="button" class="btn btn-outline-danger" 
+                        onclick="deleteTrack('<%= track.id %>')" 
+                        title="Удалить">
+                  🗑️
+                </button>
+              </div>
             </td>
           </tr>
         <% }) %>
       </tbody>
     </table>
   </div>
+
+  <!-- 📄 Пагинация -->
+  <% if (totalPages > 1) { %>
+  <nav aria-label="Навигация по страницам" class="mt-4">
+    <ul class="pagination justify-content-center">
+      <li class="page-item <%= currentPage === 1 ? 'disabled' : '' %>">
+        <a class="page-link" href="?page=<%= currentPage - 1 %>">← Назад</a>
+      </li>
+      
+      <% for (let i = 1; i <= totalPages; i++) { %>
+        <% if (i === 1 || i === totalPages || (i >= currentPage - 2 && i <= currentPage + 2)) { %>
+          <li class="page-item <%= i === currentPage ? 'active' : '' %>">
+            <a class="page-link" href="?page=<%= i %>"><%= i %></a>
+          </li>
+        <% } else if (i === currentPage - 3 || i === currentPage + 3) { %>
+          <li class="page-item disabled"><span class="page-link">...</span></li>
+        <% } %>
+      <% } %>
+      
+      <li class="page-item <%= currentPage === totalPages ? 'disabled' : '' %>">
+        <a class="page-link" href="?page=<%= currentPage + 1 %>">Вперёд →</a>
+      </li>
+    </ul>
+  </nav>
+  <% } %>
+
+  <p class="text-muted text-center">
+    Показано <%= tracks.length %> из <%= totalTracks %> записей
+  </p>
 <% } %>
+
+<!-- 🔔 Toast уведомления -->
+<div class="toast-container position-fixed bottom-0 end-0 p-3" style="z-index: 9999;">
+  <div id="toast" class="toast" role="alert">
+    <div class="toast-header">
+      <strong class="me-auto" id="toastTitle">Уведомление</strong>
+      <button type="button" class="btn-close" data-bs-dismiss="toast"></button>
+    </div>
+    <div class="toast-body" id="toastBody"></div>
+  </div>
+</div>
+
+<script>
+// ===== Утилиты =====
+
+function showToast(title, message, type = 'info') {
+  const toast = document.getElementById('toast');
+  const toastEl = new bootstrap.Toast(toast);
+  
+  document.getElementById('toastTitle').textContent = title;
+  document.getElementById('toastBody').textContent = message;
+  
+  // Цвета
+  toast.className = 'toast';
+  if (type === 'success') toast.classList.add('bg-success', 'text-white');
+  else if (type === 'danger') toast.classList.add('bg-danger', 'text-white');
+  else if (type === 'warning') toast.classList.add('bg-warning');
+  
+  toastEl.show();
+}
+
+function copyUrl(url) {
+  navigator.clipboard.writeText(url).then(() => {
+    showToast('✅ Скопировано', 'Ссылка в буфере обмена', 'success');
+  }).catch(() => {
+    // Fallback для старых браузеров
+    const input = document.createElement('input');
+    input.value = url;
+    document.body.appendChild(input);
+    input.select();
+    document.execCommand('copy');
+    document.body.removeChild(input);
+    showToast('✅ Скопировано', 'Ссылка в буфере обмена', 'success');
+  });
+}
+
+// ===== Выбор строк =====
+
+function toggleSelectAll() {
+  const selectAll = document.getElementById('selectAll');
+  const checkboxes = document.querySelectorAll('.row-checkbox');
+  
+  checkboxes.forEach(cb => {
+    const row = cb.closest('tr');
+    if (row.style.display !== 'none') {
+      cb.checked = selectAll.checked;
+    }
+  });
+  
+  updateSelectedCount();
+}
+
+function updateSelectedCount() {
+  const count = document.querySelectorAll('.row-checkbox:checked').length;
+  document.getElementById('selectedCount').textContent = count;
+  document.getElementById('deleteSelectedBtn').disabled = count === 0;
+}
+
+// ===== Фильтрация =====
+
+function filterTable() {
+  const search = document.getElementById('searchInput').value.toLowerCase();
+  const reason = document.getElementById('reasonFilter').value;
+  const dateFilter = document.getElementById('dateFilter').value;
+  
+  const now = new Date();
+  const rows = document.querySelectorAll('#tracksTable tbody tr');
+  
+  rows.forEach(row => {
+    const title = row.dataset.title || '';
+    const url = row.dataset.url || '';
+    const rowReason = row.dataset.reason;
+    const rowDate = new Date(row.dataset.date);
+    
+    let show = true;
+    
+    // Поиск по тексту
+    if (search && !title.includes(search) && !url.includes(search)) {
+      show = false;
+    }
+    
+    // Фильтр по причине
+    if (reason && rowReason !== reason) {
+      show = false;
+    }
+    
+    // Фильтр по дате
+    if (dateFilter) {
+      const diff = (now - rowDate) / (1000 * 60 * 60 * 24);
+      if (dateFilter === 'today' && diff > 1) show = false;
+      if (dateFilter === 'week' && diff > 7) show = false;
+      if (dateFilter === 'month' && diff > 30) show = false;
+    }
+    
+    row.style.display = show ? '' : 'none';
+  });
+}
+
+function clearFilters() {
+  document.getElementById('searchInput').value = '';
+  document.getElementById('reasonFilter').value = '';
+  document.getElementById('dateFilter').value = '';
+  filterTable();
+}
+
+// ===== Действия с треками =====
+
+async function retryDownload(id, url) {
+  const btn = event.target;
+  btn.disabled = true;
+  btn.innerHTML = '⏳';
+  
+  try {
+    const response = await fetch('/api/broken-tracks/retry', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, url })
+    });
+    
+    const result = await response.json();
+    
+    if (result.success) {
+      showToast('✅ Успех', 'Трек успешно загружен!', 'success');
+      removeRow(id);
+    } else {
+      showToast('❌ Ошибка', result.error || 'Не удалось загрузить', 'danger');
+      btn.disabled = false;
+      btn.innerHTML = '🔄';
+    }
+  } catch (err) {
+    showToast('❌ Ошибка', 'Ошибка сервера', 'danger');
+    btn.disabled = false;
+    btn.innerHTML = '🔄';
+  }
+}
+
+async function markFixed(id, url) {
+  try {
+    const response = await fetch('/api/broken-tracks/fix', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, url })
+    });
+    
+    if (response.ok) {
+      removeRow(id);
+      showToast('✅ Готово', 'Трек помечен как исправленный', 'success');
+    }
+  } catch (err) {
+    showToast('❌ Ошибка', 'Не удалось обновить', 'danger');
+  }
+}
+
+async function deleteTrack(id) {
+  if (!confirm('Удалить эту запись?')) return;
+  
+  try {
+    const response = await fetch(`/api/broken-tracks/${id}`, {
+      method: 'DELETE'
+    });
+    
+    if (response.ok) {
+      removeRow(id);
+      showToast('🗑️ Удалено', 'Запись удалена', 'warning');
+    }
+  } catch (err) {
+    showToast('❌ Ошибка', 'Не удалось удалить', 'danger');
+  }
+}
+
+async function deleteSelected() {
+  const checkboxes = document.querySelectorAll('.row-checkbox:checked');
+  const ids = Array.from(checkboxes).map(cb => cb.value);
+  
+  if (!confirm(`Удалить ${ids.length} записей?`)) return;
+  
+  try {
+    const response = await fetch('/api/broken-tracks/bulk-delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids })
+    });
+    
+    if (response.ok) {
+      ids.forEach(id => removeRow(id));
+      showToast('🗑️ Удалено', `${ids.length} записей удалено`, 'warning');
+      updateSelectedCount();
+      document.getElementById('selectAll').checked = false;
+    }
+  } catch (err) {
+    showToast('❌ Ошибка', 'Не удалось удалить', 'danger');
+  }
+}
+
+function removeRow(id) {
+  const row = document.querySelector(`tr[data-id="${id}"]`);
+  if (row) {
+    row.style.transition = 'opacity 0.3s, transform 0.3s';
+    row.style.opacity = '0';
+    row.style.transform = 'translateX(20px)';
+    setTimeout(() => row.remove(), 300);
+  }
+}
+
+// ===== Экспорт =====
+
+function exportCSV() {
+  const rows = document.querySelectorAll('#tracksTable tbody tr');
+  let csv = 'Дата,User ID,Трек,Ошибка,URL\n';
+  
+  rows.forEach(row => {
+    if (row.style.display !== 'none') {
+      const date = row.dataset.date || '';
+      const userId = row.querySelector('td:nth-child(3)').textContent.trim();
+      const title = row.dataset.title || '';
+      const reason = row.dataset.reason || '';
+      const url = row.dataset.url || '';
+      csv += `"${date}","${userId}","${title}","${reason}","${url}"\n`;
+    }
+  });
+  
+  const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' });
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = `broken_tracks_${new Date().toISOString().slice(0,10)}.csv`;
+  link.click();
+  
+  showToast('📥 Экспорт', 'CSV файл скачан', 'success');
+}
+
+// ===== Сортировка =====
+
+let sortDirections = {};
+
+function sortTable(columnIndex) {
+  const table = document.getElementById('tracksTable');
+  const tbody = table.querySelector('tbody');
+  const rows = Array.from(tbody.querySelectorAll('tr'));
+  
+  sortDirections[columnIndex] = !sortDirections[columnIndex];
+  const direction = sortDirections[columnIndex] ? 1 : -1;
+  
+  rows.sort((a, b) => {
+    let aVal, bVal;
+    
+    if (columnIndex === 0) {
+      aVal = new Date(a.dataset.date);
+      bVal = new Date(b.dataset.date);
+    } else if (columnIndex === 2) {
+      aVal = a.dataset.title || '';
+      bVal = b.dataset.title || '';
+    }
+    
+    if (aVal < bVal) return -1 * direction;
+    if (aVal > bVal) return 1 * direction;
+    return 0;
+  });
+  
+  rows.forEach(row => tbody.appendChild(row));
+}
+</script>
+
+<style>
+.table th[onclick] {
+  user-select: none;
+}
+
+.table th[onclick]:hover {
+  background-color: rgba(255,255,255,0.1) !important;
+  cursor: pointer;
+}
+
+.btn-group-sm > .btn {
+  padding: 0.2rem 0.4rem;
+}
+
+.card {
+  transition: transform 0.2s;
+}
+
+.card:hover {
+  transform: translateY(-2px);
+}
+</style>
