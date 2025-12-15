@@ -16,12 +16,12 @@
 </div>
 
 <!-- 📊 Статистика -->
-<% if (tracks.length > 0) { %>
+<% if (tracks && tracks.length > 0) { %>
 <div class="row mb-4">
   <div class="col-md-3 col-6 mb-2">
     <div class="card bg-danger text-white">
       <div class="card-body text-center py-3">
-        <h3 class="mb-0"><%= totalTracks %></h3>
+        <h3 class="mb-0"><%= totalTracks || 0 %></h3>
         <small>Всего проблем</small>
       </div>
     </div>
@@ -88,7 +88,7 @@
 </div>
 <% } %>
 
-<% if (tracks.length === 0) { %>
+<% if (!tracks || tracks.length === 0) { %>
   <div class="alert alert-success d-flex align-items-center" role="alert">
     <span style="font-size: 3rem; margin-right: 1rem;">🎉</span>
     <div>
@@ -114,24 +114,25 @@
         </tr>
       </thead>
       <tbody>
-        <% tracks.forEach((track) => { 
-          const reasonBadges = {
-            'download_failed': 'bg-danger',
-            'not_found': 'bg-warning text-dark',
-            'geo_blocked': 'bg-info',
-            'timeout': 'bg-secondary',
-            'invalid_url': 'bg-dark'
-          };
-          const reasonLabels = {
-            'download_failed': '❌ Ошибка загрузки',
-            'not_found': '🔍 Не найдено',
-            'geo_blocked': '🌍 Гео-блок',
-            'timeout': '⏱️ Таймаут',
-            'invalid_url': '🔗 Неверный URL'
-          };
+        <% 
+        const reasonBadges = {
+          'download_failed': 'bg-danger',
+          'not_found': 'bg-warning text-dark',
+          'geo_blocked': 'bg-info',
+          'timeout': 'bg-secondary',
+          'invalid_url': 'bg-dark'
+        };
+        const reasonLabels = {
+          'download_failed': '❌ Ошибка загрузки',
+          'not_found': '🔍 Не найдено',
+          'geo_blocked': '🌍 Гео-блок',
+          'timeout': '⏱️ Таймаут',
+          'invalid_url': '🔗 Неверный URL'
+        };
         %>
+        <% tracks.forEach((track) => { %>
           <tr data-id="<%= track.id %>" 
-              data-reason="<%= track.reason %>" 
+              data-reason="<%= track.reason || '' %>" 
               data-date="<%= track.created_at %>"
               data-title="<%= (track.title || '').toLowerCase() %>"
               data-url="<%= (track.url || '').toLowerCase() %>">
@@ -139,11 +140,15 @@
               <input type="checkbox" class="form-check-input row-checkbox" value="<%= track.id %>" onchange="updateSelectedCount()">
             </td>
             <td>
-              <span class="text-muted" title="<%= new Date(track.created_at).toLocaleString('ru-RU') %>">
-                <%= new Date(track.created_at).toLocaleDateString('ru-RU') %>
-              </span>
-              <br>
-              <small class="text-muted"><%= new Date(track.created_at).toLocaleTimeString('ru-RU', {hour: '2-digit', minute:'2-digit'}) %></small>
+              <% if (track.created_at) { %>
+                <span class="text-muted" title="<%= new Date(track.created_at).toLocaleString('ru-RU') %>">
+                  <%= new Date(track.created_at).toLocaleDateString('ru-RU') %>
+                </span>
+                <br>
+                <small class="text-muted"><%= new Date(track.created_at).toLocaleTimeString('ru-RU', {hour: '2-digit', minute:'2-digit'}) %></small>
+              <% } else { %>
+                <span class="text-muted">—</span>
+              <% } %>
             </td>
             <td>
               <a href="/user/<%= track.user_id %>" class="text-decoration-none">
@@ -164,9 +169,9 @@
             <td>
               <span class="badge <%= reasonBadges[track.reason] || 'bg-dark' %>" 
                     title="<%= track.error_message || '' %>">
-                <%= reasonLabels[track.reason] || track.reason %>
+                <%= reasonLabels[track.reason] || track.reason || 'Неизвестно' %>
               </span>
-              <% if (track.retry_count > 0) { %>
+              <% if (track.retry_count && track.retry_count > 0) { %>
                 <br><small class="text-muted">Попыток: <%= track.retry_count %></small>
               <% } %>
             </td>
@@ -184,7 +189,7 @@
               <div class="btn-group btn-group-sm" role="group">
                 <button type="button" class="btn btn-outline-primary" 
                         onclick="retryDownload('<%= track.id %>', '<%= track.url %>')" 
-                        title="Повторить загрузку">
+                        title="Сбросить кэш">
                   🔄
                 </button>
                 <button type="button" class="btn btn-outline-success" 
@@ -206,8 +211,8 @@
   </div>
 
   <!-- 📄 Пагинация -->
-  <% if (totalPages > 1) { %>
-  <nav aria-label="Навигация по страницам" class="mt-4">
+  <% if (totalPages && totalPages > 1) { %>
+  <nav aria-label="Навигация" class="mt-4">
     <ul class="pagination justify-content-center">
       <li class="page-item <%= currentPage === 1 ? 'disabled' : '' %>">
         <a class="page-link" href="?page=<%= currentPage - 1 %>">← Назад</a>
@@ -231,7 +236,7 @@
   <% } %>
 
   <p class="text-muted text-center">
-    Показано <%= tracks.length %> из <%= totalTracks %> записей
+    Показано <%= tracks.length %> из <%= totalTracks || 0 %> записей
   </p>
 <% } %>
 
@@ -249,35 +254,51 @@
 <script>
 // ===== Утилиты =====
 
-function showToast(title, message, type = 'info') {
+function showToast(title, message, type) {
   const toast = document.getElementById('toast');
-  const toastEl = new bootstrap.Toast(toast);
+  const toastTitle = document.getElementById('toastTitle');
+  const toastBody = document.getElementById('toastBody');
   
-  document.getElementById('toastTitle').textContent = title;
-  document.getElementById('toastBody').textContent = message;
+  toastTitle.textContent = title;
+  toastBody.textContent = message;
   
-  // Цвета
+  // Сбрасываем классы
   toast.className = 'toast';
-  if (type === 'success') toast.classList.add('bg-success', 'text-white');
-  else if (type === 'danger') toast.classList.add('bg-danger', 'text-white');
-  else if (type === 'warning') toast.classList.add('bg-warning');
   
-  toastEl.show();
+  // Добавляем цвет
+  if (type === 'success') {
+    toast.classList.add('bg-success', 'text-white');
+  } else if (type === 'danger') {
+    toast.classList.add('bg-danger', 'text-white');
+  } else if (type === 'warning') {
+    toast.classList.add('bg-warning');
+  }
+  
+  // Показываем
+  const bsToast = new bootstrap.Toast(toast);
+  bsToast.show();
 }
 
 function copyUrl(url) {
-  navigator.clipboard.writeText(url).then(() => {
-    showToast('✅ Скопировано', 'Ссылка в буфере обмена', 'success');
-  }).catch(() => {
-    // Fallback для старых браузеров
-    const input = document.createElement('input');
-    input.value = url;
-    document.body.appendChild(input);
-    input.select();
-    document.execCommand('copy');
-    document.body.removeChild(input);
-    showToast('✅ Скопировано', 'Ссылка в буфере обмена', 'success');
-  });
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(url).then(function() {
+      showToast('✅ Скопировано', 'Ссылка в буфере обмена', 'success');
+    }).catch(function() {
+      fallbackCopy(url);
+    });
+  } else {
+    fallbackCopy(url);
+  }
+}
+
+function fallbackCopy(text) {
+  const input = document.createElement('input');
+  input.value = text;
+  document.body.appendChild(input);
+  input.select();
+  document.execCommand('copy');
+  document.body.removeChild(input);
+  showToast('✅ Скопировано', 'Ссылка в буфере обмена', 'success');
 }
 
 // ===== Выбор строк =====
@@ -286,7 +307,7 @@ function toggleSelectAll() {
   const selectAll = document.getElementById('selectAll');
   const checkboxes = document.querySelectorAll('.row-checkbox');
   
-  checkboxes.forEach(cb => {
+  checkboxes.forEach(function(cb) {
     const row = cb.closest('tr');
     if (row.style.display !== 'none') {
       cb.checked = selectAll.checked;
@@ -308,14 +329,14 @@ function filterTable() {
   const search = document.getElementById('searchInput').value.toLowerCase();
   const reason = document.getElementById('reasonFilter').value;
   const dateFilter = document.getElementById('dateFilter').value;
-  
   const now = new Date();
+  
   const rows = document.querySelectorAll('#tracksTable tbody tr');
   
-  rows.forEach(row => {
+  rows.forEach(function(row) {
     const title = row.dataset.title || '';
     const url = row.dataset.url || '';
-    const rowReason = row.dataset.reason;
+    const rowReason = row.dataset.reason || '';
     const rowDate = new Date(row.dataset.date);
     
     let show = true;
@@ -353,6 +374,7 @@ function clearFilters() {
 
 async function retryDownload(id, url) {
   const btn = event.target;
+  const originalText = btn.innerHTML;
   btn.disabled = true;
   btn.innerHTML = '⏳';
   
@@ -360,23 +382,23 @@ async function retryDownload(id, url) {
     const response = await fetch('/api/broken-tracks/retry', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id, url })
+      body: JSON.stringify({ id: id, url: url })
     });
     
     const result = await response.json();
     
     if (result.success) {
-      showToast('✅ Успех', 'Трек успешно загружен!', 'success');
+      showToast('✅ Готово', result.message || 'Кэш сброшен', 'success');
       removeRow(id);
     } else {
-      showToast('❌ Ошибка', result.error || 'Не удалось загрузить', 'danger');
+      showToast('❌ Ошибка', result.error || 'Не удалось выполнить', 'danger');
       btn.disabled = false;
-      btn.innerHTML = '🔄';
+      btn.innerHTML = originalText;
     }
   } catch (err) {
     showToast('❌ Ошибка', 'Ошибка сервера', 'danger');
     btn.disabled = false;
-    btn.innerHTML = '🔄';
+    btn.innerHTML = originalText;
   }
 }
 
@@ -385,15 +407,17 @@ async function markFixed(id, url) {
     const response = await fetch('/api/broken-tracks/fix', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id, url })
+      body: JSON.stringify({ id: id, url: url })
     });
     
     if (response.ok) {
       removeRow(id);
-      showToast('✅ Готово', 'Трек помечен как исправленный', 'success');
+      showToast('✅ Готово', 'Помечено как исправленное', 'success');
+    } else {
+      showToast('❌ Ошибка', 'Не удалось обновить', 'danger');
     }
   } catch (err) {
-    showToast('❌ Ошибка', 'Не удалось обновить', 'danger');
+    showToast('❌ Ошибка', 'Ошибка сервера', 'danger');
   }
 }
 
@@ -401,74 +425,92 @@ async function deleteTrack(id) {
   if (!confirm('Удалить эту запись?')) return;
   
   try {
-    const response = await fetch(`/api/broken-tracks/${id}`, {
+    const response = await fetch('/api/broken-tracks/' + id, {
       method: 'DELETE'
     });
     
     if (response.ok) {
       removeRow(id);
       showToast('🗑️ Удалено', 'Запись удалена', 'warning');
+    } else {
+      showToast('❌ Ошибка', 'Не удалось удалить', 'danger');
     }
   } catch (err) {
-    showToast('❌ Ошибка', 'Не удалось удалить', 'danger');
+    showToast('❌ Ошибка', 'Ошибка сервера', 'danger');
   }
 }
 
 async function deleteSelected() {
   const checkboxes = document.querySelectorAll('.row-checkbox:checked');
-  const ids = Array.from(checkboxes).map(cb => cb.value);
+  const ids = [];
   
-  if (!confirm(`Удалить ${ids.length} записей?`)) return;
+  checkboxes.forEach(function(cb) {
+    ids.push(cb.value);
+  });
+  
+  if (ids.length === 0) return;
+  if (!confirm('Удалить ' + ids.length + ' записей?')) return;
   
   try {
     const response = await fetch('/api/broken-tracks/bulk-delete', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ids })
+      body: JSON.stringify({ ids: ids })
     });
     
     if (response.ok) {
-      ids.forEach(id => removeRow(id));
-      showToast('🗑️ Удалено', `${ids.length} записей удалено`, 'warning');
-      updateSelectedCount();
+      ids.forEach(function(id) {
+        removeRow(id);
+      });
+      showToast('🗑️ Удалено', ids.length + ' записей удалено', 'warning');
       document.getElementById('selectAll').checked = false;
+      updateSelectedCount();
+    } else {
+      showToast('❌ Ошибка', 'Не удалось удалить', 'danger');
     }
   } catch (err) {
-    showToast('❌ Ошибка', 'Не удалось удалить', 'danger');
+    showToast('❌ Ошибка', 'Ошибка сервера', 'danger');
   }
 }
 
 function removeRow(id) {
-  const row = document.querySelector(`tr[data-id="${id}"]`);
+  const row = document.querySelector('tr[data-id="' + id + '"]');
   if (row) {
     row.style.transition = 'opacity 0.3s, transform 0.3s';
     row.style.opacity = '0';
     row.style.transform = 'translateX(20px)';
-    setTimeout(() => row.remove(), 300);
+    setTimeout(function() {
+      row.remove();
+    }, 300);
   }
 }
 
-// ===== Экспорт =====
+// ===== Экспорт CSV =====
 
 function exportCSV() {
   const rows = document.querySelectorAll('#tracksTable tbody tr');
   let csv = 'Дата,User ID,Трек,Ошибка,URL\n';
   
-  rows.forEach(row => {
+  rows.forEach(function(row) {
     if (row.style.display !== 'none') {
       const date = row.dataset.date || '';
-      const userId = row.querySelector('td:nth-child(3)').textContent.trim();
+      const userCell = row.querySelector('td:nth-child(3)');
+      const userId = userCell ? userCell.textContent.trim() : '';
       const title = row.dataset.title || '';
       const reason = row.dataset.reason || '';
       const url = row.dataset.url || '';
-      csv += `"${date}","${userId}","${title}","${reason}","${url}"\n`;
+      
+      csv += '"' + date + '","' + userId + '","' + title + '","' + reason + '","' + url + '"\n';
     }
   });
   
+  // BOM для корректного отображения кириллицы в Excel
   const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' });
   const link = document.createElement('a');
+  const dateStr = new Date().toISOString().slice(0, 10);
+  
   link.href = URL.createObjectURL(blob);
-  link.download = `broken_tracks_${new Date().toISOString().slice(0,10)}.csv`;
+  link.download = 'broken_tracks_' + dateStr + '.csv';
   link.click();
   
   showToast('📥 Экспорт', 'CSV файл скачан', 'success');
@@ -476,7 +518,7 @@ function exportCSV() {
 
 // ===== Сортировка =====
 
-let sortDirections = {};
+var sortDirections = {};
 
 function sortTable(columnIndex) {
   const table = document.getElementById('tracksTable');
@@ -486,13 +528,15 @@ function sortTable(columnIndex) {
   sortDirections[columnIndex] = !sortDirections[columnIndex];
   const direction = sortDirections[columnIndex] ? 1 : -1;
   
-  rows.sort((a, b) => {
+  rows.sort(function(a, b) {
     let aVal, bVal;
     
     if (columnIndex === 0) {
+      // Сортировка по дате
       aVal = new Date(a.dataset.date);
       bVal = new Date(b.dataset.date);
     } else if (columnIndex === 2) {
+      // Сортировка по названию трека
       aVal = a.dataset.title || '';
       bVal = b.dataset.title || '';
     }
@@ -502,7 +546,9 @@ function sortTable(columnIndex) {
     return 0;
   });
   
-  rows.forEach(row => tbody.appendChild(row));
+  rows.forEach(function(row) {
+    tbody.appendChild(row);
+  });
 }
 </script>
 
@@ -512,7 +558,7 @@ function sortTable(columnIndex) {
 }
 
 .table th[onclick]:hover {
-  background-color: rgba(255,255,255,0.1) !important;
+  background-color: rgba(255, 255, 255, 0.1) !important;
   cursor: pointer;
 }
 
@@ -526,5 +572,9 @@ function sortTable(columnIndex) {
 
 .card:hover {
   transform: translateY(-2px);
+}
+
+.toast {
+  min-width: 280px;
 }
 </style>
