@@ -53,14 +53,104 @@
 <%- contentFor('body') %>
 
 <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
-  <h1 class="h2"><i class="bi bi-broadcast me-2"></i>Управление рассылками</h1>
-  <a href="/broadcast/new" class="btn btn-sm btn-primary">
-    <i class="bi bi-plus-circle me-1"></i>Создать новую
-  </a>
+  <div class="d-flex align-items-center gap-2">
+    <h1 class="h2 mb-0"><i class="bi bi-broadcast me-2"></i>Управление рассылками</h1>
+    <span class="badge bg-secondary" data-bs-toggle="tooltip" title="Показывается время в Москве">МСК</span>
+  </div>
+  <div class="btn-toolbar mb-2 mb-md-0 gap-2">
+    <button class="btn btn-sm btn-outline-secondary" onclick="location.reload()">
+      <i class="bi bi-arrow-clockwise me-1"></i>Обновить
+    </button>
+    <button class="btn btn-sm btn-outline-primary" onclick="exportCsv()">
+      <i class="bi bi-download me-1"></i>Экспорт CSV
+    </button>
+    <a href="/broadcast/new" class="btn btn-sm btn-primary">
+      <i class="bi bi-plus-circle me-1"></i>Создать новую
+    </a>
+  </div>
 </div>
 
+<% if (tasks && tasks.length) { 
+  const total = tasks.length;
+  const pending = tasks.filter(t => t.status === 'pending').length;
+  const processing = tasks.filter(t => t.status === 'processing').length;
+  const completed = tasks.filter(t => t.status === 'completed').length;
+  const failed = tasks.filter(t => t.status === 'failed').length;
+%>
+<div class="row g-3 mb-3">
+  <div class="col-md-3 col-6">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-body text-center">
+        <div class="text-muted small">Всего</div>
+        <div class="fs-4 fw-semibold"><%= total %></div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-3 col-6">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-body text-center">
+        <div class="text-muted small">В ожидании</div>
+        <div class="fs-4 fw-semibold text-warning"><%= pending %></div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-3 col-6">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-body text-center">
+        <div class="text-muted small">В процессе</div>
+        <div class="fs-4 fw-semibold text-info"><%= processing %></div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-3 col-6">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-body text-center">
+        <div class="text-muted small">Завершено / Ошибка</div>
+        <div class="fs-4 fw-semibold">
+          <span class="text-success me-2"><%= completed %></span>
+          <span class="text-danger"><%= failed %></span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="card mb-3">
+  <div class="card-body">
+    <div class="row g-3">
+      <div class="col-md-4">
+        <label class="form-label">🔍 Поиск</label>
+        <input type="text" id="searchInput" class="form-control" placeholder="Текст сообщения или ID" oninput="filterTable()">
+      </div>
+      <div class="col-md-3">
+        <label class="form-label">Статус</label>
+        <select id="statusFilter" class="form-select" onchange="filterTable()">
+          <option value="">Все</option>
+          <option value="pending">В ожидании</option>
+          <option value="processing">В процессе</option>
+          <option value="completed">Завершена</option>
+          <option value="failed">Ошибка</option>
+        </select>
+      </div>
+      <div class="col-md-3">
+        <label class="form-label">Аудитория</label>
+        <select id="audienceFilter" class="form-select" onchange="filterTable()">
+          <option value="">Все</option>
+          <option value="all_users">Все пользователи</option>
+          <option value="free_users">Free</option>
+          <option value="premium_users">Premium</option>
+        </select>
+      </div>
+      <div class="col-md-2 d-flex align-items-end">
+        <button class="btn btn-outline-secondary w-100" onclick="clearFilters()">Сбросить</button>
+      </div>
+    </div>
+  </div>
+</div>
+<% } %>
+
 <div class="table-responsive">
-  <table class="table table-hover align-middle">
+  <table class="table table-hover align-middle" id="broadcastsTable">
     <thead class="table-light">
       <tr>
         <th scope="col">ID</th>
@@ -73,7 +163,7 @@
       </tr>
     </thead>
     <tbody>
-      <% if (tasks?.length > 0) { %>
+      <% if (tasks && tasks.length > 0) { %>
         <% tasks.forEach(task => { 
           const safeMessage = escapeHtml(task.message);
           
@@ -90,9 +180,16 @@
             free_users: 'Free пользователи',
             premium_users: 'Premium пользователи'
           };
-          const audience = audienceMap[task.target_audience] || task.target_audience.replace('_', ' ');
+          const audience = audienceMap[task.target_audience] || (task.target_audience ? task.target_audience.replace('_', ' ') : '');
+          
+          const sent = task.sent_count || 0;
+          const total = task.total_count || 0;
+          const progress = total > 0 ? Math.round((sent / total) * 100) : 0;
         %>
-          <tr>
+          <tr data-id="<%= task.id %>"
+              data-status="<%= task.status %>"
+              data-audience="<%= task.target_audience %>"
+              data-message="<%= (task.message || '').toLowerCase() %>">
             <td class="fw-semibold">#<%= task.id %></td>
             <td>
               <span class="badge <%= status.class %>"><%- status.name %></span>
@@ -113,18 +210,14 @@
             </td>
             
             <td class="text-center">
-              <% if (task.status === 'processing' || task.status === 'completed') { 
-                const sent = task.sent_count || 0;
-                const total = task.total_count || 0;
-                const progress = total > 0 ? Math.round((sent / total) * 100) : 0;
-              %>
+              <% if (task.status === 'processing' || task.status === 'completed') { %>
                 <div class="progress" 
                      style="height: 22px; font-size: 0.8rem;" 
                      data-bs-toggle="tooltip" 
                      title="Отправлено: <%= sent %> из <%= total %>">
                   <div class="progress-bar progress-bar-striped progress-bar-animated" 
                        role="progressbar" 
-                       style="width: <%= progress %>%;" 
+                       data-progress="<%= progress %>" 
                        aria-valuenow="<%= progress %>" 
                        aria-valuemin="0" 
                        aria-valuemax="100">
@@ -147,12 +240,11 @@
                      title="Редактировать">
                     <i class="bi bi-pencil-fill"></i>
                   </a>
-                  <form method="POST" action="/broadcast/delete">
+                  <form method="POST" action="/broadcast/delete" onsubmit="return confirm('Удалить эту рассылку? Действие необратимо.');">
                     <input type="hidden" name="taskId" value="<%= task.id %>">
                     <button type="submit" 
                             class="btn btn-outline-danger"
-                            title="Удалить"
-                            data-confirm="Удалить эту рассылку? Действие необратимо.">
+                            title="Удалить">
                       <i class="bi bi-trash-fill"></i>
                     </button>
                   </form>
@@ -177,3 +269,82 @@
     </tbody>
   </table>
 </div>
+
+<script>
+// Инициализация тултипов
+document.addEventListener('DOMContentLoaded', () => {
+  const tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+  tooltipTriggerList.map(t => new bootstrap.Tooltip(t));
+
+  // Устанавливаем ширину прогресс-баров из data-progress
+  document.querySelectorAll('.progress-bar[data-progress]').forEach(el => {
+    const p = parseInt(el.dataset.progress, 10) || 0;
+    el.style.width = `${p}%`;
+  });
+});
+
+function filterTable() {
+  const search = (document.getElementById('searchInput')?.value || '').toLowerCase();
+  const status = document.getElementById('statusFilter')?.value || '';
+  const audience = document.getElementById('audienceFilter')?.value || '';
+  const rows = document.querySelectorAll('#broadcastsTable tbody tr');
+  
+  rows.forEach(row => {
+    const rowStatus = row.dataset.status || '';
+    const rowAudience = row.dataset.audience || '';
+    const rowMsg = row.dataset.message || '';
+    const idText = row.dataset.id || '';
+    
+    let show = true;
+    if (status && rowStatus !== status) show = false;
+    if (audience && rowAudience !== audience) show = false;
+    if (search && !rowMsg.includes(search) && !idText.includes(search)) show = false;
+    
+    row.style.display = show ? '' : 'none';
+  });
+}
+
+function clearFilters() {
+  const s = document.getElementById('searchInput');
+  const st = document.getElementById('statusFilter');
+  const a = document.getElementById('audienceFilter');
+  if (s) s.value = '';
+  if (st) st.value = '';
+  if (a) a.value = '';
+  filterTable();
+}
+
+function exportCsv() {
+  const rows = Array.from(document.querySelectorAll('#broadcastsTable tbody tr'));
+  if (!rows.length) return;
+  const headers = ['id','status','audience','message','scheduled_at','sent','total','progress'];
+  const lines = [headers.join(',')];
+  
+  rows.forEach(row => {
+    const cols = row.querySelectorAll('td');
+    const id = cols[0]?.innerText.replace('#','').trim() || '';
+    const status = (row.dataset.status || '').trim();
+    const audience = (row.dataset.audience || '').trim();
+    const message = (cols[3]?.innerText || '').replace(/\s+/g,' ').trim();
+    const scheduled = (cols[4]?.innerText || '').trim();
+    const progressCell = cols[5];
+    const progressText = progressCell?.innerText.replace('%','').trim() || '';
+    const sentMatch = progressCell?.querySelector('.progress')?.getAttribute('title') || '';
+    const sent = (sentMatch.match(/Отправлено:\s*(\d+)/) || [])[1] || '';
+    const total = (sentMatch.match(/из\s*(\d+)/) || [])[1] || '';
+    
+    const line = [id,status,audience,message,scheduled,sent,total,progressText]
+      .map(val => `"${String(val).replace(/"/g,'""')}"`)
+      .join(',');
+    lines.push(line);
+  });
+  
+  const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `broadcasts_${new Date().toISOString().slice(0,10)}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+</script>
