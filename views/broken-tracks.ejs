@@ -410,7 +410,41 @@ async function retryDownload(id, url) {
     btn.innerHTML = originalText;
   }
 }
+// В секции <script> добавь:
 
+async function fixAndSend(id, url, userId) {
+  const btn = event.target;
+  const originalText = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '⏳';
+  
+  showToast('📤 Загрузка', 'Скачиваю и отправляю пользователю...', 'info');
+  
+  try {
+    const response = await fetch('/api/broken-tracks/fix-and-send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, url, userId })
+    });
+    
+    const result = await response.json();
+    
+    if (result.success) {
+      showToast('📤 Отправлено', 'Трек скачивается и отправляется пользователю', 'success');
+      
+      // Убираем строку через 3 сек (даем время на загрузку)
+      setTimeout(() => removeRow(id), 3000);
+    } else {
+      showToast('❌ Ошибка', result.error, 'danger');
+      btn.disabled = false;
+      btn.innerHTML = originalText;
+    }
+  } catch (err) {
+    showToast('❌ Ошибка', 'Ошибка сервера', 'danger');
+    btn.disabled = false;
+    btn.innerHTML = originalText;
+  }
+}
 async function markFixed(id, url) {
   console.log('markFixed called:', id, url); // Для отладки
   
