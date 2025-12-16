@@ -38,6 +38,13 @@ const YTDL_COMMON = {
   'no-warnings': true,
 };
 
+// Базовые опции для получения метаданных/скачиваний через yt-dlp
+const YTDL_OPTIONS = {
+  ...YTDL_COMMON,
+  'no-playlist': true,
+  'ignore-errors': true
+};
+
 // --- Вспомогательные функции ---
 
 function sanitizeFilename(name) {
