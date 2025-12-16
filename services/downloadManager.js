@@ -34,6 +34,17 @@ const USER_AGENTS = [
 
 const pickUserAgent = () => USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
 
+const COMMON_HEADERS = [
+  'Accept-Language:en-US,en;q=0.9,ru;q=0.8',
+  'Accept:text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+  'Referer:https://soundcloud.com/',
+  'Sec-Fetch-Dest:document',
+  'Sec-Fetch-Mode:navigate',
+  'Sec-Fetch-Site:same-origin',
+  'Sec-Fetch-User:?1',
+  'Upgrade-Insecure-Requests:1'
+];
+
 const YTDL_COMMON = {
   'format': 'bestaudio[ext=mp3]/bestaudio[ext=opus]/bestaudio',
   'ffmpeg-location': ffmpegPath,
@@ -42,6 +53,9 @@ const YTDL_COMMON = {
   retries: 3,
   'socket-timeout': 120,
   'no-warnings': true,
+  referer: 'https://soundcloud.com/',
+  'add-header': COMMON_HEADERS,
+  'geo-bypass': true
 };
 
 // --- Вспомогательные функции ---
@@ -340,7 +354,14 @@ export async function trackDownloadProcessor(task) {
     // ========================================================
     try {
         console.log(`[Worker/Stream] (SCDL) Пробую скачать: ${fullUrl}`);
-        stream = await scdl.default.download(fullUrl, { proxy: PROXY_URL });
+        const ua = pickUserAgent();
+        stream = await scdl.default.download(fullUrl, { 
+            proxy: PROXY_URL, 
+            headers: { 
+              'User-Agent': ua,
+              'Referer': 'https://soundcloud.com/'
+            } 
+        });
         
         if (STORAGE_CHANNEL_ID) {
             console.log(`[Worker/Stream] Отправка в хранилище БЕЗ duration для проверки...`);
