@@ -1777,16 +1777,48 @@ export async function getBrokenTracks(limit = 50) {
 }
 
 /**
- * Пометить трек как исправленный
+ * Пометить трек как исправленный (удаляет из списка)
+ * @param {number|string} id - ID записи в failed_tracks
+ * @returns {Promise<boolean>} - true если успешно
  */
 export async function resolveBrokenTrack(id) {
-  const { error } = await supabase
-    .from('failed_tracks')
-    .update({ is_fixed: true })
-    .eq('id', id);
+  try {
+    // Парсим id в число
+    const numId = parseInt(id, 10);
+    
+    if (isNaN(numId)) {
+      console.error('[DB] resolveBrokenTrack: невалидный id:', id, typeof id);
+      return false;
+    }
+    
+    console.log(`[DB] resolveBrokenTrack: удаляю запись id=${numId}`);
+    
+    // Вариант 1: УДАЛЯЕМ полностью (рекомендую - чище)
+    const { data, error } = await supabase
+      .from('failed_tracks')
+      .delete()
+      .eq('id', numId)
+      .select();
+    
+    // Вариант 2: Помечаем is_fixed = true (раскомментируй если хочешь хранить историю)
+    // const { data, error } = await supabase
+    //   .from('failed_tracks')
+    //   .update({ is_fixed: true, updated_at: new Date().toISOString() })
+    //   .eq('id', numId)
+    //   .select();
 
-  if (error) console.error('[DB] Ошибка resolveBrokenTrack:', error);
-  return !error;
+    if (error) {
+      console.error('[DB] Ошибка resolveBrokenTrack:', error);
+      return false;
+    }
+    
+    console.log(`[DB] ✅ Трек ${numId} успешно обработан. Затронуто записей:`, data?.length || 0);
+    return true;
+    
+  } catch (e) {
+    console.error('[DB] resolveBrokenTrack exception:', e.message);
+    return false;
+  }
 }
 // ============================================
 // ПРОБЛЕМНЫЕ ТРЕКИ - РАСШИРЕННЫЕ ФУНКЦИИ
