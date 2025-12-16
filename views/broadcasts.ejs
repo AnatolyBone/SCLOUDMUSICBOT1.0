@@ -224,6 +224,10 @@
                     <%= progress %>%
                   </div>
                 </div>
+              <% } else if (task.status === 'pending') { %>
+                <span class="badge bg-warning-subtle text-warning border border-warning-subtle px-3">
+                  Ожидает запуска
+                </span>
               <% } else if (task.status === 'failed' && task.report?.error) { %>
                 <i class="bi bi-exclamation-triangle-fill text-danger fs-5" 
                    data-bs-toggle="tooltip" 
@@ -237,15 +241,15 @@
                 <div class="btn-group btn-group-sm">
                   <a href="/broadcast/edit/<%= task.id %>" 
                      class="btn btn-outline-primary"
-                     title="Редактировать">
-                    <i class="bi bi-pencil-fill"></i>
+                     title="Редактировать запланированную рассылку">
+                    <i class="bi bi-pencil-fill me-1"></i>Изм.
                   </a>
                   <form method="POST" action="/broadcast/delete" onsubmit="return confirm('Удалить эту рассылку? Действие необратимо.');">
                     <input type="hidden" name="taskId" value="<%= task.id %>">
                     <button type="submit" 
                             class="btn btn-outline-danger"
-                            title="Удалить">
-                      <i class="bi bi-trash-fill"></i>
+                            title="Отменить/удалить">
+                      <i class="bi bi-trash-fill me-1"></i>Отмена
                     </button>
                   </form>
                 </div>
