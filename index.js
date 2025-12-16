@@ -384,20 +384,39 @@ app.post('/broken-tracks/fix', requireAuth, async (req, res) => {
   }
 });
 
-// API: Пометить исправленным
+// ===== API ENDPOINTS ДЛЯ AJAX (Проблемные треки) =====
+
+// API: Пометить исправленным (удаляет из списка + очищает кэш)
 app.post('/api/broken-tracks/fix', requireAuth, async (req, res) => {
   try {
     const { id, url } = req.body;
-    if (url) await deleteCachedTrack(url);
-    await resolveBrokenTrack(id);
-    res.json({ success: true });
+    
+    console.log(`[Admin] Помечаем трек как исправленный: id=${id}, url=${url?.substring(0, 50)}...`);
+    
+    // Удаляем битый кэш если есть
+    if (url) {
+      const deleted = await deleteCachedTrack(url);
+      console.log(`[Admin] Кэш удалён: ${deleted}`);
+    }
+    
+    // Удаляем из списка проблемных
+    const success = await resolveBrokenTrack(id);
+    
+    if (success) {
+      console.log(`[Admin] ✅ Трек ${id} успешно убран из списка`);
+      res.json({ success: true });
+    } else {
+      console.error(`[Admin] ❌ Не удалось убрать трек ${id}`);
+      res.status(500).json({ success: false, error: 'Не удалось обновить запись' });
+    }
+    
   } catch (e) {
     console.error('[API BrokenTracks] fix error:', e);
     res.status(500).json({ success: false, error: e.message });
   }
 });
 
-// API: Повторить загрузку (сбросить кэш)
+// API: Повторить загрузку (сбрасывает кэш + удаляет из списка)
 app.post('/api/broken-tracks/retry', requireAuth, async (req, res) => {
   try {
     const { id, url } = req.body;
@@ -406,30 +425,35 @@ app.post('/api/broken-tracks/retry', requireAuth, async (req, res) => {
       return res.status(400).json({ success: false, error: 'URL не указан' });
     }
     
+    console.log(`[Admin] Повторная обработка: id=${id}, url=${url?.substring(0, 50)}...`);
+    
     // Увеличиваем счетчик попыток
     await incrementBrokenTrackRetry(id);
     
     // Удаляем старый кэш
     await deleteCachedTrack(url);
     
-    // Помечаем как исправленное
+    // Удаляем из списка проблемных
     await resolveBrokenTrack(id);
     
     res.json({ 
       success: true, 
-      message: 'Кэш сброшен. Трек будет скачан заново при следующем запросе.' 
+      message: 'Кэш очищен. Трек будет скачан заново при следующем запросе.' 
     });
+    
   } catch (e) {
     console.error('[API BrokenTracks] retry error:', e);
     res.status(500).json({ success: false, error: e.message });
   }
 });
 
-// API: Удалить одну запись
+// API: Удалить одну запись (только из списка, кэш не трогаем)
 app.delete('/api/broken-tracks/:id', requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
-    await deleteBrokenTrack(parseInt(id));
+    console.log(`[Admin] Удаление записи: id=${id}`);
+    
+    await deleteBrokenTrack(parseInt(id, 10));
     res.json({ success: true });
   } catch (e) {
     console.error('[API BrokenTracks] delete error:', e);
@@ -446,7 +470,9 @@ app.post('/api/broken-tracks/bulk-delete', requireAuth, async (req, res) => {
       return res.status(400).json({ success: false, error: 'Не выбраны записи' });
     }
     
-    const count = await deleteBrokenTracksBulk(ids.map(id => parseInt(id)));
+    console.log(`[Admin] Массовое удаление: ${ids.length} записей`);
+    
+    const count = await deleteBrokenTracksBulk(ids.map(id => parseInt(id, 10)));
     res.json({ success: true, deleted: count });
   } catch (e) {
     console.error('[API BrokenTracks] bulk-delete error:', e);
