@@ -193,10 +193,10 @@
                   🔄
                 </button>
                 <button type="button" class="btn btn-outline-success" 
-                        onclick="markFixed('<%= track.id %>', '<%= track.url %>')" 
-                        title="Исправлено">
-                  ✅
-                </button>
+        onclick="markFixed('<%= track.id %>', '<%= track.url %>')" 
+        title="Исправлено">
+  ✅
+</button>
                 <button type="button" class="btn btn-outline-danger" 
                         onclick="deleteTrack('<%= track.id %>')" 
                         title="Удалить">
@@ -403,6 +403,8 @@ async function retryDownload(id, url) {
 }
 
 async function markFixed(id, url) {
+  console.log('markFixed called:', id, url); // Для отладки
+  
   try {
     const response = await fetch('/api/broken-tracks/fix', {
       method: 'POST',
@@ -410,17 +412,20 @@ async function markFixed(id, url) {
       body: JSON.stringify({ id: id, url: url })
     });
     
-    if (response.ok) {
+    const result = await response.json();
+    console.log('Server response:', result); // Для отладки
+    
+    if (result.success) {
       removeRow(id);
-      showToast('✅ Готово', 'Помечено как исправленное', 'success');
+      showToast('✅ Готово', 'Трек убран из списка', 'success');
     } else {
-      showToast('❌ Ошибка', 'Не удалось обновить', 'danger');
+      showToast('❌ Ошибка', result.error || 'Не удалось обновить', 'danger');
     }
   } catch (err) {
+    console.error('markFixed error:', err);
     showToast('❌ Ошибка', 'Ошибка сервера', 'danger');
   }
 }
-
 async function deleteTrack(id) {
   if (!confirm('Удалить эту запись?')) return;
   
