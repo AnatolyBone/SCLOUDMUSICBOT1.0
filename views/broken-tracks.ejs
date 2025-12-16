@@ -64,11 +64,12 @@
         <label class="form-label">⚠️ Тип ошибки</label>
         <select class="form-select" id="reasonFilter" onchange="filterTable()">
           <option value="">Все ошибки</option>
-          <option value="download_failed">Ошибка загрузки</option>
-          <option value="not_found">Не найдено</option>
-          <option value="geo_blocked">Гео-блокировка</option>
-          <option value="timeout">Таймаут</option>
-          <option value="invalid_url">Неверный URL</option>
+          <option value="PREVIEW_ONLY">Только превью (SC/YTDL)</option>
+          <option value="FILE_TOO_LARGE">Файл слишком большой</option>
+          <option value="403_FORBIDDEN">Доступ запрещён (403)</option>
+          <option value="RATE_LIMIT">Лимит запросов (429)</option>
+          <option value="DOWNLOAD_ERROR">Ошибка скачивания</option>
+          <option value="UNKNOWN_ERROR">Другая ошибка</option>
         </select>
       </div>
       <div class="col-md-3">
@@ -116,18 +117,22 @@
       <tbody>
         <% 
         const reasonBadges = {
-          'download_failed': 'bg-danger',
-          'not_found': 'bg-warning text-dark',
-          'geo_blocked': 'bg-info',
-          'timeout': 'bg-secondary',
-          'invalid_url': 'bg-dark'
+          'PREVIEW_ONLY': 'bg-warning text-dark',
+          'PREVIEW_ONLY_YTDL': 'bg-warning text-dark',
+          'FILE_TOO_LARGE': 'bg-danger',
+          '403_FORBIDDEN': 'bg-info',
+          'RATE_LIMIT': 'bg-secondary',
+          'DOWNLOAD_ERROR': 'bg-danger',
+          'UNKNOWN_ERROR': 'bg-dark'
         };
         const reasonLabels = {
-          'download_failed': '❌ Ошибка загрузки',
-          'not_found': '🔍 Не найдено',
-          'geo_blocked': '🌍 Гео-блок',
-          'timeout': '⏱️ Таймаут',
-          'invalid_url': '🔗 Неверный URL'
+          'PREVIEW_ONLY': '🎧 Только превью (SC)',
+          'PREVIEW_ONLY_YTDL': '🎧 Только превью (YT-DLP)',
+          'FILE_TOO_LARGE': '📦 Файл слишком большой',
+          '403_FORBIDDEN': '🚫 Доступ запрещён (403)',
+          'RATE_LIMIT': '⏱️ Лимит запросов (429)',
+          'DOWNLOAD_ERROR': '❌ Ошибка скачивания',
+          'UNKNOWN_ERROR': '❓ Неизвестная ошибка'
         };
         %>
         <% tracks.forEach((track) => { %>
@@ -185,34 +190,25 @@
                 </button>
               </div>
             </td>
-<td>
-  <div class="btn-group btn-group-sm" role="group">
-    <!-- НОВАЯ КНОПКА: Исправить и отправить -->
-    <button type="button" class="btn btn-outline-primary" 
-            onclick="fixAndSend('<%= track.id %>', '<%= track.url %>', '<%= track.user_id %>')" 
-            title="Скачать и отправить пользователю">
-      📤
-    </button>
-    <!-- Сбросить кэш -->
-    <button type="button" class="btn btn-outline-secondary" 
-            onclick="retryDownload('<%= track.id %>', '<%= track.url %>')" 
-            title="Сбросить кэш">
-      🔄
-    </button>
-    <!-- Просто убрать из списка -->
-    <button type="button" class="btn btn-outline-success" 
-            onclick="markFixed('<%= track.id %>', '<%= track.url %>')" 
-            title="Убрать из списка">
-      ✅
-    </button>
-    <!-- Удалить запись -->
-    <button type="button" class="btn btn-outline-danger" 
-            onclick="deleteTrack('<%= track.id %>')" 
-            title="Удалить">
-      🗑️
-    </button>
-  </div>
-</td>
+            <td>
+              <div class="btn-group btn-group-sm" role="group">
+                <button type="button" class="btn btn-outline-primary" 
+                        onclick="retryDownload('<%= track.id %>', '<%= track.url %>')" 
+                        title="Сбросить кэш">
+                  🔄
+                </button>
+                <button type="button" class="btn btn-outline-success" 
+                        onclick="markFixed('<%= track.id %>', '<%= track.url %>')" 
+                        title="Исправлено">
+                  ✅
+                </button>
+                <button type="button" class="btn btn-outline-danger" 
+                        onclick="deleteTrack('<%= track.id %>')" 
+                        title="Удалить">
+                  🗑️
+                </button>
+              </div>
+            </td>
           </tr>
         <% }) %>
       </tbody>
@@ -410,44 +406,8 @@ async function retryDownload(id, url) {
     btn.innerHTML = originalText;
   }
 }
-// В секции <script> добавь:
 
-async function fixAndSend(id, url, userId) {
-  const btn = event.target;
-  const originalText = btn.innerHTML;
-  btn.disabled = true;
-  btn.innerHTML = '⏳';
-  
-  showToast('📤 Загрузка', 'Скачиваю и отправляю пользователю...', 'info');
-  
-  try {
-    const response = await fetch('/api/broken-tracks/fix-and-send', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id, url, userId })
-    });
-    
-    const result = await response.json();
-    
-    if (result.success) {
-      showToast('📤 Отправлено', 'Трек скачивается и отправляется пользователю', 'success');
-      
-      // Убираем строку через 3 сек (даем время на загрузку)
-      setTimeout(() => removeRow(id), 3000);
-    } else {
-      showToast('❌ Ошибка', result.error, 'danger');
-      btn.disabled = false;
-      btn.innerHTML = originalText;
-    }
-  } catch (err) {
-    showToast('❌ Ошибка', 'Ошибка сервера', 'danger');
-    btn.disabled = false;
-    btn.innerHTML = originalText;
-  }
-}
 async function markFixed(id, url) {
-  console.log('markFixed called:', id, url); // Для отладки
-  
   try {
     const response = await fetch('/api/broken-tracks/fix', {
       method: 'POST',
@@ -455,20 +415,17 @@ async function markFixed(id, url) {
       body: JSON.stringify({ id: id, url: url })
     });
     
-    const result = await response.json();
-    console.log('Server response:', result); // Для отладки
-    
-    if (result.success) {
+    if (response.ok) {
       removeRow(id);
-      showToast('✅ Готово', 'Трек убран из списка', 'success');
+      showToast('✅ Готово', 'Помечено как исправленное', 'success');
     } else {
-      showToast('❌ Ошибка', result.error || 'Не удалось обновить', 'danger');
+      showToast('❌ Ошибка', 'Не удалось обновить', 'danger');
     }
   } catch (err) {
-    console.error('markFixed error:', err);
     showToast('❌ Ошибка', 'Ошибка сервера', 'danger');
   }
 }
+
 async function deleteTrack(id) {
   if (!confirm('Удалить эту запись?')) return;
   
