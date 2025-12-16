@@ -150,6 +150,121 @@ async function ensureTaskMetadata(task) {
   }
   return { metadata, cacheKey, url };
 }
+// =====================================================================================
+//                    НОВОЕ: ФУНКЦИЯ ДЛЯ АДМИНКИ
+// =====================================================================================
+
+/**
+ * Скачивает трек и отправляет пользователю
+ * Используется для кнопки "Исправить и отправить" в админке
+ * 
+ * @param {string} url - URL трека
+ * @param {number} userId - ID пользователя
+ * @param {object} metadata - Метаданные (опционально)
+ * @returns {Promise<{success: boolean, fileId?: string, title?: string, error?: string}>}
+ */
+export async function downloadTrackForUser(url, userId, metadata = null) {
+  let tempFilePath = null;
+  
+  try {
+    console.log(`[DownloadForUser] Скачиваю для User ${userId}: ${url.substring(0, 60)}...`);
+    
+    // Получаем метаданные если нет
+    if (!metadata) {
+      const info = await ytdl(url, { 
+        'dump-single-json': true, 
+        'skip-download': true,
+        'no-playlist': true,
+        ...YTDL_COMMON 
+      });
+      metadata = extractMetadataFromInfo(info);
+    }
+    
+    if (!metadata) throw new Error('META_MISSING');
+    
+    const { title, uploader, duration, webpage_url: fullUrl, thumbnail } = metadata;
+    const roundedDuration = duration ? Math.round(duration) : null;
+    const trackUrl = fullUrl || url;
+    
+    let stream;
+    let usedFallback = false;
+    
+    // Попытка 1: SCDL (быстро, streaming)
+    try {
+      console.log(`[DownloadForUser/SCDL] Пробую: ${trackUrl}`);
+      stream = await scdl.default.download(trackUrl);
+    } catch (scdlError) {
+      // Попытка 2: YT-DLP fallback
+      console.log(`[DownloadForUser] SCDL failed (${scdlError.message}), trying YT-DLP...`);
+      
+      tempFilePath = path.join(TEMP_DIR, `admin_${Date.now()}_${userId}.mp3`);
+      usedFallback = true;
+      
+      await ytdl(trackUrl, {
+        output: tempFilePath,
+        format: 'bestaudio[ext=mp3]/bestaudio',
+        noPlaylist: true,
+        ...YTDL_COMMON
+      });
+      
+      if (!fs.existsSync(tempFilePath)) {
+        throw new Error('YT-DLP failed to create file');
+      }
+      
+      stream = fs.createReadStream(tempFilePath);
+    }
+    
+    // Отправляем в хранилище
+    if (!STORAGE_CHANNEL_ID) {
+      throw new Error('STORAGE_CHANNEL_ID not configured');
+    }
+    
+    const sentMsg = await bot.telegram.sendAudio(
+      STORAGE_CHANNEL_ID,
+      { source: stream, filename: `${sanitizeFilename(title)}.mp3` },
+      { title, performer: uploader }
+    );
+    
+    const realDuration = sentMsg.audio?.duration || 0;
+    const fileId = sentMsg.audio?.file_id;
+    
+    // Проверка на превью
+    if (isPreview(realDuration, roundedDuration)) {
+      console.warn(`[DownloadForUser] ПРЕВЬЮ! ${realDuration}s vs ${roundedDuration}s`);
+      await bot.telegram.deleteMessage(STORAGE_CHANNEL_ID, sentMsg.message_id).catch(() => {});
+      throw new Error('PREVIEW_ONLY');
+    }
+    
+    // Кэшируем
+    await db.cacheTrack({
+      url: trackUrl,
+      fileId,
+      title,
+      artist: uploader,
+      duration: realDuration,
+      thumbnail
+    });
+    
+    // Отправляем пользователю
+    await bot.telegram.sendAudio(userId, fileId, {
+      title,
+      performer: uploader,
+      duration: realDuration
+    });
+    
+    console.log(`[DownloadForUser] ✅ Успешно: "${title}" → User ${userId}`);
+    
+    return { success: true, fileId, title };
+    
+  } catch (err) {
+    console.error(`[DownloadForUser] ❌ Ошибка:`, err.message);
+    return { success: false, error: err.message };
+  } finally {
+    if (tempFilePath && fs.existsSync(tempFilePath)) {
+      try { fs.unlinkSync(tempFilePath); } catch (e) {}
+    }
+  }
+}
 
 // =====================================================================================
 //                             ГЛАВНЫЙ ПРОЦЕССОР ЗАГРУЗКИ
