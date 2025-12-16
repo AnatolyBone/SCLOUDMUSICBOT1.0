@@ -103,6 +103,99 @@ async function ensureTaskMetadata(task) {
   }
   return { metadata, cacheKey, url };
 }
+/**
+ * Скачивает трек и возвращает file_id из Telegram
+ * Используется для "Исправить и отправить"
+ */
+export async function downloadTrackForUser(url, userId, metadata = null) {
+  let tempFilePath = null;
+  
+  try {
+    // Получаем метаданные если нет
+    if (!metadata) {
+      const info = await ytdl(url, { 
+        'dump-single-json': true, 
+        'skip-download': true,
+        ...YTDL_OPTIONS 
+      });
+      metadata = extractMetadataFromInfo(info);
+    }
+    
+    if (!metadata) throw new Error('META_MISSING');
+    
+    const { title, uploader, duration, webpage_url: fullUrl } = metadata;
+    const roundedDuration = duration ? Math.round(duration) : null;
+    
+    console.log(`[DownloadForUser] Скачиваю: "${title}" для User ${userId}`);
+    
+    let audioSource;
+    let method = 'unknown';
+    
+    // Пробуем SCDL Stream
+    try {
+      const result = await downloadWithScdlStream(fullUrl || url, title, uploader, roundedDuration);
+      audioSource = { source: result.stream, filename: `${sanitizeFilename(title)}.mp3` };
+      method = 'SCDL';
+    } catch (scdlErr) {
+      console.log(`[DownloadForUser] SCDL failed: ${scdlErr.message}, trying YT-DLP...`);
+      
+      // Fallback на YT-DLP
+      const result = await downloadWithYtdlpFile(fullUrl || url, roundedDuration);
+      tempFilePath = result.filePath;
+      audioSource = { source: fs.createReadStream(tempFilePath), filename: `${sanitizeFilename(title)}.mp3` };
+      method = 'YT-DLP';
+    }
+    
+    // Отправляем в хранилище
+    if (STORAGE_CHANNEL_ID) {
+      const sentMsg = await bot.telegram.sendAudio(
+        STORAGE_CHANNEL_ID,
+        audioSource,
+        { title, performer: uploader }
+      );
+      
+      const realDuration = sentMsg.audio?.duration || 0;
+      const fileId = sentMsg.audio?.file_id;
+      
+      // Проверка на превью
+      if (roundedDuration && roundedDuration > 60 && realDuration < 35) {
+        await bot.telegram.deleteMessage(STORAGE_CHANNEL_ID, sentMsg.message_id).catch(() => {});
+        throw new Error('PREVIEW_ONLY');
+      }
+      
+      // Кэшируем
+      await db.cacheTrack({
+        url: fullUrl || url,
+        fileId,
+        title,
+        artist: uploader,
+        duration: realDuration,
+        thumbnail: metadata.thumbnail
+      });
+      
+      // Отправляем пользователю
+      await bot.telegram.sendAudio(userId, fileId, {
+        title,
+        performer: uploader,
+        duration: realDuration
+      });
+      
+      console.log(`[DownloadForUser] ✅ Успешно (${method}): "${title}" → User ${userId}`);
+      
+      return { success: true, fileId, title, method };
+    } else {
+      throw new Error('STORAGE_NOT_CONFIGURED');
+    }
+    
+  } catch (err) {
+    console.error(`[DownloadForUser] ❌ Ошибка:`, err.message);
+    throw err;
+  } finally {
+    if (tempFilePath && fs.existsSync(tempFilePath)) {
+      try { fs.unlinkSync(tempFilePath); } catch (e) {}
+    }
+  }
+}
 
 // =====================================================================================
 //                             ГЛАВНЫЙ ПРОЦЕССОР ЗАГРУЗКИ
