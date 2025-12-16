@@ -185,25 +185,34 @@
                 </button>
               </div>
             </td>
-            <td>
-              <div class="btn-group btn-group-sm" role="group">
-                <button type="button" class="btn btn-outline-primary" 
-                        onclick="retryDownload('<%= track.id %>', '<%= track.url %>')" 
-                        title="Сбросить кэш">
-                  🔄
-                </button>
-                <button type="button" class="btn btn-outline-success" 
-        onclick="markFixed('<%= track.id %>', '<%= track.url %>')" 
-        title="Исправлено">
-  ✅
-</button>
-                <button type="button" class="btn btn-outline-danger" 
-                        onclick="deleteTrack('<%= track.id %>')" 
-                        title="Удалить">
-                  🗑️
-                </button>
-              </div>
-            </td>
+<td>
+  <div class="btn-group btn-group-sm" role="group">
+    <!-- НОВАЯ КНОПКА: Исправить и отправить -->
+    <button type="button" class="btn btn-outline-primary" 
+            onclick="fixAndSend('<%= track.id %>', '<%= track.url %>', '<%= track.user_id %>')" 
+            title="Скачать и отправить пользователю">
+      📤
+    </button>
+    <!-- Сбросить кэш -->
+    <button type="button" class="btn btn-outline-secondary" 
+            onclick="retryDownload('<%= track.id %>', '<%= track.url %>')" 
+            title="Сбросить кэш">
+      🔄
+    </button>
+    <!-- Просто убрать из списка -->
+    <button type="button" class="btn btn-outline-success" 
+            onclick="markFixed('<%= track.id %>', '<%= track.url %>')" 
+            title="Убрать из списка">
+      ✅
+    </button>
+    <!-- Удалить запись -->
+    <button type="button" class="btn btn-outline-danger" 
+            onclick="deleteTrack('<%= track.id %>')" 
+            title="Удалить">
+      🗑️
+    </button>
+  </div>
+</td>
           </tr>
         <% }) %>
       </tbody>
