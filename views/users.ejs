@@ -4,64 +4,82 @@
 
 <style>
   /* === БАЗОВЫЕ СТИЛИ СТРАНИЦЫ === */
-  .hx-indicator {
-    display: none;
+  .hx-indicator { display: none; }
+  .hx-request .hx-indicator { display: inline-block !important; }
+  .spinner-sm { width: 1rem; height: 1rem; border-width: .15rem; }
+  .form-section-title { font-size: .9rem; color: #6c757d; }
+
+  /* === КАРТОЧКИ СТАТИСТИКИ === */
+  .stat-card {
+    background: var(--bs-card-bg);
+    border: 1px solid var(--bs-border-color);
+    border-radius: 10px;
+    padding: 1rem 1.25rem;
+    text-align: center;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
   }
-  .hx-request .hx-indicator {
-    display: inline-block !important;
+  .stat-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
   }
-  .spinner-sm {
-    width: 1rem; height: 1rem; border-width: .15rem;
+  .stat-card .stat-value {
+    font-size: 1.75rem;
+    font-weight: 700;
+    line-height: 1.2;
   }
-  .form-section-title {
-    font-size: .9rem; color: #6c757d;
+  .stat-card .stat-label {
+    font-size: 0.8rem;
+    color: #6c757d;
+    margin-top: 0.25rem;
   }
 
-  /* === СТИЛИ ТАБЛИЦЫ (ПЕРЕНЕСЕНО ИЗ PARTIAL) === */
+  /* === СТИЛИ ТАБЛИЦЫ === */
+  .table { font-size: 0.9rem; }
+  .table th { font-weight: 600; white-space: nowrap; }
   
   /* Адаптив для мобильных */
-  @media (max-width: 768px) {
+  @media (max-width: 992px) {
     .table thead { display: none; }
     .table tbody tr {
-      display: block; margin-bottom: 1.5rem; border: 1px solid var(--bs-border-color);
-      border-radius: 8px; padding: 12px; background-color: var(--bs-card-bg);
+      display: block; margin-bottom: 1rem; border: 1px solid var(--bs-border-color);
+      border-radius: 10px; padding: 1rem; background-color: var(--bs-card-bg);
     }
     .table tbody td {
       display: flex; justify-content: space-between; align-items: center;
-      padding: 8px 4px; border: none; border-bottom: 1px solid var(--bs-border-color);
+      padding: 0.5rem 0; border: none; border-bottom: 1px solid var(--bs-border-color);
     }
     .table tbody td:last-child { border-bottom: none; }
     .table tbody td::before {
-      content: attr(data-label); font-weight: 600; margin-right: 10px; flex-shrink: 0;
+      content: attr(data-label); font-weight: 600; margin-right: 10px; flex-shrink: 0; color: #6c757d;
     }
-    .table tbody td > * { text-align: right; }
-    .tariff-form { width: 100%; flex-direction: column; }
+    .tariff-form { width: 100%; flex-direction: column; gap: 0.5rem !important; }
     .tariff-form select, .tariff-form input { width: 100% !important; }
-    .btn-group, .btn-group .dropdown-toggle { width: 100%; }
+    .btn-group { width: 100%; }
+    .stat-card .stat-value { font-size: 1.5rem; }
   }
 
-  /* Анимации и элементы интерфейса */
+  /* Анимации */
   .htmx-swapping { opacity: 0; transition: opacity 0.2s ease-out; }
-  
-  .badge { font-size: 0.8rem; padding: 4px 10px; font-weight: 600; }
+  .badge { font-size: 0.75rem; padding: 4px 8px; font-weight: 600; }
 
-  /* Dropdown меню */
+  /* Dropdown */
   .dropdown-menu {
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
     border: 1px solid var(--bs-border-color);
     border-radius: 8px;
   }
-  .dropdown-item { padding: 10px 16px; transition: background-color 0.15s ease; }
+  .dropdown-item { padding: 8px 14px; transition: background-color 0.15s ease; }
   .dropdown-item:hover { background-color: var(--table-row-hover); }
-  .dropdown-item i { width: 18px; display: inline-block; }
 
-  /* Форма тарифа и пагинация */
-  .tariff-form { gap: 8px; }
-  .tariff-form .form-select, .tariff-form .form-control { font-size: 0.85rem; }
+  /* Форма тарифа */
+  .tariff-form { gap: 6px; }
+  .tariff-form .form-select, .tariff-form .form-control { font-size: 0.8rem; padding: 0.25rem 0.5rem; }
 
+  /* Сортировка */
   thead th a { display: flex; align-items: center; gap: 4px; }
   thead th a:hover { color: var(--bs-primary-color) !important; }
 
+  /* Пагинация */
   .pagination { margin-top: 1.5rem; margin-bottom: 1rem; }
   .page-link {
     color: var(--bs-body-color); background-color: var(--bs-card-bg);
@@ -71,25 +89,47 @@
     color: #ffffff; background-color: var(--bs-primary-color);
     border-color: var(--bs-primary-color);
   }
-  .page-item.active .page-link {
-    background-color: var(--bs-primary-color); border-color: var(--bs-primary-color);
-  }
-  .page-item.disabled .page-link {
-    background-color: var(--bs-card-bg); border-color: var(--bs-border-color); opacity: 0.5;
-  }
+  .page-item.active .page-link { background-color: var(--bs-primary-color); border-color: var(--bs-primary-color); }
+  .page-item.disabled .page-link { background-color: var(--bs-card-bg); border-color: var(--bs-border-color); opacity: 0.5; }
 </style>
 
 <script src="https://unpkg.com/htmx.org@1.9.10"></script>
 
 <!-- Дальше идет ваш HTML (div, h1, form...) без изменений -->
 
-<div class="d-flex justify-content-between align-items-center mb-3">
-  <h1 class="h3 mb-0">Пользователи (<%= totalUsers %>)</h1>
-
-  <!-- Индикатор HTMX -->
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <h1 class="h3 mb-0">👥 Пользователи</h1>
   <div class="hx-indicator">
     <div class="spinner-border text-primary spinner-sm" role="status">
       <span class="visually-hidden">Загрузка...</span>
+    </div>
+  </div>
+</div>
+
+<!-- Карточки статистики -->
+<div class="row g-3 mb-4">
+  <div class="col-6 col-md-3">
+    <div class="stat-card">
+      <div class="stat-value text-primary"><%= typeof totalUsers !== 'undefined' ? totalUsers.toLocaleString('ru-RU') : '—' %></div>
+      <div class="stat-label">Всего</div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="stat-card">
+      <div class="stat-value text-success"><%= typeof activeUsers !== 'undefined' ? activeUsers.toLocaleString('ru-RU') : '—' %></div>
+      <div class="stat-label">Активных</div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="stat-card">
+      <div class="stat-value text-warning"><%= typeof premiumUsers !== 'undefined' ? premiumUsers.toLocaleString('ru-RU') : '—' %></div>
+      <div class="stat-label">Премиум</div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="stat-card">
+      <div class="stat-value text-info"><%= typeof newUsersToday !== 'undefined' ? newUsersToday.toLocaleString('ru-RU') : '—' %></div>
+      <div class="stat-label">Новых сегодня</div>
     </div>
   </div>
 </div>
