@@ -192,6 +192,11 @@
             </td>
             <td>
               <div class="btn-group btn-group-sm" role="group">
+                <button type="button" class="btn btn-outline-warning" 
+                        onclick="fixAndSend('<%= track.id %>', '<%= track.url %>', '<%= track.user_id %>')" 
+                        title="Исправить и отправить пользователю">
+                  📤
+                </button>
                 <button type="button" class="btn btn-outline-primary" 
                         onclick="retryDownload('<%= track.id %>', '<%= track.url %>')" 
                         title="Сбросить кэш">
@@ -423,6 +428,38 @@ async function markFixed(id, url) {
     }
   } catch (err) {
     showToast('❌ Ошибка', 'Ошибка сервера', 'danger');
+  }
+}
+
+async function fixAndSend(id, url, userId) {
+  if (!confirm('Исправить трек и отправить пользователю?')) return;
+  
+  const btn = event.target;
+  const originalText = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '⏳';
+  
+  try {
+    const response = await fetch('/api/broken-tracks/fix-and-send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: id, url: url, userId: userId })
+    });
+    
+    const result = await response.json();
+    
+    if (result.success) {
+      showToast('✅ Отправлено', result.message || 'Трек отправлен пользователю', 'success');
+      removeRow(id);
+    } else {
+      showToast('❌ Ошибка', result.error || 'Не удалось отправить', 'danger');
+      btn.disabled = false;
+      btn.innerHTML = originalText;
+    }
+  } catch (err) {
+    showToast('❌ Ошибка', 'Ошибка сервера', 'danger');
+    btn.disabled = false;
+    btn.innerHTML = originalText;
   }
 }
 
