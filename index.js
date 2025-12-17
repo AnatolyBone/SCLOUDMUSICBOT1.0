@@ -69,7 +69,7 @@ import {
   WEBHOOK_PATH, STORAGE_CHANNEL_ID, BROADCAST_STORAGE_ID
 } from './config.js';
 import { loadTexts, setText, getEditableTexts } from './config/texts.js';
-import { downloadQueue, initializeDownloadManager, downloadTrackForUser } from './services/downloadManager.js';
+import { downloadQueue, initializeDownloadManager } from './services/downloadManager.js';
 
 const app = express();
 
@@ -384,69 +384,20 @@ app.post('/broken-tracks/fix', requireAuth, async (req, res) => {
   }
 });
 
-// ===== API ENDPOINTS ДЛЯ AJAX (Проблемные треки) =====
-// ===== API: ИСПРАВИТЬ И ОТПРАВИТЬ ПОЛЬЗОВАТЕЛЮ =====
-app.post('/api/broken-tracks/fix-and-send', requireAuth, async (req, res) => {
-  try {
-    const { id, url, userId } = req.body;
-    
-    if (!url || !userId) {
-      return res.status(400).json({ success: false, error: 'URL или userId не указаны' });
-    }
-    
-    console.log(`[Admin] Исправляю и отправляю: ${url} → User ${userId}`);
-    
-    // Отправляем ответ сразу (чтобы не ждать)
-    res.json({ success: true, message: 'Загрузка начата...' });
-    
-    // Скачиваем и отправляем в фоне
-    try {
-      const result = await downloadTrackForUser(url, parseInt(userId, 10));
-      
-      if (result.success) {
-        // Удаляем из списка проблемных
-        await resolveBrokenTrack(id);
-        console.log(`[Admin] ✅ Трек отправлен пользователю ${userId}`);
-      }
-    } catch (downloadErr) {
-      console.error(`[Admin] ❌ Не удалось скачать:`, downloadErr.message);
-      
-      // Уведомляем пользователя об ошибке
-      try {
-        await bot.telegram.sendMessage(userId, 
-          `❌ Администратор попытался исправить ваш трек, но загрузка не удалась.\n\nПопробуйте отправить ссылку еще раз.`
-        );
-      } catch (e) {}
-    }
-    
-  } catch (e) {
-    console.error('[API] fix-and-send error:', e);
-    res.status(500).json({ success: false, error: e.message });
-  }
-});
-
-// Обновленный API: Просто пометить исправленным (без отправки)
+// API: Пометить исправленным
 app.post('/api/broken-tracks/fix', requireAuth, async (req, res) => {
   try {
     const { id, url } = req.body;
-    
-    console.log(`[Admin] Помечаю как исправленный: id=${id}`);
-    
     if (url) await deleteCachedTrack(url);
-    const success = await resolveBrokenTrack(id);
-    
-    if (success) {
-      res.json({ success: true });
-    } else {
-      res.status(500).json({ success: false, error: 'Не удалось обновить' });
-    }
+    await resolveBrokenTrack(id);
+    res.json({ success: true });
   } catch (e) {
-    console.error('[API] fix error:', e);
+    console.error('[API BrokenTracks] fix error:', e);
     res.status(500).json({ success: false, error: e.message });
   }
 });
 
-// API: Повторить (сбросить кэш)
+// API: Повторить загрузку (сбросить кэш)
 app.post('/api/broken-tracks/retry', requireAuth, async (req, res) => {
   try {
     const { id, url } = req.body;
@@ -455,24 +406,30 @@ app.post('/api/broken-tracks/retry', requireAuth, async (req, res) => {
       return res.status(400).json({ success: false, error: 'URL не указан' });
     }
     
+    // Увеличиваем счетчик попыток
     await incrementBrokenTrackRetry(id);
+    
+    // Удаляем старый кэш
     await deleteCachedTrack(url);
+    
+    // Помечаем как исправленное
     await resolveBrokenTrack(id);
     
-    res.json({ success: true, message: 'Кэш очищен' });
+    res.json({ 
+      success: true, 
+      message: 'Кэш сброшен. Трек будет скачан заново при следующем запросе.' 
+    });
   } catch (e) {
-    console.error('[API] retry error:', e);
+    console.error('[API BrokenTracks] retry error:', e);
     res.status(500).json({ success: false, error: e.message });
   }
 });
 
-// API: Удалить одну запись (только из списка, кэш не трогаем)
+// API: Удалить одну запись
 app.delete('/api/broken-tracks/:id', requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
-    console.log(`[Admin] Удаление записи: id=${id}`);
-    
-    await deleteBrokenTrack(parseInt(id, 10));
+    await deleteBrokenTrack(parseInt(id));
     res.json({ success: true });
   } catch (e) {
     console.error('[API BrokenTracks] delete error:', e);
@@ -489,9 +446,7 @@ app.post('/api/broken-tracks/bulk-delete', requireAuth, async (req, res) => {
       return res.status(400).json({ success: false, error: 'Не выбраны записи' });
     }
     
-    console.log(`[Admin] Массовое удаление: ${ids.length} записей`);
-    
-    const count = await deleteBrokenTracksBulk(ids.map(id => parseInt(id, 10)));
+    const count = await deleteBrokenTracksBulk(ids.map(id => parseInt(id)));
     res.json({ success: true, deleted: count });
   } catch (e) {
     console.error('[API BrokenTracks] bulk-delete error:', e);
@@ -774,7 +729,29 @@ app.get('/dashboard', requireAuth, async (req, res) => {
         searchQuery: q, statusFilter: status, page: parseInt(page), limit: parseInt(limit), sortBy: sort, sortOrder: order
       });
       const queryParams = { q, status, page, limit, sort, order };
-      res.render('users', { title: 'Пользователи', page: 'users', users, totalUsers, totalPages, currentPage: parseInt(page), limit: parseInt(limit), searchQuery: q, statusFilter: status, queryParams });
+      
+      // Статистика для карточек
+      const [activeUsers, premiumUsers, newUsersToday] = await Promise.all([
+        db.query('SELECT COUNT(*) FROM users WHERE active = true').then(r => parseInt(r.rows[0]?.count || 0)),
+        db.query('SELECT COUNT(*) FROM users WHERE premium_until > NOW()').then(r => parseInt(r.rows[0]?.count || 0)),
+        db.getNewUsersCount(1)
+      ]);
+      
+      res.render('users', { 
+        title: 'Пользователи', 
+        page: 'users', 
+        users, 
+        totalUsers, 
+        totalPages, 
+        currentPage: parseInt(page), 
+        limit: parseInt(limit), 
+        searchQuery: q, 
+        statusFilter: status, 
+        queryParams,
+        activeUsers,
+        premiumUsers,
+        newUsersToday
+      });
     } catch (error) {
       console.error('Ошибка на странице пользователей:', error);
       res.status(500).send('Ошибка сервера');
@@ -1190,3 +1167,4 @@ app.post('/tariffs/reset-others', requireAuth, async (req, res) => {
 
 // Запускаем приложение
 startApp();
+
