@@ -1361,17 +1361,19 @@ export async function getTopRecentSearches(limit = 5) {
 }
 
 export async function getNewUsersCount(days = 1) {
-  const date = new Date();
-  date.setDate(date.getDate() - days);
-  const { count, error } = await supabase
-    .from('users')
-    .select('*', { count: 'exact', head: true })
-    .gte('created_at', date.toISOString());
-  if (error) {
-    console.error(`[DB] Ошибка получения количества новых пользователей за ${days} дней:`, error.message);
+  try {
+    const { rows } = await query(`
+      SELECT COUNT(*) as count 
+      FROM users 
+      WHERE created_at >= NOW() - INTERVAL '${days} days'
+    `);
+    const count = parseInt(rows[0]?.count || 0);
+    console.log(`[DB] Новых пользователей за ${days} дн.: ${count}`);
+    return count;
+  } catch (error) {
+    console.error(`[DB] Ошибка getNewUsersCount(${days}):`, error.message);
     return 0;
   }
-  return count;
 }
 
 export async function getUserActivityByDayHour(days = 30) {
@@ -1739,20 +1741,17 @@ export async function cleanUpDatabase() {
  */
 export async function logBrokenTrack(url, title, userId, reason) {
   try {
-    const { error } = await supabase
-      .from('failed_tracks')
-      .upsert({ 
-        url: url, 
-        title: title || 'Unknown', 
-        user_id: userId, 
-        reason: reason,
-        is_fixed: false,
-        created_at: new Date()
-      }, { onConflict: 'url' });
-
-    if (error) console.error('[DB] Ошибка записи broken track:', error.message);
-    else console.log(`[DB] 📝 Трек добавлен в реестр ошибок: ${title}`);
+    await query(`
+      INSERT INTO failed_tracks (url, title, user_id, reason, is_fixed, created_at)
+      VALUES ($1, $2, $3, $4, false, NOW())
+      ON CONFLICT (url) DO UPDATE SET
+        title = EXCLUDED.title,
+        user_id = EXCLUDED.user_id,
+        reason = EXCLUDED.reason,
+        created_at = NOW()
+    `, [url, title || 'Unknown', userId, reason]);
     
+    console.log(`[DB] 📝 Трек добавлен в реестр ошибок: ${title}`);
   } catch (e) {
     console.error('[DB] Ошибка logBrokenTrack:', e.message);
   }
@@ -1762,61 +1761,29 @@ export async function logBrokenTrack(url, title, userId, reason) {
  * Получение списка проблемных треков для админки
  */
 export async function getBrokenTracks(limit = 50) {
-  const { data, error } = await supabase
-    .from('failed_tracks')
-    .select('*')
-    .eq('is_fixed', false)
-    .order('created_at', { ascending: false })
-    .limit(limit);
-
-  if (error) {
-    console.error('[DB] Ошибка получения broken tracks:', error);
+  try {
+    const { rows } = await query(`
+      SELECT * FROM failed_tracks 
+      WHERE is_fixed = false 
+      ORDER BY created_at DESC 
+      LIMIT $1
+    `, [limit]);
+    return rows || [];
+  } catch (error) {
+    console.error('[DB] Ошибка получения broken tracks:', error.message);
     return [];
   }
-  return data;
 }
 
 /**
- * Пометить трек как исправленный (удаляет из списка)
- * @param {number|string} id - ID записи в failed_tracks
- * @returns {Promise<boolean>} - true если успешно
+ * Пометить трек как исправленный
  */
 export async function resolveBrokenTrack(id) {
   try {
-    // Парсим id в число
-    const numId = parseInt(id, 10);
-    
-    if (isNaN(numId)) {
-      console.error('[DB] resolveBrokenTrack: невалидный id:', id, typeof id);
-      return false;
-    }
-    
-    console.log(`[DB] resolveBrokenTrack: удаляю запись id=${numId}`);
-    
-    // Вариант 1: УДАЛЯЕМ полностью (рекомендую - чище)
-    const { data, error } = await supabase
-      .from('failed_tracks')
-      .delete()
-      .eq('id', numId)
-      .select();
-    
-    // Вариант 2: Помечаем is_fixed = true (раскомментируй если хочешь хранить историю)
-    // const { data, error } = await supabase
-    //   .from('failed_tracks')
-    //   .update({ is_fixed: true, updated_at: new Date().toISOString() })
-    //   .eq('id', numId)
-    //   .select();
-
-    if (error) {
-      console.error('[DB] Ошибка resolveBrokenTrack:', error);
-      return false;
-    }
-    
-    console.log(`[DB] ✅ Трек ${numId} успешно обработан. Затронуто записей:`, data?.length || 0);
+    await query(`UPDATE failed_tracks SET is_fixed = true WHERE id = $1`, [id]);
     return true;
-    
-  } catch (e) {
-    console.error('[DB] resolveBrokenTrack exception:', e.message);
+  } catch (error) {
+    console.error('[DB] Ошибка resolveBrokenTrack:', error.message);
     return false;
   }
 }
@@ -1831,55 +1798,38 @@ export async function getBrokenTracksWithPagination({ page = 1, limit = 25 } = {
   const offset = (page - 1) * limit;
   
   try {
-    // Общее количество неисправленных
-    const { count: totalTracks, error: countError } = await supabase
-      .from('failed_tracks')
-      .select('*', { count: 'exact', head: true })
-      .eq('is_fixed', false);
+    // Общее количество неисправленных (прямой SQL обходит RLS)
+    const countResult = await query(`
+      SELECT COUNT(*) as count FROM failed_tracks WHERE is_fixed = false
+    `);
+    const totalTracks = parseInt(countResult.rows[0]?.count || 0);
     
-    if (countError) throw countError;
+    console.log(`[DB] Битых треков найдено: ${totalTracks}`);
     
-    // Треки с пагинацией
-    const { data: tracks, error } = await supabase
-      .from('failed_tracks')
-      .select('*')
-      .eq('is_fixed', false)
-      .order('created_at', { ascending: false })
-      .range(offset, offset + limit - 1);
+    // Треки с пагинацией и информацией о пользователях
+    const tracksResult = await query(`
+      SELECT 
+        ft.*,
+        u.username,
+        u.first_name
+      FROM failed_tracks ft
+      LEFT JOIN users u ON ft.user_id = u.id
+      WHERE ft.is_fixed = false
+      ORDER BY ft.created_at DESC
+      LIMIT $1 OFFSET $2
+    `, [limit, offset]);
     
-    if (error) throw error;
-    
-    // Получаем информацию о пользователях отдельно
-    const userIds = [...new Set(tracks.map(t => t.user_id).filter(Boolean))];
-    
-    let usersMap = {};
-    if (userIds.length > 0) {
-      const { data: users } = await supabase
-        .from('users')
-        .select('id, username, first_name')
-        .in('id', userIds);
-      
-      if (users) {
-        users.forEach(u => { usersMap[u.id] = u; });
-      }
-    }
-    
-    // Добавляем инфо о пользователях к трекам
-    const tracksWithUsers = tracks.map(track => ({
-      ...track,
-      username: usersMap[track.user_id]?.username || null,
-      first_name: usersMap[track.user_id]?.first_name || null
-    }));
+    const tracks = tracksResult.rows || [];
     
     return {
-      tracks: tracksWithUsers,
-      totalTracks: totalTracks || 0,
-      totalPages: Math.ceil((totalTracks || 0) / limit),
+      tracks,
+      totalTracks,
+      totalPages: Math.ceil(totalTracks / limit),
       currentPage: page
     };
     
   } catch (e) {
-    console.error('[DB] getBrokenTracksWithPagination error:', e);
+    console.error('[DB] getBrokenTracksWithPagination error:', e.message);
     return {
       tracks: [],
       totalTracks: 0,
@@ -1894,17 +1844,12 @@ export async function getBrokenTracksWithPagination({ page = 1, limit = 25 } = {
  */
 export async function deleteBrokenTrack(id) {
   try {
-    const { data, error } = await supabase
-      .from('failed_tracks')
-      .delete()
-      .eq('id', id)
-      .select()
-      .single();
-    
-    if (error) throw error;
-    return data;
+    const { rows } = await query(`
+      DELETE FROM failed_tracks WHERE id = $1 RETURNING *
+    `, [id]);
+    return rows[0] || null;
   } catch (e) {
-    console.error('[DB] deleteBrokenTrack error:', e);
+    console.error('[DB] deleteBrokenTrack error:', e.message);
     return null;
   }
 }
@@ -1916,16 +1861,13 @@ export async function deleteBrokenTracksBulk(ids) {
   if (!ids || ids.length === 0) return 0;
   
   try {
-    const { data, error } = await supabase
-      .from('failed_tracks')
-      .delete()
-      .in('id', ids)
-      .select();
-    
-    if (error) throw error;
-    return data?.length || 0;
+    const placeholders = ids.map((_, i) => `$${i + 1}`).join(',');
+    const { rowCount } = await query(`
+      DELETE FROM failed_tracks WHERE id IN (${placeholders})
+    `, ids);
+    return rowCount || 0;
   } catch (e) {
-    console.error('[DB] deleteBrokenTracksBulk error:', e);
+    console.error('[DB] deleteBrokenTracksBulk error:', e.message);
     return 0;
   }
 }
@@ -1935,27 +1877,16 @@ export async function deleteBrokenTracksBulk(ids) {
  */
 export async function incrementBrokenTrackRetry(id) {
   try {
-    // Сначала получаем текущее значение
-    const { data: current } = await supabase
-      .from('failed_tracks')
-      .select('retry_count')
-      .eq('id', id)
-      .single();
-    
-    const newCount = (current?.retry_count || 0) + 1;
-    
-    const { error } = await supabase
-      .from('failed_tracks')
-      .update({ 
-        retry_count: newCount,
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', id);
-    
-    if (error) throw error;
-    return newCount;
+    const { rows } = await query(`
+      UPDATE failed_tracks 
+      SET retry_count = COALESCE(retry_count, 0) + 1,
+          updated_at = NOW()
+      WHERE id = $1
+      RETURNING retry_count
+    `, [id]);
+    return rows[0]?.retry_count || 0;
   } catch (e) {
-    console.error('[DB] incrementBrokenTrackRetry error:', e);
+    console.error('[DB] incrementBrokenTrackRetry error:', e.message);
     return 0;
   }
 }
