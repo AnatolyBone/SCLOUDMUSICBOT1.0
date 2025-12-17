@@ -1,260 +1,534 @@
-<% // views/expiring-users.ejs %>
+// =====================================================================================
+//      СКОПИРУЙТЕ ВЕСЬ ЭТОТ КОД И ПОЛНОСТЬЮ ЗАМЕНИТЕ ИМ СОДЕРЖИМОЕ
+//                       ФАЙЛА services/downloadManager.js
+// =====================================================================================
 
-<%
-// Хелперы
-function tariffLabel(limit) {
-  if (limit >= 1000) return 'Unlimited';
-  if (limit === 100) return 'Pro';
-  if (limit === 30) return 'Plus';
-  return 'Free';
-}
+import { STORAGE_CHANNEL_ID, CHANNEL_USERNAME, PROXY_URL } from '../config.js';
+import { Markup } from 'telegraf';
+import path from 'path';
+import ffmpegPath from 'ffmpeg-static';
+import fs from 'fs';
+import scdl from 'soundcloud-downloader';
+import os from 'os';
+import { fileURLToPath } from 'url';
+import ytdl from 'youtube-dl-exec';
+import axios from 'axios';
 
-function tariffBadge(limit) {
-  if (limit >= 1000) return 'bg-primary';
-  if (limit === 100) return 'bg-warning text-dark';
-  if (limit === 30) return 'bg-info text-dark';
-  return 'bg-secondary';
-}
+import { bot } from '../bot.js';
+import { T } from '../config/texts.js';
+import { TaskQueue } from '../lib/TaskQueue.js';
+import * as db from '../db.js';
 
-function formatDate(s) {
-  if (!s) return '—';
+// Папка для обложек
+const THUMB_DIR = path.join(os.tmpdir(), 'sc-thumbs');
+if (!fs.existsSync(THUMB_DIR)) fs.mkdirSync(THUMB_DIR, { recursive: true });
+
+/**
+ * Скачивает обложку и возвращает путь к файлу или null
+ */
+async function downloadThumbnail(thumbnailUrl) {
+  if (!thumbnailUrl) return null;
   try {
-    const d = new Date(s);
-    if (isNaN(d.getTime())) return '—';
-    return d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    const thumbPath = path.join(THUMB_DIR, `thumb_${Date.now()}.jpg`);
+    const response = await axios.get(thumbnailUrl, { responseType: 'arraybuffer', timeout: 10000 });
+    fs.writeFileSync(thumbPath, response.data);
+    return thumbPath;
   } catch (e) {
-    return '—';
+    console.warn('[Thumbnail] Не удалось скачать обложку:', e.message);
+    return null;
   }
 }
 
-function daysUntil(s) {
-  if (!s) return null;
-  const now = new Date();
-  const target = new Date(s);
-  const diff = Math.ceil((target - now) / (1000 * 60 * 60 * 24));
-  return diff;
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Папка для временных файлов (нужна для yt-dlp fallback)
+const TEMP_DIR = path.join(os.tmpdir(), 'sc-cache');
+if (!fs.existsSync(TEMP_DIR)) fs.mkdirSync(TEMP_DIR, { recursive: true });
+
+const MAX_CONCURRENT_DOWNLOADS = parseInt(process.env.MAX_CONCURRENT_DOWNLOADS, 10) || 2;
+
+// Настройки для yt-dlp
+const YTDL_COMMON = {
+  'format': 'bestaudio[ext=mp3]/bestaudio[ext=opus]/bestaudio',
+  'ffmpeg-location': ffmpegPath,
+  'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36',
+  proxy: PROXY_URL,
+  retries: 3,
+  'socket-timeout': 120,
+  'no-warnings': true,
+};
+
+// Базовые опции для получения метаданных/скачиваний через yt-dlp
+const YTDL_OPTIONS = {
+  ...YTDL_COMMON,
+  'no-playlist': true,
+  'ignore-errors': true
+};
+
+// --- Вспомогательные функции ---
+
+function sanitizeFilename(name) {
+  if (!name || typeof name !== 'string') return 'track';
+  return name.replace(/[<>:"/\\|?*]+/g, '').trim() || 'track';
 }
-%>
 
-<%- contentFor('styles') %>
-<style>
-  .stat-card {
-    background: var(--bs-card-bg);
-    border: 1px solid var(--bs-border-color);
-    border-radius: 10px;
-    padding: 1rem;
-    text-align: center;
+function getCacheKey(meta, fallbackUrl) {
+  if (meta?.id) return `sc:${meta.id}`;
+  return fallbackUrl || 'unknown';
+}
+
+async function safeSendMessage(userId, text, extra = {}) {
+  try {
+    return await bot.telegram.sendMessage(userId, text, extra);
+  } catch (e) {
+    // Если юзер заблокировал бота (403)
+    if (e.response?.error_code === 403) {
+      await db.updateUserField(userId, 'active', false).catch(() => {});
+    }
+    return null;
   }
-  .stat-card .stat-value {
-    font-size: 1.5rem;
-    font-weight: 700;
-  }
-  .stat-card .stat-label {
-    font-size: 0.8rem;
-    color: #6c757d;
-  }
-  .days-badge {
-    min-width: 60px;
-    display: inline-block;
-  }
-</style>
+}
 
-<%- contentFor('body') %>
+async function incrementDownload(userId, trackTitle, fileId, cacheKey) {
+  return await db.incrementDownloadsAndSaveTrack(userId, trackTitle, fileId, cacheKey);
+}
 
-<div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
-  <h1 class="h2">⏳ Истекающие подписки</h1>
-</div>
+async function getUserUsage(userId) {
+  return await db.getUser(userId);
+}
 
-<!-- Карточки статистики -->
-<div class="row g-3 mb-4">
-  <div class="col-6 col-md-3">
-    <div class="stat-card">
-      <div class="stat-value text-danger"><%= typeof expiringToday !== 'undefined' ? expiringToday : 0 %></div>
-      <div class="stat-label">Сегодня</div>
-    </div>
-  </div>
-  <div class="col-6 col-md-3">
-    <div class="stat-card">
-      <div class="stat-value text-warning"><%= typeof expiring3Days !== 'undefined' ? expiring3Days : 0 %></div>
-      <div class="stat-label">3 дня</div>
-    </div>
-  </div>
-  <div class="col-6 col-md-3">
-    <div class="stat-card">
-      <div class="stat-value text-info"><%= typeof expiring7Days !== 'undefined' ? expiring7Days : 0 %></div>
-      <div class="stat-label">7 дней</div>
-    </div>
-  </div>
-  <div class="col-6 col-md-3">
-    <div class="stat-card">
-      <div class="stat-value text-primary"><%= typeof totalExpiring !== 'undefined' ? totalExpiring : (users ? users.length : 0) %></div>
-      <div class="stat-label">Всего</div>
-    </div>
-  </div>
-</div>
+// Преобразует данные от ytdl/scdl в наш формат
+function extractMetadataFromInfo(info) {
+  const e = Array.isArray(info?.entries) ? info.entries[0] : info;
+  if (!e) return null;
+  return {
+    id: e.id,
+    webpage_url: e.webpage_url || e.url,
+    title: sanitizeFilename(e.title || 'Unknown Title'),
+    uploader: e.uploader || 'Unknown Artist',
+    duration: e.duration,
+    thumbnail: e.thumbnail,
+  };
+}
 
-<!-- Фильтры -->
-<form id="filterForm" class="row g-3 mb-4">
-  <div class="col-md-3">
-    <label class="form-label small text-muted">Поиск</label>
-    <input type="text" class="form-control" id="searchInput" placeholder="ID, имя, @username...">
-  </div>
-  <div class="col-md-2">
-    <label class="form-label small text-muted">Тариф</label>
-    <select class="form-select" id="tariffFilter">
-      <option value="">Все</option>
-      <option value="Plus">Plus</option>
-      <option value="Pro">Pro</option>
-      <option value="Unlimited">Unlimited</option>
-    </select>
-  </div>
-  <div class="col-md-2">
-    <label class="form-label small text-muted">Истекает через</label>
-    <select class="form-select" id="daysFilter">
-      <option value="">Все</option>
-      <option value="1">Сегодня</option>
-      <option value="3">До 3 дней</option>
-      <option value="7">До 7 дней</option>
-    </select>
-  </div>
-  <div class="col-md-2 d-flex align-items-end">
-    <button type="button" class="btn btn-outline-secondary w-100" onclick="resetFilters()">Сбросить</button>
-  </div>
-</form>
-
-<div class="card shadow-sm">
-  <div class="card-body p-0">
-    <div class="table-responsive">
-      <table class="table table-hover mb-0 align-middle" id="expiringTable">
-        <thead class="table-light">
-          <tr>
-            <th>ID</th>
-            <th>Пользователь</th>
-            <th>Тариф</th>
-            <th>Истекает</th>
-            <th>Осталось</th>
-            <th>Действия</th>
-          </tr>
-        </thead>
-        <tbody>
-          <% if (typeof users !== 'undefined' && users.length > 0) { %>
-            <% users.forEach(u => { 
-              const days = daysUntil(u.premium_until);
-              const tariff = tariffLabel(u.premium_limit);
-            %>
-              <tr data-search="<%= (u.id + ' ' + (u.first_name || '') + ' ' + (u.username || '')).toLowerCase() %>"
-                  data-tariff="<%= tariff %>"
-                  data-days="<%= days %>">
-                <td><a href="/user/<%= u.id %>" class="font-monospace"><%= u.id %></a></td>
-                <td>
-                  <div class="fw-semibold"><%= u.first_name || 'Без имени' %></div>
-                  <div class="text-muted small"><%= u.username ? '@'+u.username : '' %></div>
-                </td>
-                <td>
-                  <span class="badge <%= tariffBadge(u.premium_limit) %>"><%= tariff %></span>
-                </td>
-                <td class="text-nowrap"><%= formatDate(u.premium_until) %></td>
-                <td>
-                  <% if (days !== null) { %>
-                    <% if (days <= 0) { %>
-                      <span class="badge bg-danger days-badge">Истёк</span>
-                    <% } else if (days === 1) { %>
-                      <span class="badge bg-danger days-badge">Сегодня</span>
-                    <% } else if (days <= 3) { %>
-                      <span class="badge bg-warning text-dark days-badge"><%= days %> дн.</span>
-                    <% } else { %>
-                      <span class="badge bg-info text-dark days-badge"><%= days %> дн.</span>
-                    <% } %>
-                  <% } else { %>
-                    <span class="text-muted">—</span>
-                  <% } %>
-                </td>
-                <td>
-                  <div class="btn-group btn-group-sm">
-                    <a href="/user/<%= u.id %>" class="btn btn-outline-primary" title="Профиль">
-                      <i class="bi bi-person"></i>
-                    </a>
-                    <form action="/set-tariff" method="POST" class="d-inline">
-                      <input type="hidden" name="userId" value="<%= u.id %>">
-                      <input type="hidden" name="limit" value="<%= u.premium_limit %>">
-                      <input type="hidden" name="days" value="30">
-                      <input type="hidden" name="applyMode" value="extend">
-                      <button type="submit" class="btn btn-outline-success" title="Продлить на 30 дней"
-                              onclick="return confirm('Продлить подписку на 30 дней?')">
-                        <i class="bi bi-plus-circle"></i>
-                      </button>
-                    </form>
-                  </div>
-                </td>
-              </tr>
-            <% }) %>
-          <% } else { %>
-            <tr>
-              <td colspan="6" class="text-center text-muted py-5">
-                <i class="bi bi-check-circle fs-1 text-success opacity-50"></i>
-                <p class="h5 mt-3">Нет пользователей с истекающей подпиской</p>
-                <p class="mb-0">Все подписки в порядке.</p>
-              </td>
-            </tr>
-          <% } %>
-        </tbody>
-      </table>
-    </div>
-  </div>
-</div>
-
-<p class="text-muted text-center mt-3" id="resultsCount">
-  Показано <span id="visibleCount"><%= users ? users.length : 0 %></span> из <%= users ? users.length : 0 %> записей
-</p>
-
-<script>
-function filterTable() {
-  const search = document.getElementById('searchInput').value.toLowerCase();
-  const tariff = document.getElementById('tariffFilter').value;
-  const days = document.getElementById('daysFilter').value;
+// Гарантирует наличие метаданных (если их нет, качает через ytdl)
+async function ensureTaskMetadata(task) {
+  let { metadata, cacheKey } = task;
+  const url = task.url || task.originalUrl;
   
-  const rows = document.querySelectorAll('#expiringTable tbody tr');
-  let visible = 0;
+  if (!metadata) {
+    if (!url) throw new Error('TASK_MISSING_URL');
+    console.warn('[Worker] metadata отсутствует, получаю через ytdl для URL:', url);
+    // Добавляем ignore-errors, чтобы не падать на playlist entries
+    const info = await ytdl(url, { 'dump-single-json': true, 'no-playlist': true, 'ignore-errors': true, ...YTDL_COMMON });
+    metadata = extractMetadataFromInfo(info);
+    if (!metadata) throw new Error('META_MISSING');
+  }
   
-  rows.forEach(row => {
-    if (!row.dataset.search) return; // Skip empty row
-    
-    let show = true;
-    
-    // Search filter
-    if (search && !row.dataset.search.includes(search)) {
-      show = false;
+  if (!cacheKey) {
+    cacheKey = getCacheKey(metadata, task.originalUrl || url);
+  }
+  return { metadata, cacheKey, url };
+}
+/**
+ * Скачивает трек и возвращает file_id из Telegram
+ * Используется для "Исправить и отправить"
+ */
+export async function downloadTrackForUser(url, userId, metadata = null) {
+  let tempFilePath = null;
+  
+  try {
+    // Получаем метаданные если нет
+    if (!metadata) {
+      const info = await ytdl(url, { 
+        'dump-single-json': true, 
+        'skip-download': true,
+        ...YTDL_OPTIONS 
+      });
+      metadata = extractMetadataFromInfo(info);
     }
     
-    // Tariff filter
-    if (tariff && row.dataset.tariff !== tariff) {
-      show = false;
+    if (!metadata) throw new Error('META_MISSING');
+    
+    const { title, uploader, duration, webpage_url: fullUrl } = metadata;
+    const roundedDuration = duration ? Math.round(duration) : null;
+    
+    console.log(`[DownloadForUser] Скачиваю: "${title}" для User ${userId}`);
+    
+    let audioSource;
+    let method = 'unknown';
+    
+    // Пробуем SCDL Stream
+    try {
+      const result = await downloadWithScdlStream(fullUrl || url, title, uploader, roundedDuration);
+      audioSource = { source: result.stream, filename: `${sanitizeFilename(title)}.mp3` };
+      method = 'SCDL';
+    } catch (scdlErr) {
+      console.log(`[DownloadForUser] SCDL failed: ${scdlErr.message}, trying YT-DLP...`);
+      
+      // Fallback на YT-DLP
+      const result = await downloadWithYtdlpFile(fullUrl || url, roundedDuration);
+      tempFilePath = result.filePath;
+      audioSource = { source: fs.createReadStream(tempFilePath), filename: `${sanitizeFilename(title)}.mp3` };
+      method = 'YT-DLP';
     }
     
-    // Days filter
-    if (days) {
-      const rowDays = parseInt(row.dataset.days);
-      if (isNaN(rowDays) || rowDays > parseInt(days)) {
-        show = false;
+    // Отправляем в хранилище
+    if (STORAGE_CHANNEL_ID) {
+      const sentMsg = await bot.telegram.sendAudio(
+        STORAGE_CHANNEL_ID,
+        audioSource,
+        { title, performer: uploader }
+      );
+      
+      const realDuration = sentMsg.audio?.duration || 0;
+      const fileId = sentMsg.audio?.file_id;
+      
+      // Проверка на превью
+      if (roundedDuration && roundedDuration > 60 && realDuration < 35) {
+        await bot.telegram.deleteMessage(STORAGE_CHANNEL_ID, sentMsg.message_id).catch(() => {});
+        throw new Error('PREVIEW_ONLY');
+      }
+      
+      // Кэшируем
+      await db.cacheTrack({
+        url: fullUrl || url,
+        fileId,
+        title,
+        artist: uploader,
+        duration: realDuration,
+        thumbnail: metadata.thumbnail
+      });
+      
+      // Отправляем пользователю
+      await bot.telegram.sendAudio(userId, fileId, {
+        title,
+        performer: uploader,
+        duration: realDuration
+      });
+      
+      console.log(`[DownloadForUser] ✅ Успешно (${method}): "${title}" → User ${userId}`);
+      
+      return { success: true, fileId, title, method };
+    } else {
+      throw new Error('STORAGE_NOT_CONFIGURED');
+    }
+    
+  } catch (err) {
+    console.error(`[DownloadForUser] ❌ Ошибка:`, err.message);
+    throw err;
+  } finally {
+    if (tempFilePath && fs.existsSync(tempFilePath)) {
+      try { fs.unlinkSync(tempFilePath); } catch (e) {}
+    }
+  }
+}
+
+// =====================================================================================
+//                             ГЛАВНЫЙ ПРОЦЕССОР ЗАГРУЗКИ
+// =====================================================================================
+
+export async function trackDownloadProcessor(task) {
+  let statusMessage = null;
+  let tempFilePath = null; // Путь к файлу, если придется качать через yt-dlp
+  let thumbPath = null; // Путь к обложке
+  const userId = parseInt(task.userId, 10);
+  
+  try {
+    // 1. Проверка лимитов
+    const usage = await getUserUsage(userId);
+    if (!usage || usage.downloads_today >= usage.premium_limit) {
+      await safeSendMessage(userId, T('limitReached'));
+      return;
+    }
+
+    // 2. Получение метаданных
+    const ensured = await ensureTaskMetadata(task);
+    const { metadata, cacheKey } = ensured;
+    const { title, uploader, duration, webpage_url: fullUrl } = metadata;
+    const roundedDuration = duration ? Math.round(duration) : undefined;
+    
+    if (!fullUrl) throw new Error(`Нет ссылки на трек: ${title}`);
+
+    // 3. Проверка КЭША (вдруг уже скачали, пока задача лежала в очереди)
+    let cached = await db.findCachedTrack(cacheKey) || await db.findCachedTrack(fullUrl);
+    if (cached?.fileId) {
+      console.log(`[Worker/Cache] ХИТ! Отправляю "${cached.title}" из кэша.`);
+      await bot.telegram.sendAudio(userId, cached.fileId, { title: cached.title, performer: cached.artist || uploader, duration: roundedDuration });
+      await incrementDownload(userId, cached.title, cached.fileId, cacheKey);
+      return;
+    }
+
+    statusMessage = await safeSendMessage(userId, `⏳ Начинаю обработку: "${title}"`);
+    
+    let stream;
+    let usedFallback = false;
+
+    // 4. СКАЧИВАНИЕ
+    // Попытка 1: SCDL (быстро, в оперативную память)
+    try {
+        console.log(`[Worker/Stream] (SCDL) Пробую скачать: ${fullUrl}`);
+        stream = await scdl.default.download(fullUrl);
+    } catch (scdlError) {
+        // Попытка 2: Fallback YT-DLP (медленнее, через файл, но надежнее для 404/Geo)
+        console.warn(`[Worker] SCDL ошибка (${scdlError.message}). Переключаюсь на YT-DLP...`);
+        
+        tempFilePath = path.join(TEMP_DIR, `dl_${Date.now()}_${userId}.mp3`);
+        usedFallback = true;
+
+        await ytdl(fullUrl, {
+            output: tempFilePath,
+            format: 'bestaudio[ext=mp3]/bestaudio',
+            noPlaylist: true,
+            ...YTDL_COMMON
+        });
+
+        if (fs.existsSync(tempFilePath)) {
+            console.log(`[Worker/Fallback] Файл скачан: ${tempFilePath}`);
+            stream = fs.createReadStream(tempFilePath);
+        } else {
+            throw new Error(`Не удалось скачать трек. Ошибка SCDL: ${scdlError.message}`);
+        }
+    }
+
+    // 5. ОТПРАВКА В TELEGRAM
+    let finalFileId = null;
+
+    // Скачиваем обложку
+    if (metadata.thumbnail) {
+      thumbPath = await downloadThumbnail(metadata.thumbnail);
+    }
+
+    // А) В канал-хранилище (если настроен)
+    if (STORAGE_CHANNEL_ID) {
+      try {
+        console.log(`[Worker/Stream] Отправка в хранилище...`);
+        const audioOpts = { title, performer: uploader, duration: roundedDuration };
+        if (thumbPath) audioOpts.thumb = { source: thumbPath };
+        
+        const sentToStorage = await bot.telegram.sendAudio(
+          STORAGE_CHANNEL_ID,
+          { source: stream, filename: `${sanitizeFilename(title)}.mp3` },
+          audioOpts
+        );
+        finalFileId = sentToStorage?.audio?.file_id;
+      } catch (e) {
+        console.error(`❌ Ошибка отправки в хранилище:`, e.message);
+        // Если использовали fallback (файл), можно пересоздать стрим
+        if (usedFallback && fs.existsSync(tempFilePath)) {
+            stream = fs.createReadStream(tempFilePath); 
+        }
+        // Если scdl, стрим умер, но код пойдет ниже в блок "else" и попробует отправить что есть или упадет
       }
     }
+
+    // Б) Если получили file_id -> Сохраняем в БД и отправляем юзеру
+    if (finalFileId) {
+        const urlAliases = [];
+        if (task.originalUrl && task.originalUrl !== fullUrl) urlAliases.push(task.originalUrl);
+        if (cacheKey && !cacheKey.startsWith('http')) urlAliases.push(cacheKey);
+        
+        await db.cacheTrack({ 
+            url: fullUrl, 
+            fileId: finalFileId, 
+            title, 
+            artist: uploader, 
+            duration: roundedDuration, 
+            thumbnail: metadata.thumbnail, 
+            aliases: urlAliases 
+        });
+        
+        console.log(`✅ [Cache] Трек "${title}" сохранён.`);
+        await bot.telegram.sendAudio(userId, finalFileId, { title, performer: uploader, duration: roundedDuration });
+        await incrementDownload(userId, title, finalFileId, task.originalUrl || fullUrl);
+
+    } else {
+      // В) Если хранилище недоступно -> Отправляем файл напрямую юзеру
+      console.warn('[Worker] Отправляю напрямую пользователю (без кэша)...');
+      
+      // Перестраховка для стрима
+      if (usedFallback && fs.existsSync(tempFilePath)) {
+          stream = fs.createReadStream(tempFilePath);
+      } else if (!usedFallback && (!stream || stream.destroyed)) {
+           // Если scdl стрим сдох, пробуем еще раз scdl (шанс мал, но все же)
+           try { stream = await scdl.default.download(fullUrl); } catch(e) { throw new Error('Повторное скачивание failed'); }
+      }
+
+      await bot.telegram.sendAudio(
+        userId, 
+        { source: stream, filename: `${sanitizeFilename(title)}.mp3` },
+        { title, performer: uploader, duration: roundedDuration }
+      );
+    }
+
+  } catch (err) {
+    const errorDetails = err?.stderr || err?.message || 'Unknown error';
+    console.error(`❌ Ошибка воркера (User ${userId}):`, errorDetails);
     
-    row.style.display = show ? '' : 'none';
-    if (show) visible++;
-  });
-  
-  document.getElementById('visibleCount').textContent = visible;
+    let userMsg = `❌ Не удалось обработать трек`;
+    const trackTitle = task.metadata?.title || 'Unknown';
+    const trackUrl = task.url || task.originalUrl || '';
+    
+    if (trackTitle !== 'Unknown') userMsg += `: "${trackTitle}"`;
+    
+    // Определяем причину ошибки для логирования
+    let reason = 'UNKNOWN_ERROR';
+    if (errorDetails.includes('404') || errorDetails.includes('Video unavailable')) {
+         userMsg += "\n(Трек удален или приватный)";
+         reason = '404_NOT_FOUND';
+    } else if (errorDetails.includes('403')) {
+         reason = '403_FORBIDDEN';
+    } else if (errorDetails.includes('PREVIEW') || errorDetails.includes('preview')) {
+         reason = 'PREVIEW_ONLY';
+    } else if (errorDetails.includes('timeout') || errorDetails.includes('TIMEOUT')) {
+         reason = 'TIMEOUT';
+    }
+    
+    // Логируем битый трек в БД
+    await db.logBrokenTrack(trackUrl, trackTitle, userId, reason).catch(() => {});
+
+    await safeSendMessage(userId, userMsg);
+
+  } finally {
+    // 6. ОЧИСТКА
+    // Удаляем сообщение "Начинаю обработку" ВСЕГДА
+    if (statusMessage) {
+      try {
+        await bot.telegram.deleteMessage(userId, statusMessage.message_id);
+      } catch (e) {}
+    }
+    
+    // Удаляем временный файл
+    if (tempFilePath && fs.existsSync(tempFilePath)) {
+      try {
+        fs.unlinkSync(tempFilePath);
+        console.log(`[Worker] Временный файл удален.`);
+      } catch (e) { console.error('Ошибка удаления tmp файла:', e); }
+    }
+    
+    // Удаляем обложку
+    if (thumbPath && fs.existsSync(thumbPath)) {
+      try { fs.unlinkSync(thumbPath); } catch (e) {}
+    }
+  }
 }
 
-function resetFilters() {
-  document.getElementById('searchInput').value = '';
-  document.getElementById('tariffFilter').value = '';
-  document.getElementById('daysFilter').value = '';
-  filterTable();
+// =====================================================================================
+//                                 ОЧЕРЕДЬ ЗАГРУЗОК
+// =====================================================================================
+
+export const downloadQueue = new TaskQueue({
+  maxConcurrent: MAX_CONCURRENT_DOWNLOADS,
+  taskProcessor: trackDownloadProcessor
+});
+
+console.log(`[DownloadManager] Очередь (threads=${MAX_CONCURRENT_DOWNLOADS})`);
+
+// =====================================================================================
+//                                 ФУНКЦИЯ ENQUEUE
+// =====================================================================================
+
+export function enqueue(ctx, userId, url, earlyData = {}) {
+  (async () => {
+    let statusMessage = null;
+    console.log(`[Enqueue] User ${userId}, URL: ${url}`);
+    
+    try {
+      // Проверка бонусов/лимитов
+      const user = await db.getUser(userId);
+      if ((user.downloads_today || 0) >= user.premium_limit) {
+          const bonusAvailable = Boolean(CHANNEL_USERNAME && !user?.subscribed_bonus_used);
+          const cleanUsername = CHANNEL_USERNAME?.replace('@', '');
+          const bonusText = bonusAvailable ? `\n\n🎁 Доступен бонус! Подпишись на <a href="https://t.me/${cleanUsername}">@${cleanUsername}</a> и получи <b>7 дней тарифа Plus</b>.` : '';
+          const text = `${T('limitReached')}${bonusText}`;
+          const extra = { parse_mode: 'HTML', disable_web_page_preview: true };
+          if (bonusAvailable) {
+            extra.reply_markup = { inline_keyboard: [[Markup.button.callback('✅ Я подписался, забрать бонус', 'check_subscription')]] };
+          }
+          await safeSendMessage(userId, text, extra);
+          return;
+      }
+
+      // 1. FAST PATH (если метаданные уже есть из поиска)
+      if (earlyData.isSingleTrack && earlyData.metadata) {
+        console.log('[Enqueue/Fast] Метаданные получены заранее.');
+        const metadata = extractMetadataFromInfo(earlyData.metadata);
+        const { webpage_url: fullUrl, id } = metadata;
+        const cacheKey = id ? `sc:${id}` : null;
+
+        // Проверка кэша
+        const cached = await db.findCachedTrack(url) || await db.findCachedTrack(fullUrl) || (cacheKey && await db.findCachedTrack(cacheKey));
+        if (cached?.fileId) {
+          console.log(`[Enqueue/Fast] ХИТ КЭША!`);
+          await bot.telegram.sendAudio(userId, cached.fileId, { title: cached.title, performer: cached.artist });
+          await incrementDownload(userId, cached.title, cached.fileId, url);
+          return;
+        }
+
+        // Добавляем в очередь
+        const task = { userId, url: fullUrl, originalUrl: url, source: 'soundcloud', cacheKey, metadata };
+        downloadQueue.add({ ...task, priority: user.premium_limit || 5 });
+        await safeSendMessage(userId, `✅ Трек "${metadata.title}" добавлен в очередь.`);
+        return;
+      }
+
+      // 2. SLOW PATH (Если просто кинули ссылку)
+      // Сначала проверим кэш по URL, чтобы не делать лишних запросов
+      const quickCache = await db.findCachedTrack(url);
+      if (quickCache?.fileId) {
+          console.log(`[Enqueue/Slow] ХИТ КЭША по URL!`);
+          await bot.telegram.sendAudio(userId, quickCache.fileId, { title: quickCache.title, performer: quickCache.artist });
+          await incrementDownload(userId, quickCache.title, quickCache.fileId, url);
+          return;
+      }
+
+      statusMessage = await safeSendMessage(userId, '🔍 Анализирую ссылку...');
+      
+      // Получаем инфо через yt-dlp
+      const info = await ytdl(url, { 'dump-single-json': true, 'flat-playlist': true, ...YTDL_COMMON });
+      
+      // Удаляем сообщение "Анализирую..."
+      if (statusMessage) {
+        await bot.telegram.deleteMessage(userId, statusMessage.message_id).catch(() => {});
+      }
+
+      // Это плейлист?
+      if (info.entries && info.entries.length > 0) {
+          await safeSendMessage(userId, `📂 Найден плейлист/альбом: "${info.title || 'Playlist'}".\nДобавляю ${info.entries.length} треков...`);
+          
+          let addedCount = 0;
+          for (const entry of info.entries) {
+              const meta = extractMetadataFromInfo(entry);
+              if (meta) {
+                  const task = { userId, url: meta.webpage_url, originalUrl: url, source: 'soundcloud', metadata: meta };
+                  downloadQueue.add({ ...task, priority: user.premium_limit || 5 });
+                  addedCount++;
+              }
+          }
+          await safeSendMessage(userId, `✅ Добавлено в очередь: ${addedCount} треков.`);
+      } else {
+          // Одиночный трек
+          const meta = extractMetadataFromInfo(info);
+          if (meta) {
+              const task = { userId, url: meta.webpage_url, originalUrl: url, source: 'soundcloud', metadata: meta };
+              downloadQueue.add({ ...task, priority: user.premium_limit || 5 });
+              await safeSendMessage(userId, `✅ Трек "${meta.title}" добавлен в очередь.`);
+          } else {
+              throw new Error('Не удалось извлечь данные о треке.');
+          }
+      }
+
+    } catch (err) {
+      console.error(`[Enqueue] Ошибка:`, err.message);
+      if (statusMessage) {
+        await bot.telegram.deleteMessage(userId, statusMessage.message_id).catch(() => {});
+      }
+      await safeSendMessage(userId, `❌ Ошибка при чтении ссылки. Возможно, она приватная или неверная.`);
+    }
+  })().catch(e => console.error('Async Enqueue Error:', e));
 }
 
-// Attach listeners
-document.getElementById('searchInput').addEventListener('input', filterTable);
-document.getElementById('tariffFilter').addEventListener('change', filterTable);
-document.getElementById('daysFilter').addEventListener('change', filterTable);
-</script>
+export function initializeDownloadManager() {
+  console.log('[DownloadManager] Готов к работе.');
+}
