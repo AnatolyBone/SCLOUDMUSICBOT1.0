@@ -453,6 +453,34 @@ app.post('/api/broken-tracks/bulk-delete', requireAuth, async (req, res) => {
     res.status(500).json({ success: false, error: e.message });
   }
 });
+
+// API: Исправить и отправить пользователю
+app.post('/api/broken-tracks/fix-and-send', requireAuth, async (req, res) => {
+  try {
+    const { id, url, userId } = req.body;
+    
+    if (!url || !userId) {
+      return res.status(400).json({ success: false, error: 'URL или userId не указаны' });
+    }
+    
+    // Импортируем функцию скачивания
+    const { downloadTrackForUser } = await import('./services/downloadManager.js');
+    
+    // Скачиваем и отправляем
+    await downloadTrackForUser(url, parseInt(userId));
+    
+    // Помечаем как исправленное
+    await resolveBrokenTrack(id);
+    
+    res.json({ 
+      success: true, 
+      message: 'Трек скачан и отправлен пользователю!' 
+    });
+  } catch (e) {
+    console.error('[API BrokenTracks] fix-and-send error:', e);
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
   app.get('/admin', (req, res) => {
     if (req.session.authenticated) return res.redirect('/dashboard');
     res.render('login', { title: 'Вход', page: 'login', layout: false, error: null });
@@ -486,12 +514,26 @@ app.post('/admin/queue/clear-user', requireAuth, (req, res) => {
   res.redirect('back');
 });
 app.get('/settings', requireAuth, (req, res) => {
+  const { downloadQueue } = require('./services/downloadManager.js');
+  const { isMaintenanceMode } = require('./services/appState.js');
+  
   res.render('settings', {
     title: 'Настройки',
     page: 'settings',
     settings: getAllSettings(),
-    success: req.query.success
+    success: req.query.success,
+    maintenanceMode: isMaintenanceMode(),
+    queueWaiting: downloadQueue?.waiting || 0,
+    queueActive: downloadQueue?.active || 0
   });
+});
+
+app.post('/settings/maintenance', requireAuth, (req, res) => {
+  const { setMaintenanceMode } = require('./services/appState.js');
+  const enabled = req.body.enabled === 'on';
+  setMaintenanceMode(enabled);
+  console.log(`[Settings] Режим обслуживания: ${enabled ? 'ВКЛЮЧЁН' : 'ВЫКЛЮЧЕН'}`);
+  res.redirect('/settings?success=1');
 });
 
 app.post('/settings/update', requireAuth, async (req, res) => {
@@ -1037,8 +1079,30 @@ res.redirect('/dashboard?resetExpired=err');
   app.get('/expiring-users', requireAuth, async (req, res) => {
     try {
       const users = await getExpiringUsers();
-      res.render('expiring-users', { title: 'Истекающие подписки', page: 'expiring-users', users });
+      
+      // Считаем статистику
+      const now = new Date();
+      let expiringToday = 0, expiring3Days = 0, expiring7Days = 0;
+      
+      users.forEach(u => {
+        if (!u.premium_until) return;
+        const days = Math.ceil((new Date(u.premium_until) - now) / (1000 * 60 * 60 * 24));
+        if (days <= 1) expiringToday++;
+        if (days <= 3) expiring3Days++;
+        if (days <= 7) expiring7Days++;
+      });
+      
+      res.render('expiring-users', { 
+        title: 'Истекающие подписки', 
+        page: 'expiring-users', 
+        users,
+        expiringToday,
+        expiring3Days,
+        expiring7Days,
+        totalExpiring: users.length
+      });
     } catch (e) {
+      console.error('[Expiring Users] Error:', e);
       res.status(500).send('Ошибка сервера');
     }
   });
