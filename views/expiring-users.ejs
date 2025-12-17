@@ -1,7 +1,7 @@
 <% // views/expiring-users.ejs %>
 
 <%
-// Хелпер: формат тарифа
+// Хелперы
 function tariffLabel(limit) {
   if (limit >= 1000) return 'Unlimited';
   if (limit === 100) return 'Pro';
@@ -9,7 +9,13 @@ function tariffLabel(limit) {
   return 'Free';
 }
 
-// Хелпер: безопасно форматируем дату из БД
+function tariffBadge(limit) {
+  if (limit >= 1000) return 'bg-primary';
+  if (limit === 100) return 'bg-warning text-dark';
+  if (limit === 30) return 'bg-info text-dark';
+  return 'bg-secondary';
+}
+
 function formatDate(s) {
   if (!s) return '—';
   try {
@@ -20,12 +26,36 @@ function formatDate(s) {
     return '—';
   }
 }
+
+function daysUntil(s) {
+  if (!s) return null;
+  const now = new Date();
+  const target = new Date(s);
+  const diff = Math.ceil((target - now) / (1000 * 60 * 60 * 24));
+  return diff;
+}
 %>
 
 <%- contentFor('styles') %>
 <style>
-  .table th {
-    font-weight: 500;
+  .stat-card {
+    background: var(--bs-card-bg);
+    border: 1px solid var(--bs-border-color);
+    border-radius: 10px;
+    padding: 1rem;
+    text-align: center;
+  }
+  .stat-card .stat-value {
+    font-size: 1.5rem;
+    font-weight: 700;
+  }
+  .stat-card .stat-label {
+    font-size: 0.8rem;
+    color: #6c757d;
+  }
+  .days-badge {
+    min-width: 60px;
+    display: inline-block;
   }
 </style>
 
@@ -35,44 +65,134 @@ function formatDate(s) {
   <h1 class="h2">⏳ Истекающие подписки</h1>
 </div>
 
+<!-- Карточки статистики -->
+<div class="row g-3 mb-4">
+  <div class="col-6 col-md-3">
+    <div class="stat-card">
+      <div class="stat-value text-danger"><%= typeof expiringToday !== 'undefined' ? expiringToday : 0 %></div>
+      <div class="stat-label">Сегодня</div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="stat-card">
+      <div class="stat-value text-warning"><%= typeof expiring3Days !== 'undefined' ? expiring3Days : 0 %></div>
+      <div class="stat-label">3 дня</div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="stat-card">
+      <div class="stat-value text-info"><%= typeof expiring7Days !== 'undefined' ? expiring7Days : 0 %></div>
+      <div class="stat-label">7 дней</div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="stat-card">
+      <div class="stat-value text-primary"><%= typeof totalExpiring !== 'undefined' ? totalExpiring : (users ? users.length : 0) %></div>
+      <div class="stat-label">Всего</div>
+    </div>
+  </div>
+</div>
+
+<!-- Фильтры -->
+<form id="filterForm" class="row g-3 mb-4">
+  <div class="col-md-3">
+    <label class="form-label small text-muted">Поиск</label>
+    <input type="text" class="form-control" id="searchInput" placeholder="ID, имя, @username...">
+  </div>
+  <div class="col-md-2">
+    <label class="form-label small text-muted">Тариф</label>
+    <select class="form-select" id="tariffFilter">
+      <option value="">Все</option>
+      <option value="Plus">Plus</option>
+      <option value="Pro">Pro</option>
+      <option value="Unlimited">Unlimited</option>
+    </select>
+  </div>
+  <div class="col-md-2">
+    <label class="form-label small text-muted">Истекает через</label>
+    <select class="form-select" id="daysFilter">
+      <option value="">Все</option>
+      <option value="1">Сегодня</option>
+      <option value="3">До 3 дней</option>
+      <option value="7">До 7 дней</option>
+    </select>
+  </div>
+  <div class="col-md-2 d-flex align-items-end">
+    <button type="button" class="btn btn-outline-secondary w-100" onclick="resetFilters()">Сбросить</button>
+  </div>
+</form>
+
 <div class="card shadow-sm">
   <div class="card-body p-0">
     <div class="table-responsive">
-      <table class="table table-hover mb-0 align-middle">
+      <table class="table table-hover mb-0 align-middle" id="expiringTable">
         <thead class="table-light">
           <tr>
             <th>ID</th>
             <th>Пользователь</th>
             <th>Тариф</th>
             <th>Истекает</th>
+            <th>Осталось</th>
             <th>Действия</th>
           </tr>
         </thead>
         <tbody>
           <% if (typeof users !== 'undefined' && users.length > 0) { %>
-            <% users.forEach(u => { %>
-              <tr>
-                <td><a href="/user/<%= u.id %>"><%= u.id %></a></td>
+            <% users.forEach(u => { 
+              const days = daysUntil(u.premium_until);
+              const tariff = tariffLabel(u.premium_limit);
+            %>
+              <tr data-search="<%= (u.id + ' ' + (u.first_name || '') + ' ' + (u.username || '')).toLowerCase() %>"
+                  data-tariff="<%= tariff %>"
+                  data-days="<%= days %>">
+                <td><a href="/user/<%= u.id %>" class="font-monospace"><%= u.id %></a></td>
                 <td>
-                    <div><%= u.first_name || 'Без имени' %></div>
-                    <div class="text-muted small"><%= u.username ? '@'+u.username : '' %></div>
+                  <div class="fw-semibold"><%= u.first_name || 'Без имени' %></div>
+                  <div class="text-muted small"><%= u.username ? '@'+u.username : '' %></div>
                 </td>
                 <td>
-                  <span class="badge bg-warning text-dark"><%= tariffLabel(u.premium_limit) %></span>
+                  <span class="badge <%= tariffBadge(u.premium_limit) %>"><%= tariff %></span>
                 </td>
-                <td><%= formatDate(u.premium_until) %></td>
+                <td class="text-nowrap"><%= formatDate(u.premium_until) %></td>
                 <td>
-                  <a href="/user/<%= u.id %>" class="btn btn-sm btn-outline-primary">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-eye-fill me-1" viewBox="0 0 16 16"><path d="M10.5 8a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0"/><path d="M0 8s3-5.5 8-5.5S16 8 16 8s-3 5.5-8 5.5S0 8 0 8m8 3.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7"/></svg>
-                    Профиль
-                  </a>
+                  <% if (days !== null) { %>
+                    <% if (days <= 0) { %>
+                      <span class="badge bg-danger days-badge">Истёк</span>
+                    <% } else if (days === 1) { %>
+                      <span class="badge bg-danger days-badge">Сегодня</span>
+                    <% } else if (days <= 3) { %>
+                      <span class="badge bg-warning text-dark days-badge"><%= days %> дн.</span>
+                    <% } else { %>
+                      <span class="badge bg-info text-dark days-badge"><%= days %> дн.</span>
+                    <% } %>
+                  <% } else { %>
+                    <span class="text-muted">—</span>
+                  <% } %>
+                </td>
+                <td>
+                  <div class="btn-group btn-group-sm">
+                    <a href="/user/<%= u.id %>" class="btn btn-outline-primary" title="Профиль">
+                      <i class="bi bi-person"></i>
+                    </a>
+                    <form action="/set-tariff" method="POST" class="d-inline">
+                      <input type="hidden" name="userId" value="<%= u.id %>">
+                      <input type="hidden" name="limit" value="<%= u.premium_limit %>">
+                      <input type="hidden" name="days" value="30">
+                      <input type="hidden" name="applyMode" value="extend">
+                      <button type="submit" class="btn btn-outline-success" title="Продлить на 30 дней"
+                              onclick="return confirm('Продлить подписку на 30 дней?')">
+                        <i class="bi bi-plus-circle"></i>
+                      </button>
+                    </form>
+                  </div>
                 </td>
               </tr>
             <% }) %>
           <% } else { %>
             <tr>
-              <td colspan="5" class="text-center text-muted py-5">
-                <p class="h5">Нет пользователей с истекающей подпиской</p>
+              <td colspan="6" class="text-center text-muted py-5">
+                <i class="bi bi-check-circle fs-1 text-success opacity-50"></i>
+                <p class="h5 mt-3">Нет пользователей с истекающей подпиской</p>
                 <p class="mb-0">Все подписки в порядке.</p>
               </td>
             </tr>
@@ -83,4 +203,58 @@ function formatDate(s) {
   </div>
 </div>
 
-<!-- Пагинацию можно будет добавить позже, если понадобится -->
+<p class="text-muted text-center mt-3" id="resultsCount">
+  Показано <span id="visibleCount"><%= users ? users.length : 0 %></span> из <%= users ? users.length : 0 %> записей
+</p>
+
+<script>
+function filterTable() {
+  const search = document.getElementById('searchInput').value.toLowerCase();
+  const tariff = document.getElementById('tariffFilter').value;
+  const days = document.getElementById('daysFilter').value;
+  
+  const rows = document.querySelectorAll('#expiringTable tbody tr');
+  let visible = 0;
+  
+  rows.forEach(row => {
+    if (!row.dataset.search) return; // Skip empty row
+    
+    let show = true;
+    
+    // Search filter
+    if (search && !row.dataset.search.includes(search)) {
+      show = false;
+    }
+    
+    // Tariff filter
+    if (tariff && row.dataset.tariff !== tariff) {
+      show = false;
+    }
+    
+    // Days filter
+    if (days) {
+      const rowDays = parseInt(row.dataset.days);
+      if (isNaN(rowDays) || rowDays > parseInt(days)) {
+        show = false;
+      }
+    }
+    
+    row.style.display = show ? '' : 'none';
+    if (show) visible++;
+  });
+  
+  document.getElementById('visibleCount').textContent = visible;
+}
+
+function resetFilters() {
+  document.getElementById('searchInput').value = '';
+  document.getElementById('tariffFilter').value = '';
+  document.getElementById('daysFilter').value = '';
+  filterTable();
+}
+
+// Attach listeners
+document.getElementById('searchInput').addEventListener('input', filterTable);
+document.getElementById('tariffFilter').addEventListener('change', filterTable);
+document.getElementById('daysFilter').addEventListener('change', filterTable);
+</script>
