@@ -12,11 +12,32 @@ import scdl from 'soundcloud-downloader';
 import os from 'os';
 import { fileURLToPath } from 'url';
 import ytdl from 'youtube-dl-exec';
+import axios from 'axios';
 
 import { bot } from '../bot.js';
 import { T } from '../config/texts.js';
 import { TaskQueue } from '../lib/TaskQueue.js';
 import * as db from '../db.js';
+
+// Папка для обложек
+const THUMB_DIR = path.join(os.tmpdir(), 'sc-thumbs');
+if (!fs.existsSync(THUMB_DIR)) fs.mkdirSync(THUMB_DIR, { recursive: true });
+
+/**
+ * Скачивает обложку и возвращает путь к файлу или null
+ */
+async function downloadThumbnail(thumbnailUrl) {
+  if (!thumbnailUrl) return null;
+  try {
+    const thumbPath = path.join(THUMB_DIR, `thumb_${Date.now()}.jpg`);
+    const response = await axios.get(thumbnailUrl, { responseType: 'arraybuffer', timeout: 10000 });
+    fs.writeFileSync(thumbPath, response.data);
+    return thumbPath;
+  } catch (e) {
+    console.warn('[Thumbnail] Не удалось скачать обложку:', e.message);
+    return null;
+  }
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -272,15 +293,24 @@ export async function trackDownloadProcessor(task) {
 
     // 5. ОТПРАВКА В TELEGRAM
     let finalFileId = null;
+    let thumbPath = null;
+
+    // Скачиваем обложку
+    if (metadata.thumbnail) {
+      thumbPath = await downloadThumbnail(metadata.thumbnail);
+    }
 
     // А) В канал-хранилище (если настроен)
     if (STORAGE_CHANNEL_ID) {
       try {
         console.log(`[Worker/Stream] Отправка в хранилище...`);
+        const audioOpts = { title, performer: uploader, duration: roundedDuration };
+        if (thumbPath) audioOpts.thumb = { source: thumbPath };
+        
         const sentToStorage = await bot.telegram.sendAudio(
           STORAGE_CHANNEL_ID,
           { source: stream, filename: `${sanitizeFilename(title)}.mp3` },
-          { title, performer: uploader, duration: roundedDuration }
+          audioOpts
         );
         finalFileId = sentToStorage?.audio?.file_id;
       } catch (e) {
@@ -360,6 +390,11 @@ export async function trackDownloadProcessor(task) {
         fs.unlinkSync(tempFilePath);
         console.log(`[Worker] Временный файл удален.`);
       } catch (e) { console.error('Ошибка удаления tmp файла:', e); }
+    }
+    
+    // Удаляем обложку
+    if (thumbPath && fs.existsSync(thumbPath)) {
+      try { fs.unlinkSync(thumbPath); } catch (e) {}
     }
   }
 }
