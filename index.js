@@ -355,16 +355,16 @@ app.get('/broken-tracks', requireAuth, async (req, res) => {
     const page = parseInt(req.query.page) || 1;
     const limit = 25;
     
-    const { tracks, totalTracks, totalPages, currentPage } = 
-      await getBrokenTracksWithPagination({ page, limit });
+    const result = await getBrokenTracksWithPagination({ page, limit });
+    console.log('[BrokenTracks] Загружено:', result.totalTracks, 'треков');
     
     res.render('broken-tracks', { 
       title: 'Проблемные треки', 
       page: 'broken-tracks',
-      tracks,
-      totalTracks,
-      totalPages,
-      currentPage
+      tracks: result.tracks || [],
+      totalTracks: result.totalTracks || 0,
+      totalPages: result.totalPages || 0,
+      currentPage: result.currentPage || 1
     });
   } catch (e) {
     console.error('[BrokenTracks] Ошибка загрузки:', e);
@@ -770,13 +770,19 @@ app.get('/dashboard', requireAuth, async (req, res) => {
       const queryParams = { q, status, page, limit, sort, order };
       
       // Статистика для карточек
-      const [activeUsersRes, premiumUsersRes, newUsersToday] = await Promise.all([
-        pool.query('SELECT COUNT(*) FROM users WHERE active = true'),
-        pool.query('SELECT COUNT(*) FROM users WHERE premium_until > NOW()'),
-        getNewUsersCount(1)
-      ]);
-      const activeUsers = parseInt(activeUsersRes.rows[0]?.count || 0);
-      const premiumUsers = parseInt(premiumUsersRes.rows[0]?.count || 0);
+      let activeUsers = 0, premiumUsers = 0, newUsersToday = 0;
+      try {
+        const [activeUsersRes, premiumUsersRes, newUsersTodayRes] = await Promise.all([
+          pool.query('SELECT COUNT(*) FROM users WHERE active = true'),
+          pool.query('SELECT COUNT(*) FROM users WHERE premium_until > NOW()'),
+          getNewUsersCount(1)
+        ]);
+        activeUsers = parseInt(activeUsersRes.rows[0]?.count || 0);
+        premiumUsers = parseInt(premiumUsersRes.rows[0]?.count || 0);
+        newUsersToday = newUsersTodayRes || 0;
+      } catch (statsErr) {
+        console.error('[Users] Ошибка получения статистики:', statsErr.message);
+      }
       
       res.render('users', { 
         title: 'Пользователи', 
