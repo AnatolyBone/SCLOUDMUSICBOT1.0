@@ -1085,26 +1085,28 @@ res.redirect('/dashboard?resetExpired=err');
     try {
       const users = await getExpiringUsers();
       
-      // Считаем статистику
+      // Считаем статистику (непересекающиеся группы)
       const now = new Date();
-      let expiringToday = 0, expiring3Days = 0, expiring7Days = 0;
+      let expiringToday = 0, expiring2to3Days = 0, expiring4to7Days = 0;
       
       users.forEach(u => {
         if (!u.premium_until) return;
         const days = Math.ceil((new Date(u.premium_until) - now) / (1000 * 60 * 60 * 24));
         if (days <= 1) expiringToday++;
-        if (days <= 3) expiring3Days++;
-        if (days <= 7) expiring7Days++;
+        else if (days <= 3) expiring2to3Days++;
+        else if (days <= 7) expiring4to7Days++;
       });
+      
+      const totalExpiring = expiringToday + expiring2to3Days + expiring4to7Days;
       
       res.render('expiring-users', { 
         title: 'Истекающие подписки', 
         page: 'expiring-users', 
         users,
         expiringToday,
-        expiring3Days,
-        expiring7Days,
-        totalExpiring: users.length
+        expiring2to3Days,
+        expiring4to7Days,
+        totalExpiring
       });
     } catch (e) {
       console.error('[Expiring Users] Error:', e);
