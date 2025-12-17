@@ -1081,8 +1081,14 @@ app.post('/set-tariff', requireAuth, async (req, res) => {
   } catch (error) {
     console.error(`[Admin] Ошибка при смене тарифа для ${userId}:`, error.message);
   }
-  const back = req.get('Referer') || '/users';
-  res.redirect(back);
+  
+  // Если пришли из профиля — возвращаемся в профиль
+  const referer = req.get('Referer') || '';
+  if (referer.includes('/user/')) {
+    res.redirect(`/user/${userId}?tariffUpdated=1`);
+  } else {
+    res.redirect('/users');
+  }
 });
   app.post('/reset-bonus', requireAuth, async (req, res) => {
     const { userId } = req.body;
