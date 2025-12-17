@@ -1307,22 +1307,45 @@ bot.on('text', async (ctx) => {
     const urlMatch = text.match(/(https?:\/\/[^\s]+)/g);
     if (!urlMatch) return await ctx.reply('Пожалуйста, отправьте мне ссылку.');
     
+    // ПАКЕТНЫЙ РЕЖИМ ДЛЯ АДМИНА: обрабатываем все ссылки из сообщения
+    const isAdmin = ctx.from.id === ADMIN_ID;
+    const soundcloudUrls = urlMatch.filter(u => u.includes('soundcloud.com'));
+    
+    if (isAdmin && soundcloudUrls.length > 1) {
+        // Админ прислал несколько ссылок — обрабатываем все
+        await ctx.reply(`📦 Пакетный режим: найдено ${soundcloudUrls.length} ссылок. Добавляю в очередь...`);
+        let added = 0;
+        for (const scUrl of soundcloudUrls) {
+            try {
+                handleSoundCloudUrl(ctx, scUrl);
+                added++;
+            } catch (e) {
+                console.error(`[Admin/Batch] Ошибка для ${scUrl}:`, e.message);
+            }
+        }
+        console.log(`[Admin/Batch] Добавлено ${added}/${soundcloudUrls.length} ссылок в очередь`);
+        return;
+    }
+    
     const url = urlMatch[0];
 
     if (url.includes('soundcloud.com')) {
-        const user = await getUser(ctx.from.id);
-        if ((user.downloads_today || 0) >= (user.premium_limit || 0)) {
-            const bonusAvailable = Boolean(CHANNEL_USERNAME && !user.subscribed_bonus_used);
-            const cleanUsername = CHANNEL_USERNAME?.replace('@', '');
-            const bonusText = bonusAvailable
-              ? `\n\n🎁 Доступен бонус! Подпишись на <a href="https://t.me/${cleanUsername}">@${cleanUsername}</a> и получи <b>7 дней тарифа Plus</b>.`
-              : '';
-            const extra = { parse_mode: 'HTML', disable_web_page_preview: true };
-            if (bonusAvailable) {
-              extra.reply_markup = { inline_keyboard: [[ { text: '✅ Я подписался, забрать бонус', callback_data: 'check_subscription' } ]] };
+        // Для админа пропускаем проверку лимитов
+        if (!isAdmin) {
+            const user = await getUser(ctx.from.id);
+            if ((user.downloads_today || 0) >= (user.premium_limit || 0)) {
+                const bonusAvailable = Boolean(CHANNEL_USERNAME && !user.subscribed_bonus_used);
+                const cleanUsername = CHANNEL_USERNAME?.replace('@', '');
+                const bonusText = bonusAvailable
+                  ? `\n\n🎁 Доступен бонус! Подпишись на <a href="https://t.me/${cleanUsername}">@${cleanUsername}</a> и получи <b>7 дней тарифа Plus</b>.`
+                  : '';
+                const extra = { parse_mode: 'HTML', disable_web_page_preview: true };
+                if (bonusAvailable) {
+                  extra.reply_markup = { inline_keyboard: [[ { text: '✅ Я подписался, забрать бонус', callback_data: 'check_subscription' } ]] };
+                }
+                await ctx.reply(`${T('limitReached')}${bonusText}`, extra);
+                return;
             }
-            await ctx.reply(`${T('limitReached')}${bonusText}`, extra);
-            return;
         }
         handleSoundCloudUrl(ctx, url);
     } else if (url.includes('open.spotify.com')) {
