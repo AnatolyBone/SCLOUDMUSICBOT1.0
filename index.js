@@ -57,11 +57,12 @@ import {
   deleteBrokenTrack,
   deleteBrokenTracksBulk,
   incrementBrokenTrackRetry,
-  setAppSetting
+  setAppSetting,
+  getNewUsersCount
 } from './db.js';
 import { initializeWorkers } from './services/workerManager.js';
 import { runBroadcastBatch } from './services/broadcastManager.js';
-import { isShuttingDown, setShuttingDown, setMaintenanceMode} from './services/appState.js';
+import { isShuttingDown, setShuttingDown, setMaintenanceMode, isMaintenanceMode } from './services/appState.js';
 import { bot } from './bot.js';
 import redisService from './services/redisClient.js';
 import {
@@ -514,9 +515,6 @@ app.post('/admin/queue/clear-user', requireAuth, (req, res) => {
   res.redirect('back');
 });
 app.get('/settings', requireAuth, (req, res) => {
-  const { downloadQueue } = require('./services/downloadManager.js');
-  const { isMaintenanceMode } = require('./services/appState.js');
-  
   res.render('settings', {
     title: 'Настройки',
     page: 'settings',
@@ -529,7 +527,6 @@ app.get('/settings', requireAuth, (req, res) => {
 });
 
 app.post('/settings/maintenance', requireAuth, (req, res) => {
-  const { setMaintenanceMode } = require('./services/appState.js');
   const enabled = req.body.enabled === 'on';
   setMaintenanceMode(enabled);
   console.log(`[Settings] Режим обслуживания: ${enabled ? 'ВКЛЮЧЁН' : 'ВЫКЛЮЧЕН'}`);
@@ -773,11 +770,13 @@ app.get('/dashboard', requireAuth, async (req, res) => {
       const queryParams = { q, status, page, limit, sort, order };
       
       // Статистика для карточек
-      const [activeUsers, premiumUsers, newUsersToday] = await Promise.all([
-        db.query('SELECT COUNT(*) FROM users WHERE active = true').then(r => parseInt(r.rows[0]?.count || 0)),
-        db.query('SELECT COUNT(*) FROM users WHERE premium_until > NOW()').then(r => parseInt(r.rows[0]?.count || 0)),
-        db.getNewUsersCount(1)
+      const [activeUsersRes, premiumUsersRes, newUsersToday] = await Promise.all([
+        pool.query('SELECT COUNT(*) FROM users WHERE active = true'),
+        pool.query('SELECT COUNT(*) FROM users WHERE premium_until > NOW()'),
+        getNewUsersCount(1)
       ]);
+      const activeUsers = parseInt(activeUsersRes.rows[0]?.count || 0);
+      const premiumUsers = parseInt(premiumUsersRes.rows[0]?.count || 0);
       
       res.render('users', { 
         title: 'Пользователи', 
