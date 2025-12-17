@@ -367,11 +367,26 @@ export async function trackDownloadProcessor(task) {
     console.error(`❌ Ошибка воркера (User ${userId}):`, errorDetails);
     
     let userMsg = `❌ Не удалось обработать трек`;
-    if (task.metadata?.title) userMsg += `: "${task.metadata.title}"`;
+    const trackTitle = task.metadata?.title || 'Unknown';
+    const trackUrl = task.url || task.originalUrl || '';
     
+    if (trackTitle !== 'Unknown') userMsg += `: "${trackTitle}"`;
+    
+    // Определяем причину ошибки для логирования
+    let reason = 'UNKNOWN_ERROR';
     if (errorDetails.includes('404') || errorDetails.includes('Video unavailable')) {
          userMsg += "\n(Трек удален или приватный)";
+         reason = '404_NOT_FOUND';
+    } else if (errorDetails.includes('403')) {
+         reason = '403_FORBIDDEN';
+    } else if (errorDetails.includes('PREVIEW') || errorDetails.includes('preview')) {
+         reason = 'PREVIEW_ONLY';
+    } else if (errorDetails.includes('timeout') || errorDetails.includes('TIMEOUT')) {
+         reason = 'TIMEOUT';
     }
+    
+    // Логируем битый трек в БД
+    await db.logBrokenTrack(trackUrl, trackTitle, userId, reason).catch(() => {});
 
     await safeSendMessage(userId, userMsg);
 
