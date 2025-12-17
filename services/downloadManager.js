@@ -232,6 +232,7 @@ export async function downloadTrackForUser(url, userId, metadata = null) {
 export async function trackDownloadProcessor(task) {
   let statusMessage = null;
   let tempFilePath = null; // Путь к файлу, если придется качать через yt-dlp
+  let thumbPath = null; // Путь к обложке
   const userId = parseInt(task.userId, 10);
   
   try {
@@ -293,7 +294,6 @@ export async function trackDownloadProcessor(task) {
 
     // 5. ОТПРАВКА В TELEGRAM
     let finalFileId = null;
-    let thumbPath = null;
 
     // Скачиваем обложку
     if (metadata.thumbnail) {
