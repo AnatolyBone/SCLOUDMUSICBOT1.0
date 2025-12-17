@@ -237,25 +237,21 @@
               <% } %>
             </td>
             <td class="text-center">
-              <% if (task.status === 'pending') { %>
-                <div class="btn-group btn-group-sm">
+              <div class="btn-group btn-group-sm">
+                <% if (task.status === 'pending') { %>
                   <a href="/broadcast/edit/<%= task.id %>" 
                      class="btn btn-outline-primary"
-                     title="Редактировать запланированную рассылку">
-                    <i class="bi bi-pencil-fill me-1"></i>Изм.
+                     title="Редактировать">
+                    <i class="bi bi-pencil-fill"></i>
                   </a>
-                  <form method="POST" action="/broadcast/delete" onsubmit="return confirm('Удалить эту рассылку? Действие необратимо.');">
-                    <input type="hidden" name="taskId" value="<%= task.id %>">
-                    <button type="submit" 
-                            class="btn btn-outline-danger"
-                            title="Отменить/удалить">
-                      <i class="bi bi-trash-fill me-1"></i>Отмена
-                    </button>
-                  </form>
-                </div>
-              <% } else { %>
-                <span class="text-muted">—</span>
-              <% } %>
+                <% } %>
+                <form method="POST" action="/broadcast/delete" class="d-inline" onsubmit="return confirm('Удалить эту рассылку?');">
+                  <input type="hidden" name="taskId" value="<%= task.id %>">
+                  <button type="submit" class="btn btn-outline-danger" title="Удалить">
+                    <i class="bi bi-trash-fill"></i>
+                  </button>
+                </form>
+              </div>
             </td>
           </tr>
         <% }) %>
