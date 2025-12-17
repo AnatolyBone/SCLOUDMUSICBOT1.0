@@ -1564,16 +1564,16 @@ export async function incrementDownloadsAndLogPg(userId, trackTitle, fileId, url
 /**
  * Получает пользователей с истекающей подпиской (0-3 дня)
  */
-export async function getExpiringUsers() {
+export async function getExpiringUsers(days = 7) {
   try {
     const sql = `
       SELECT id, username, first_name, premium_until, premium_limit
       FROM users
       WHERE premium_until IS NOT NULL
-        AND premium_until BETWEEN NOW() AND NOW() + interval '3 days'
+        AND premium_until BETWEEN NOW() AND NOW() + interval '${days} days'
       ORDER BY premium_until ASC
     `;
-    const { rows } = await query(sql); // ⬅️ Используем глобальную функцию query
+    const { rows } = await pool.query(sql);
     return rows;
   } catch (error) {
     console.error('[DB] Ошибка при получении истекающих подписок:', error);
