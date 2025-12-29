@@ -597,7 +597,10 @@ export async function trackDownloadProcessor(task) {
 
   // ⚠️ ГИБРИДНАЯ АРХИТЕКТУРА — управляется из админки
   // Читаем настройку из БД (можно переключать без перезапуска)
-  const USE_HYBRID_WORKER = getSetting('use_hybrid_worker') === 'true';
+  const settingValue = getSetting('use_hybrid_worker');
+  const USE_HYBRID_WORKER = String(settingValue) === 'true'; 
+
+  console.log(`[Processor] Source: ${source}, WorkerEnabled: ${USE_HYBRID_WORKER}, Setting: ${settingValue}`); // ЛОГ ДЛЯ ОТЛАДКИ
   
   // ============ ГИБРИДНАЯ АРХИТЕКТУРА ============
   // Spotify/YouTube → делегируем внешнему воркеру (HuggingFace)
