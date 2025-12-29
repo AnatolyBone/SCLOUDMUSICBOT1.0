@@ -1,168 +1,115 @@
-// worker.js - Запускается на мощном сервере/ПК
-// node worker.js
-
-import 'dotenv/config';
-import fs from 'fs';
+import './config.js'; // Загрузка переменных окружения
+import { bot } from './bot.js';
 import { taskBroker } from './services/taskBroker.js';
-import { downloadSpotifyTrack, downloadSpotifyStream } from './services/spotifyDownloader.js';
-import { bot } from './bot.js';  // Нужен для отправки в Telegram
-import { Readable } from 'stream';
+import { downloadTrackForUser } from './services/downloadManager.js';
+import { downloadQueue } from './services/downloadManager.js';
 
-const REDIS_URL = process.env.REDIS_URL;
-const STORAGE_CHANNEL_ID = process.env.STORAGE_CHANNEL_ID;
-
-async function processTask(task) {
-  console.log(`[Worker] 🎵 Обработка: ${task.metadata?.title}`);
-  
-  const { source, quality, metadata, userId, cacheKey } = task;
-  
-  try {
-    if (source === 'spotify') {
-      const trackInfo = {
-        title: metadata.title,
-        artist: metadata.uploader,
-        duration: metadata.duration
-      };
-      
-      let fileId = null;
-      let tempFilePath = null;
-      
-      // Пробуем pipe-стриминг (быстрый метод)
-      try {
-        const streamResult = await downloadSpotifyStream(
-          `${trackInfo.artist} ${trackInfo.title}`,
-          { quality }
-        );
-        
-        const fileSizeMB = streamResult.size / 1024 / 1024;
-        
-        if (fileSizeMB <= 48) {
-          // Отправляем buffer напрямую
-          const stream = Readable.from(streamResult.buffer);
-          
-          const sentMsg = await bot.telegram.sendAudio(
-            STORAGE_CHANNEL_ID,
-            { source: stream, filename: `${trackInfo.title}.mp3` },
-            { 
-              title: trackInfo.title, 
-              performer: trackInfo.artist,
-              duration: metadata.duration ? Math.round(metadata.duration) : undefined,
-              disable_notification: true 
-            }
-          );
-          
-          fileId = sentMsg?.audio?.file_id;
-          console.log(`[Worker] ✅ Stream отправлен, file_id: ${fileId?.slice(0, 20)}...`);
-        } else {
-          throw new Error('BUFFER_TOO_LARGE');
-        }
-      } catch (streamErr) {
-        console.warn(`[Worker] Stream не сработал: ${streamErr.message}, используем файловый метод`);
-        
-        // Fallback на файловый метод
-        const result = await downloadSpotifyTrack(trackInfo, { quality });
-        tempFilePath = result.filePath;
-        
-        const sentMsg = await bot.telegram.sendAudio(
-          STORAGE_CHANNEL_ID,
-          { source: fs.createReadStream(tempFilePath), filename: `${trackInfo.title}.mp3` },
-          { 
-            title: trackInfo.title, 
-            performer: trackInfo.artist,
-            duration: metadata.duration ? Math.round(metadata.duration) : undefined,
-            disable_notification: true 
-          }
-        );
-        
-        fileId = sentMsg?.audio?.file_id;
-        
-        // Удаляем временный файл
-        if (tempFilePath && fs.existsSync(tempFilePath)) {
-          fs.unlinkSync(tempFilePath);
-        }
-        
-        console.log(`[Worker] ✅ Файл отправлен, file_id: ${fileId?.slice(0, 20)}...`);
-      }
-      
-      if (!fileId) {
-        throw new Error('Не удалось получить file_id');
-      }
-      
-      return {
-        success: true,
-        fileId,
-        title: trackInfo.title,
-        artist: trackInfo.artist,
-        quality,
-        cacheKey
-      };
-    }
-    
-    throw new Error(`Unknown source: ${source}`);
-    
-  } catch (err) {
-    console.error(`[Worker] ❌ Ошибка:`, err.message);
-    return {
-      success: false,
-      error: err.message,
-      cacheKey
-    };
-  }
-}
+console.log('[Worker] 🚀 Запуск воркера...');
 
 async function main() {
-  console.log('[Worker] 🚀 Запуск воркера...');
-  
-  const connected = await taskBroker.connect(REDIS_URL);
+  // 1. Подключаемся к Redis (Upstash)
+  const connected = await taskBroker.connect();
   if (!connected) {
-    console.error('[Worker] ❌ Не удалось подключиться к Redis');
-    console.error('[Worker] Проверьте REDIS_URL в .env');
+    console.error('[Worker] ❌ Не удалось подключиться к Redis. Воркер остановлен.');
     process.exit(1);
   }
 
-  // Heartbeat каждые 30 сек
-  setInterval(() => taskBroker.sendHeartbeat(), 30000);
-  await taskBroker.sendHeartbeat();
-
   console.log('[Worker] ✅ Готов к работе. Ожидаю задачи...');
 
-  // Основной цикл
+  // 2. Бесконечный цикл обработки задач
   while (true) {
     try {
-      const task = await taskBroker.getTask(30);
-      
-      if (!task) {
-        continue; // Таймаут, пробуем снова
+      // Отправляем пульс, чтобы Мастер знал, что мы живы
+      await taskBroker.sendHeartbeat();
+
+      // Ждем задачу (блокируется на 2 сек)
+      const task = await taskBroker.getTask();
+
+      if (task) {
+        console.log(`[Worker] 📥 Получена задача: ${task.taskId}`);
+        console.log(`[Worker] 🎵 Обработка: ${task.metadata?.title || task.url}`);
+
+        try {
+          // ==========================================================
+          // ⚙️ ОБРАБОТКА ЗАДАЧИ
+          // ==========================================================
+          
+          let result;
+          
+          // Если это Spotify или YouTube - используем downloadTrackForUser
+          // Эта функция сама скачает, отправит в ТГ и вернет file_id
+          if (task.source === 'spotify' || task.source === 'youtube') {
+             // Формируем URL или поисковый запрос
+             let targetUrl = task.url;
+             
+             // Для Spotify иногда нужно собрать поисковый запрос
+             if (task.source === 'spotify' && task.metadata) {
+                 const artist = task.metadata.uploader || '';
+                 const title = task.metadata.title || '';
+                 targetUrl = `ytmsearch1:${artist} - ${title}`;
+             }
+
+             // Запускаем скачивание
+             const downloadResult = await downloadTrackForUser(targetUrl, task.userId, task.metadata);
+             
+             result = {
+                 success: true,
+                 fileId: downloadResult.fileId,
+                 title: downloadResult.title,
+                 artist: task.metadata?.uploader || 'Unknown',
+                 duration: task.metadata?.duration || 0,
+                 source: task.source,
+                 quality: task.quality
+             };
+          } else {
+              // Для других типов задач (SoundCloud) - пока просто заглушка, 
+              // т.к. SoundCloud обрабатывается на мастере, но на будущее:
+              result = { success: false, error: 'Worker logic for this source not implemented' };
+          }
+
+          // ==========================================================
+          // 📤 ОТПРАВКА РЕЗУЛЬТАТА
+          // ==========================================================
+          
+          if (result.success) {
+            console.log(`[Worker] ✅ Успех! Отправляю результат...`);
+            await taskBroker.sendResult({
+              taskId: task.taskId, // ВАЖНО: Возвращаем ID задачи
+              userId: task.userId,
+              ...result
+            });
+          } else {
+            throw new Error(result.error || 'Unknown error');
+          }
+
+        } catch (processError) {
+          console.error(`[Worker] ❌ Ошибка обработки:`, processError.message);
+          
+          // Отправляем ошибку Мастеру
+          await taskBroker.sendResult({
+            taskId: task.taskId,
+            userId: task.userId,
+            success: false,
+            error: processError.message,
+            task: task // Возвращаем задачу для возможного fallback (локальной обработки)
+          });
+        }
       }
 
-      console.log(`[Worker] 📥 Получена задача: ${task.taskId}`);
-      
-      const result = await processTask(task);
-      
-      await taskBroker.sendResult(task.taskId, {
-        ...result,
-        userId: task.userId
-      });
-      
     } catch (err) {
       console.error('[Worker] Ошибка в цикле:', err.message);
-      await new Promise(r => setTimeout(r, 5000));
+      // Пауза перед рестартом цикла при критической ошибке
+      await new Promise(resolve => setTimeout(resolve, 5000));
     }
   }
 }
 
-// Graceful shutdown
+// Обработка остановки (Ctrl+C)
 process.on('SIGINT', async () => {
   console.log('\n[Worker] Получен SIGINT, завершаю работу...');
   await taskBroker.disconnect();
   process.exit(0);
 });
 
-process.on('SIGTERM', async () => {
-  console.log('\n[Worker] Получен SIGTERM, завершаю работу...');
-  await taskBroker.disconnect();
-  process.exit(0);
-});
-
-main().catch(console.error);
-
+// Запуск
+main();
