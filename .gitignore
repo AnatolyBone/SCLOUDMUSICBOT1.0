@@ -1,0 +1,41 @@
+# Dependencies
+node_modules/
+
+# Environment variables (NEVER commit!)
+.env
+.env.local
+.env.*.local
+youtube_cookies.txt
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# Temporary files
+tmp/
+temp/
+uploads/
+*.tmp
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Build outputs
+dist/
+build/
+
+# Python
+__pycache__/
+*.pyc
+.Python
+env/
+venv/
+

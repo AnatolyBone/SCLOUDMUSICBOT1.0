@@ -1,0 +1,560 @@
+<%# views/dashboard.ejs (безопасная финальная версия) %>
+
+<%# === Хелперы и функции === %>
+<% 
+  // Функция для экранирования HTML (защита от XSS)
+  const escapeHtml = (str) => {
+    if (str === undefined || str === null) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  };
+
+  // Функция для форматирования чисел (1234 -> "1 234")
+  const formatNumber = (num) => {
+    if (num === undefined || num === null) return '0';
+    return Number(num).toLocaleString('ru-RU');
+  };
+%>
+
+<%# === Стили, специфичные для дашборда === %>
+<%- contentFor('styles') %>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/litepicker/dist/css/litepicker.css" integrity="sha256-vT2a22r2ouAL2ltm6mBa7s1j4NOsE12WkQ2xP29S/4o=" crossorigin="anonymous"/>
+<style>
+  .stats-grid .card {
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+  }
+  .stats-grid .card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 8px 16px rgba(0, 0, 0, 0.1);
+  }
+  
+  .chart-container {
+    position: relative;
+    width: 100%;
+    min-height: 300px;
+  }
+  
+  /* Цветовые акценты для карточек */
+  .bg-light-success { background-color: rgba(25, 135, 84, 0.1) !important; }
+  .bg-light-warning { background-color: rgba(255, 193, 7, 0.15) !important; }
+  .bg-light-danger { background-color: rgba(220, 53, 69, 0.1) !important; }
+
+  /* Список тарифов */
+  .card-tariffs .list-group-item {
+    padding-left: 0;
+    padding-right: 0;
+  }
+
+  /* Списки "топов" */
+  .top-list .badge {
+    min-width: 40px;
+    text-align: center;
+  }
+</style>
+
+<%# === Основной контент === %>
+<%- contentFor('body') %>
+
+<div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+  <h1 class="h2">📊 Дашборд</h1>
+  <form id="periodForm" class="d-flex align-items-center flex-wrap gap-2">
+    <input type="hidden" name="startDate" id="startDateInput">
+    <input type="hidden" name="endDate" id="endDateInput">
+   <% 
+  // Вычисляем разницу дней для подсветки кнопок
+  const startD = locals.startDate ? new Date(locals.startDate) : new Date();
+  const endD = locals.endDate ? new Date(locals.endDate) : new Date();
+  const diffTime = Math.abs(endD - startD);
+  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
+%>
+
+<div class="btn-group btn-group-sm" role="group">
+  <a href="#" class="btn btn-outline-secondary <%= diffDays <= 8 ? 'active' : '' %>" data-days="7">7 дней</a>
+  <a href="#" class="btn btn-outline-secondary <%= diffDays > 8 && diffDays <= 31 ? 'active' : '' %>" data-days="30">30 дней</a>
+  <a href="#" class="btn btn-outline-secondary <%= diffDays > 31 ? 'active' : '' %>" data-days="90">90 дней</a>
+</div>
+    <input type="text" id="date-range-picker" class="form-control form-control-sm" style="width: 220px; text-align: center;">
+    <button type="submit" class="btn btn-sm btn-primary"><i class="bi bi-arrow-clockwise"></i> Обновить</button>
+  </form>
+</div>
+
+<%# === Уведомления === %>
+<% 
+  const alerts = [];
+  if (locals.resetOthers) {
+    const message = locals.resetOthers === 'err' 
+      ? 'Не удалось сбросить "Другие" тарифы' 
+      : `Сброшено "Других" тарифов: <b>${escapeHtml(locals.resetOthers)}</b>`;
+    alerts.push({ type: locals.resetOthers === 'err' ? 'danger' : 'success', message });
+  }
+  if (locals.resetExpired) {
+    const message = locals.resetExpired === 'err' 
+      ? 'Не удалось сбросить истёкшие подписки' 
+      : `Сброшено истёкших подписок: <b>${escapeHtml(locals.resetExpired)}</b>`;
+    alerts.push({ type: locals.resetExpired === 'err' ? 'danger' : 'success', message });
+  }
+%>
+<% alerts.forEach(alert => { %>
+  <div class="alert alert-<%= alert.type %> alert-dismissible fade show" role="alert" data-autohide="5000">
+    <%- alert.message %><button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+  </div>
+<% }); %>
+
+<%# === Верхние метрики === %>
+<div class="row row-cols-1 row-cols-sm-2 row-cols-md-3 row-cols-xl-5 g-4 mb-4 stats-grid">
+  <% 
+    const metrics = [
+      { label: 'Всего юзеров', value: stats.total_users, icon: 'bi-people-fill' },
+      { label: 'Активных сегодня', value: stats.active_today, icon: 'bi-activity' },
+      { label: 'Загрузок (всего)', value: stats.total_downloads, icon: 'bi-download' },
+      { label: 'Пришли по ссылке', value: stats.totalReferred, icon: 'bi-share-fill', bg: 'bg-light-success' },
+      { label: 'Треков в кэше', value: stats.cachedTracksCount, icon: 'bi-hdd-stack-fill' }
+    ];
+  %>
+  <% metrics.forEach(m => { %>
+    <div class="col">
+      <div class="card shadow-sm text-center h-100 <%= m.bg || '' %>">
+        <div class="card-body">
+          <i class="bi <%= m.icon %> h3 text-muted mb-2"></i>
+          <p class="h2 mb-0"><%= formatNumber(m.value) %></p>
+          <h5 class="card-title text-muted small mt-1"><%= m.label %></h5>
+        </div>
+      </div>
+    </div>
+  <% }); %>
+</div>
+
+<%# === Информационные блоки === %>
+<div class="row g-4 mb-4">
+  <%# Статус систем %>
+  <div class="col-lg-4">
+    <div class="card shadow-sm h-100">
+      <div class="card-header fw-semibold"><i class="bi bi-hdd-network me-2"></i>Статус систем</div>
+      <div class="card-body">
+        <ul class="list-group list-group-flush">
+          <li class="list-group-item d-flex justify-content-between align-items-center px-0">
+            <span>Очередь загрузок (всего)</span>
+            <span class="badge bg-primary rounded-pill" data-bs-toggle="tooltip" title="В ожидании / В работе">
+              <%= formatNumber(stats.queueWaiting) %> / <%= formatNumber(stats.queueActive) %>
+            </span>
+          </li>
+          <li class="list-group-item d-flex justify-content-between align-items-center px-0">
+            <span>Канал-хранилище</span>
+            <% if (storageStatus?.available) { %>
+              <span class="badge bg-success">✓ Доступен</span>
+            <% } else { %>
+              <span class="badge bg-danger" 
+                    data-bs-toggle="tooltip" 
+                    title="<%= escapeHtml(storageStatus?.error || 'ID не указан') %>">
+                ✗ Ошибка
+              </span>
+            <% } %>
+          </li>
+        </ul>
+        
+        <%# === Детализация по источникам === %>
+        <% 
+          const queueStats = stats.queueStatsBySource || {};
+          const sources = [
+            { key: 'spotify', label: '🎵 Spotify', color: 'success' },
+            { key: 'youtube', label: '▶️ YouTube', color: 'danger' },
+            { key: 'soundcloud', label: '☁️ SoundCloud', color: 'warning' },
+            { key: 'other', label: '📦 Другие', color: 'secondary' }
+          ];
+        %>
+        
+        <div class="mt-3 pt-3 border-top">
+          <h6 class="fw-semibold mb-2">Очереди по источникам:</h6>
+          <div class="d-flex flex-column gap-2">
+            <% sources.forEach(source => { 
+              const sourceStats = queueStats[source.key] || { waiting: 0, active: 0 };
+              const total = sourceStats.waiting + sourceStats.active;
+              const hasTasks = sourceStats.waiting > 0;
+            %>
+              <div class="d-flex justify-content-between align-items-center p-2 rounded <%= total > 0 ? '' : 'opacity-75' %>" style="background-color: rgba(0,0,0,0.1);">
+                <div class="d-flex align-items-center gap-2">
+                  <span><%- source.label %></span>
+                  <span class="badge bg-<%= source.color %> rounded-pill">
+                    <%= formatNumber(sourceStats.waiting) %> / <%= formatNumber(sourceStats.active) %>
+                  </span>
+                </div>
+                <% if (hasTasks) { %>
+                  <form action="/admin/queue/clear/<%= source.key %>" method="POST" class="mb-0" style="display: inline;">
+                    <button type="submit" 
+                            class="btn btn-sm btn-outline-<%= source.color %>" 
+                            data-confirm="Очистить очередь для <%= source.label %>? (Удалено будет: <%= sourceStats.waiting %> задач)">
+                      <i class="bi bi-x-circle me-1"></i> Очистить
+                    </button>
+                  </form>
+                <% } else { %>
+                  <span class="text-muted small">Нет задач</span>
+                <% } %>
+              </div>
+            <% }); %>
+          </div>
+        </div>
+        
+        <%# === Кнопка очистки всей очереди === %>
+        <% if (stats.queueWaiting > 0) { %>
+          <div class="mt-3 pt-3 border-top">
+            <form action="/admin/queue/clear" method="POST">
+              <button type="submit" 
+                      class="btn btn-sm btn-danger w-100" 
+                      data-confirm="Вы уверены, что хотите полностью очистить очередь загрузок? Это действие необратимо.">
+                <i class="bi bi-trash3-fill me-1"></i> Очистить всю очередь
+              </button>
+            </form>
+          </div>
+        <% } %>
+      </div>
+    </div>
+  </div>
+
+  <%# Пользователи по тарифам %>
+  <div class="col-lg-4">
+    <div class="card shadow-sm h-100 card-tariffs">
+      <div class="card-header fw-semibold"><i class="bi bi-pie-chart-fill me-2"></i>Тарифы</div>
+      <div class="card-body">
+        <% 
+          const tariffs = [
+            { label: '🆓 Free', value: stats.usersByTariff?.Free },
+            { label: '🎯 Plus', value: stats.usersByTariff?.Plus },
+            { label: '💪 Pro', value: stats.usersByTariff?.Pro },
+            { label: '💎 Unlimited', value: stats.usersByTariff?.Unlimited }
+          ];
+          const othersCount = Number(stats?.usersByTariff?.Other ?? 0);
+          const expiredCountSafe = Number(expiredCount ?? 0);
+        %>
+        <ul class="list-group list-group-flush">
+          <% tariffs.forEach(t => { %>
+            <li class="list-group-item d-flex justify-content-between align-items-center">
+              <span><%- t.label %></span>
+              <span class="fw-bold"><%= formatNumber(t.value) %></span>
+            </li>
+          <% }); %>
+          
+          <li class="list-group-item d-flex justify-content-between align-items-center <%= othersCount > 0 ? 'bg-light-warning' : '' %>">
+            <span class="fw-semibold">⚙️ Другие (старые)</span>
+            <span class="fw-bold"><%= formatNumber(othersCount) %></span>
+          </li>
+          
+          <li class="list-group-item d-flex justify-content-between align-items-center <%= expiredCountSafe > 0 ? 'bg-light-danger' : '' %>">
+            <span class="fw-semibold">⌛ Истёкшие (не Free)</span>
+            <span class="fw-bold"><%= formatNumber(expiredCountSafe) %></span>
+          </li>
+        </ul>
+
+        <div class="d-flex flex-column gap-2 mt-3">
+          <% if (othersCount > 0) { %>
+            <form method="post" action="/tariffs/reset-others">
+              <button type="submit" 
+                      class="btn btn-sm btn-warning w-100" 
+                      data-confirm="Сбросить все 'Другие' тарифы до Free?">
+                Сбросить «Другие»
+              </button>
+            </form>
+          <% } %>
+          
+          <% if (expiredCountSafe > 0) { %>
+            <form method="post" action="/tariffs/reset-expired">
+              <button type="submit" 
+                      class="btn btn-sm btn-outline-danger w-100" 
+                      data-confirm="Сбросить все истёкшие подписки до Free?">
+                Сбросить истёкшие
+              </button>
+            </form>
+          <% } %>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <%# Топ-5 источников трафика %>
+  <div class="col-lg-4">
+    <div class="card shadow-sm h-100 top-list">
+      <div class="card-header fw-semibold"><i class="bi bi-signpost-split-fill me-2"></i>Источники трафика</div>
+      <div class="card-body">
+        <% if (stats.topSources?.length > 0) { %>
+          <ul class="list-group list-group-flush">
+            <% stats.topSources.forEach(source => { %>
+              <li class="list-group-item d-flex justify-content-between align-items-center">
+                <span class="text-truncate" title="<%- escapeHtml(source.referral_source) %>">
+                  <%- escapeHtml(source.referral_source) %>
+                </span>
+                <span class="badge bg-secondary rounded-pill"><%= formatNumber(source.count) %></span>
+              </li>
+            <% }) %>
+          </ul>
+        <% } else { %>
+          <div class="text-muted text-center my-4">
+            <i class="bi bi-inbox fs-3 opacity-25"></i>
+            <p class="mt-2">Нет данных</p>
+          </div>
+        <% } %>
+      </div>
+    </div>
+  </div>
+</div>
+
+<%# === ГРАФИКИ === %>
+<div class="card shadow-sm mb-4">
+  <div class="card-header fw-semibold"><i class="bi bi-graph-up me-2"></i>Динамика метрик</div>
+  <div class="card-body chart-container">
+    <div class="spinner d-none" id="mainChartSpinner"></div>
+    <canvas id="mainChart"></canvas>
+  </div>
+</div>
+
+<div class="row g-4 mb-4">
+  <div class="col-lg-4">
+    <div class="card shadow-sm h-100">
+      <div class="card-header fw-semibold"><i class="bi bi-pie-chart-fill me-2"></i>Тарифы</div>
+      <div class="card-body d-flex justify-content-center align-items-center chart-container">
+        <canvas id="tariffsChart"></canvas>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-8">
+    <div class="card shadow-sm h-100">
+      <div class="card-header fw-semibold"><i class="bi bi-bar-chart-line-fill me-2"></i>Активность по дням недели</div>
+      <div class="card-body chart-container">
+        <canvas id="weekdayChart"></canvas>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="card shadow-sm my-4">
+  <div class="card-header fw-semibold"><i class="bi bi-clock-history me-2"></i>Активность по часам (за 7 дней)</div>
+  <div class="card-body chart-container">
+    <canvas id="hourlyChart"></canvas>
+  </div>
+</div>
+
+<%# === Дополнительная аналитика === %>
+<div class="row g-4 mb-4">
+  <div class="col-lg-4">
+    <div class="card shadow-sm h-100 top-list">
+      <div class="card-header fw-semibold"><i class="bi bi-music-note-list me-2"></i>Топ-10 треков</div>
+      <div class="card-body">
+        <% if (topTracks?.length > 0) { %>
+          <ul class="list-group list-group-flush">
+            <% topTracks.forEach((track, index) => { %>
+              <li class="list-group-item d-flex justify-content-between align-items-center">
+                <div class="text-truncate">
+                  <span class="text-muted"><%= index + 1 %>.</span> <%- escapeHtml(track.track_title) %>
+                </div>
+                <span class="badge bg-primary rounded-pill"><%= formatNumber(track.count) %></span>
+              </li>
+            <% }) %>
+          </ul>
+        <% } else { %>
+          <div class="text-muted text-center my-4">Нет данных</div>
+        <% } %>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-4">
+    <div class="card shadow-sm h-100 top-list">
+      <div class="card-header fw-semibold"><i class="bi bi-trophy-fill me-2"></i>Топ-10 пользователей</div>
+      <div class="card-body">
+        <% if (topUsers?.length > 0) { %>
+          <ul class="list-group list-group-flush">
+            <% topUsers.forEach((user, index) => { %>
+              <li class="list-group-item d-flex justify-content-between align-items-center">
+                <div class="text-truncate">
+                  <span class="text-muted"><%= index + 1 %>.</span>
+                  <a href="/user/<%= user.id %>" class="text-decoration-none">
+                    <%- escapeHtml(user.first_name) || `ID: ${user.id}` %>
+                  </a>
+                  <% if (user.username) { %>
+                    <small class="text-muted">@<%- escapeHtml(user.username) %></small>
+                  <% } %>
+                </div>
+                <span class="badge bg-success rounded-pill"><%= formatNumber(user.total_downloads) %></span>
+              </li>
+            <% }) %>
+          </ul>
+        <% } else { %>
+          <div class="text-muted text-center my-4">Нет данных</div>
+        <% } %>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-4">
+    <div class="card shadow-sm h-100 top-list">
+      <div class="card-header fw-semibold"><i class="bi bi-person-plus-fill me-2"></i>Топ-5 рефоводов</div>
+      <div class="card-body">
+        <% if (stats.topReferrers?.length > 0) { %>
+<ul class="list-group list-group-flush">
+  <% stats.topReferrers.forEach((user, index) => { %>
+    <li class="list-group-item d-flex justify-content-between align-items-center">
+      <div class="text-truncate">
+        <span class="text-muted"><%= index + 1 %>.</span>
+        <!-- 👇 ИСПРАВЛЕННАЯ ССЫЛКА (user.id) -->
+        <a href="/user/<%= user.id %>" class="text-decoration-none">
+          <%- escapeHtml(user.first_name) || `ID: ${user.id}` %>
+        </a>
+      </div>
+      <span class="badge bg-info text-dark rounded-pill">
+        <%= formatNumber(user.referral_count) %>
+      </span>
+    </li>
+  <% }) %>
+</ul>
+        <% } else { %>
+          <div class="text-muted text-center my-4">Нет данных</div>
+        <% } %>
+      </div>
+    </div>
+  </div>
+</div>
+
+<%# === Скрипты, специфичные для дашборда === %>
+<%- contentFor('scripts') %>
+
+<%# 1. Подключаем библиотеки с defer %>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/litepicker/dist/litepicker.js" defer></script>
+
+<%# 2. Определяем функцию инициализации, которую вызовет layout.ejs %>
+<script>
+  window.initializePage = function() {
+    console.log('[Dashboard] Инициализация графиков и календаря...');
+
+    // Безопасная проверка, что библиотеки загружены
+    if (typeof Chart === 'undefined' || typeof Litepicker === 'undefined') {
+      console.error('КРИТИЧЕСКАЯ ОШИБКА: Chart.js или Litepicker не загрузились вовремя!');
+      document.body.insertAdjacentHTML('afterbegin', '<div class="alert alert-danger">Ошибка загрузки библиотек. Графики не будут отображаться.</div>');
+      return;
+    }
+
+    // --- Date Picker ---
+    const form = document.getElementById('periodForm');
+    const startDateInput = document.getElementById('startDateInput');
+    const endDateInput = document.getElementById('endDateInput');
+    const dateRangePickerElement = document.getElementById('date-range-picker');
+
+    const picker = new Litepicker({
+      element: dateRangePickerElement,
+      singleMode: false,
+      format: 'DD.MM.YYYY',
+      startDate: new Date('<%- locals.startDate || new Date(new Date().setDate(new Date().getDate() - 29)).toISOString().slice(0, 10) %>'),
+      endDate: new Date('<%- locals.endDate || new Date().toISOString().slice(0, 10) %>'),
+      setup: (picker) => {
+        picker.on('selected', (date1, date2) => {
+          if (date1 && date2) {
+            startDateInput.value = date1.format('YYYY-MM-DD');
+            endDateInput.value = date2.format('YYYY-MM-DD');
+          }
+        });
+      }
+    });
+    
+    form.querySelectorAll('.btn-group .btn').forEach(button => {
+        button.addEventListener('click', (event) => {
+            event.preventDefault();
+            const days = parseInt(event.target.dataset.days, 10);
+            const endDate = new Date();
+            const startDate = new Date();
+            startDate.setDate(endDate.getDate() - (days - 1));
+            
+            startDateInput.value = startDate.toISOString().slice(0, 10);
+            endDateInput.value = endDate.toISOString().slice(0, 10);
+            form.submit();
+        });
+    });
+
+    if (picker.getStartDate() && picker.getEndDate()) {
+        startDateInput.value = picker.getStartDate().format('YYYY-MM-DD');
+        endDateInput.value = picker.getEndDate().format('YYYY-MM-DD');
+    }
+
+    // --- Chart Drawing ---
+    function drawChart(canvasId, chartData, chartType, options = {}) {
+        const canvas = document.getElementById(canvasId);
+        if (!canvas) return;
+        const container = canvas.parentElement;
+        
+        if (!chartData?.labels?.length > 0) {
+            container.innerHTML = `<div class="d-flex justify-content-center align-items-center h-100 text-muted p-4">Нет данных для отображения.</div>`;
+            return;
+        }
+
+        try {
+            if (Chart.getChart(canvas)) {
+              Chart.getChart(canvas).destroy();
+            }
+            new Chart(canvas.getContext('2d'), { 
+              type: chartType, 
+              data: chartData, 
+              options 
+            });
+        } catch (e) {
+            console.error(`Ошибка при построении графика ${canvasId}:`, e);
+            container.innerHTML = `<div class="d-flex justify-content-center align-items-center h-100 text-danger p-4">Ошибка при построении графика.</div>`;
+        }
+    }
+
+    const commonLineBarOptions = { 
+        responsive: true, 
+        maintainAspectRatio: false, 
+        scales: { 
+            y: { 
+              beginAtZero: true,
+              ticks: { 
+                  callback: (value) => window.formatNumber ? window.formatNumber(value) : value 
+              }
+            } 
+        },
+        plugins: {
+            tooltip: {
+              callbacks: {
+                  label: (context) => `${context.dataset.label}: ${window.formatNumber ? window.formatNumber(context.raw) : context.raw}`
+              }
+            }
+        }
+    };
+
+    drawChart('mainChart', <%- JSON.stringify(locals.chartDataCombined || {}) %>, 'line', commonLineBarOptions);
+    drawChart('tariffsChart', <%- JSON.stringify(locals.chartDataTariffs || {}) %>, 'doughnut', { 
+        responsive: true, 
+        maintainAspectRatio: false, 
+        plugins: { legend: { position: 'right' } } 
+    });
+    drawChart('weekdayChart', <%- JSON.stringify(locals.chartDataWeekday || {}) %>, 'bar', { 
+      ...commonLineBarOptions, 
+      plugins: { 
+          ...commonLineBarOptions.plugins,
+          legend: { display: false } 
+      } 
+    });
+    drawChart('hourlyChart', <%- JSON.stringify(locals.chartDataHourly || {}) %>, 'bar', { 
+      ...commonLineBarOptions, 
+      plugins: { 
+          ...commonLineBarOptions.plugins,
+          legend: { display: false } 
+      }
+    });
+
+    // --- Обработка подтверждений для форм с data-confirm ---
+    document.querySelectorAll('button[data-confirm]').forEach(button => {
+      button.addEventListener('click', (e) => {
+        const message = button.getAttribute('data-confirm');
+        if (message && !confirm(message)) {
+          e.preventDefault();
+          e.stopPropagation();
+          return false;
+        }
+      });
+    });
+
+    console.log('[Dashboard] Инициализация завершена');
+  };
+</script>

@@ -1,0 +1,391 @@
+<%# views/user-profile.ejs (Final Version with Date Picker) %>
+
+<%# === Хелперы и функции === %>
+<% 
+  const escapeHtml = (str) => {
+    if (str === undefined || str === null) return '';
+    return String(str)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+  };
+
+  const formatDate = (s) => {
+    if (!s) return '—';
+    try {
+      const d = new Date(s);
+      if (isNaN(d.getTime())) return '—';
+      return d.toLocaleString('ru-RU', {
+        year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit'
+      });
+    } catch {
+      return '—';
+    }
+  };
+  
+  // Безопасное получение данных (защита от undefined)
+  const u = typeof userProfile !== 'undefined' ? userProfile : {};
+  const safeName = escapeHtml(u.first_name);
+  const safeUsername = escapeHtml(u.username);
+  const displayName = safeName || safeUsername || `ID: ${u.id || '???'}`;
+  
+  // Безопасный доступ к queryParams для уведомлений
+  const qParams = typeof queryParams !== 'undefined' ? queryParams : {};
+%>
+
+<%- contentFor('styles') %>
+<style>
+  .dl-horizontal dt {
+    text-align: left;
+    white-space: normal;
+    font-weight: 600;
+    color: #555;
+  }
+  .action-buttons form {
+    display: inline-block;
+  }
+  .table-responsive {
+    max-height: 500px;
+    overflow-y: auto;
+  }
+</style>
+
+<%- contentFor('body') %>
+
+<% if (u.id) { %>
+
+<div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+  <div class="d-flex align-items-center gap-3">
+    <div class="user-avatar bg-light text-secondary d-flex align-items-center justify-content-center rounded-circle border" style="width: 50px; height: 50px; font-size: 1.5rem; font-weight: bold;">
+      <%= displayName.charAt(0).toUpperCase() %>
+    </div>
+    <h1 class="h2 mb-0"><%- displayName %></h1>
+  </div>
+  <div class="btn-toolbar mb-2 mb-md-0">
+    <a href="/users" class="btn btn-sm btn-outline-secondary">
+      <i class="bi bi-arrow-left me-1"></i> Назад к списку
+    </a>
+  </div>
+</div>
+
+<%# Уведомление об успешном исправлении кэша %>
+<% if (qParams.fixedCount) { %>
+  <div class="alert alert-success alert-dismissible fade show" role="alert">
+    <i class="bi bi-magic me-2"></i>
+    <strong>Успешно!</strong> Сброшен кэш для <b><%= qParams.fixedCount %></b> треков (до <%= qParams.fixedDate %>).
+    <br><small>Теперь при повторном скачивании названия файлов будут корректными.</small>
+    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+  </div>
+<% } %>
+
+<div class="row g-4">
+  <%# === Левая колонка: информация и управление === %>
+  <div class="col-lg-5">
+    
+    <%# Карточка Инфо %>
+    <div class="card shadow-sm mb-4">
+      <div class="card-header fw-semibold bg-light"><i class="bi bi-person-lines-fill me-2"></i>Информация о пользователе</div>
+      <div class="card-body">
+        <dl class="row mb-0 dl-horizontal">
+          <dt class="col-sm-5">ID</dt><dd class="col-sm-7"><%= u.id %></dd>
+          <dt class="col-sm-5">Имя</dt><dd class="col-sm-7"><%- safeName || '<em class="text-muted">Не указано</em>' %></dd>
+          <dt class="col-sm-5">Username</dt><dd class="col-sm-7"><%- safeUsername ? `<a href="https://t.me/${safeUsername}" target="_blank">@${safeUsername}</a>` : '—' %></dd>
+          
+          <dt class="col-sm-5">Статус</dt>
+          <dd class="col-sm-7">
+            <span class="badge <%= u.active ? 'bg-success' : 'bg-danger' %>">
+              <%= u.active ? '✓ Активен' : '✗ Заблокирован' %>
+            </span>
+          </dd>
+
+          <dt class="col-sm-5">Источник</dt>
+          <dd class="col-sm-7">
+            <% if (typeof referrer !== 'undefined' && referrer) { %>
+              Приглашен: <a href="/user/<%= referrer.id %>"><%- escapeHtml(referrer.first_name || referrer.username) || `ID: ${referrer.id}` %></a>
+            <% } else if (u.referral_source) { %>
+              <span class="badge bg-secondary"><%= u.referral_source %></span>
+            <% } else { %>
+              <span class="text-muted">Органический</span>
+            <% } %>
+          </dd>
+          
+          <dt class="col-sm-5">Тариф</dt>
+          <dd class="col-sm-7">
+            <% 
+              const limit = u.premium_limit || 0;
+              let planClass = 'bg-secondary';
+              let planName = 'Other';
+              if (limit <= 5) { planName = 'Free'; planClass = 'bg-secondary'; }
+              else if (limit == 30) { planName = 'Plus'; planClass = 'bg-info text-dark'; }
+              else if (limit == 100) { planName = 'Pro'; planClass = 'bg-warning text-dark'; }
+              else if (limit >= 10000) { planName = 'Unlim'; planClass = 'bg-primary'; }
+            %>
+            <span class="badge <%= planClass %>"><%= planName %> (<%= limit %>)</span>
+          </dd>
+          
+          <dt class="col-sm-5">Подписка до</dt><dd class="col-sm-7"><%= formatDate(u.premium_until) %></dd>
+          <dt class="col-sm-5">Последняя активность</dt><dd class="col-sm-7"><%= formatDate(u.last_active) %></dd>
+          <dt class="col-sm-5">Загрузок (сегодня/всего)</dt>
+          <dd class="col-sm-7">
+            <strong><%= u.downloads_today || 0 %></strong> / <%= u.total_downloads || 0 %>
+          </dd>
+        </dl>
+      </div>
+    </div>
+
+    <%# Карточка Смены Тарифа %>
+    <div class="card shadow-sm mb-4">
+      <div class="card-header fw-semibold bg-light"><i class="bi bi-gem me-2"></i>Управление тарифом</div>
+      <div class="card-body">
+        <form class="row g-2 align-items-center" method="post" action="/set-tariff" onsubmit="return confirm('Изменить тариф для этого пользователя?');">
+          <input type="hidden" name="userId" value="<%= u.id %>">
+          
+          <div class="col-md-5">
+            <label class="form-label small text-muted mb-0">Тариф</label>
+            <select name="limit" class="form-select form-select-sm" required>
+              <option value="5" <%= u.premium_limit <= 5 ? 'selected' : '' %>>Free (5)</option>
+              <option value="30" <%= u.premium_limit == 30 ? 'selected' : '' %>>Plus (30)</option>
+              <option value="100" <%= u.premium_limit == 100 ? 'selected' : '' %>>Pro (100)</option>
+              <option value="10000" <%= u.premium_limit >= 10000 ? 'selected' : '' %>>Unlim</option>
+            </select>
+          </div>
+          
+          <div class="col-md-3">
+            <label class="form-label small text-muted mb-0">Дней</label>
+            <input type="number" name="days" class="form-control form-control-sm" value="30" min="1" max="999" required>
+          </div>
+          
+          <div class="col-md-4 d-flex align-items-end">
+            <button type="submit" class="btn btn-sm btn-primary w-100 mt-3">Сохранить</button>
+          </div>
+
+          <div class="col-12 mt-2">
+            <div class="form-check form-check-inline">
+              <input class="form-check-input" type="radio" name="applyMode" id="applyModeSet" value="set" checked>
+              <label class="form-check-label small" for="applyModeSet">Установить (сброс даты)</label>
+            </div>
+            <div class="form-check form-check-inline">
+              <input class="form-check-input" type="radio" name="applyMode" id="applyModeExtend" value="extend">
+              <label class="form-check-label small" for="applyModeExtend">Продлить (добавить дни)</label>
+            </div>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <%# Карточка Действий %>
+    <div class="card shadow-sm mb-4">
+      <div class="card-header fw-semibold bg-light"><i class="bi bi-tools me-2"></i>Быстрые действия</div>
+      <div class="card-body d-flex flex-wrap gap-2 action-buttons">
+
+        <form action="/user/set-status" method="POST">
+          <input type="hidden" name="userId" value="<%= u.id %>">
+          <% if (u.active) { %>
+            <input type="hidden" name="newStatus" value="false">
+            <button type="submit" class="btn btn-sm btn-outline-danger" onclick="return confirm('Заблокировать <%= displayName %>?');">
+              <i class="bi bi-ban me-1"></i>Бан
+            </button>
+          <% } else { %>
+            <input type="hidden" name="newStatus" value="true">
+            <button type="submit" class="btn btn-sm btn-success">
+              <i class="bi bi-check-circle me-1"></i>Разбан
+            </button>
+          <% } %>
+        </form>
+
+        <form action="/reset-daily-limit" method="POST">
+          <input type="hidden" name="userId" value="<%= u.id %>">
+          <button type="submit" class="btn btn-sm btn-outline-warning text-dark" onclick="return confirm('Сбросить дневной лимит?');">
+            <i class="bi bi-arrow-counterclockwise me-1"></i>Сброс лимита
+          </button>
+        </form>
+
+        <form action="/reset-bonus" method="POST">
+          <input type="hidden" name="userId" value="<%= u.id %>">
+          <button type="submit" class="btn btn-sm btn-outline-info text-dark" onclick="return confirm('Сбросить использование бонуса?');">
+            <i class="bi bi-gift me-1"></i>Сброс бонуса
+          </button>
+        </form>
+
+        <form action="/admin/queue/clear-user" method="POST">
+          <input type="hidden" name="userId" value="<%= u.id %>">
+          <button type="submit" class="btn btn-sm btn-outline-secondary" onclick="return confirm('Очистить очередь загрузок этого юзера?');">
+            <i class="bi bi-eraser-fill me-1"></i>Очистить очередь
+          </button>
+        </form>
+      </div>
+    </div>
+
+    <%# === 🛑 БЛОК ИСПРАВЛЕНИЯ АУДИО (С ВЫБОРОМ ДАТЫ) === %>
+    <div class="card shadow-sm border-warning mb-4">
+      <div class="card-header bg-warning text-dark fw-bold">
+        <i class="bi bi-wrench-adjustable me-2"></i>Управление кэшем
+      </div>
+      <div class="card-body">
+        <p class="small text-muted mb-3">
+          Если у пользователя старые треки скачиваются с именем <code>audio.mp3</code>, выберите дату (до какого числа сбрасывать) и нажмите исправить.
+        </p>
+        
+        <form action="/admin/user/<%= u.id %>/fix-cache" method="POST">
+          <div class="mb-3">
+            <label for="fixDate" class="form-label small fw-bold text-muted">Сбросить треки, скачанные ДО:</label>
+            <input 
+              type="date" 
+              class="form-control form-control-sm" 
+              id="fixDate" 
+              name="fixDate" 
+              value="<%= new Date().toISOString().split('T')[0] %>" 
+              required
+            >
+          </div>
+          
+          <button type="submit" class="btn btn-sm btn-danger w-100 d-flex align-items-center justify-content-center" onclick="return confirm('Вы уверены? Это заставит бота заново скачивать старые треки этого пользователя при следующем запросе.');">
+            <i class="bi bi-magic me-2"></i> Исправить кэш
+          </button>
+        </form>
+
+        <hr class="my-2 text-muted opacity-25">
+        
+        <div class="text-center">
+            <a href="/admin/user/<%= u.id %>/links" class="small text-decoration-none text-secondary">
+              <i class="bi bi-file-earmark-text me-1"></i>Скачать список ссылок (.txt)
+            </a>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <%# === Правая колонка: таблицы === %>
+  <div class="col-lg-7">
+    
+    <%# Приглашенные %>
+    <div class="card shadow-sm mb-4">
+      <div class="card-header fw-semibold bg-light">
+        <i class="bi bi-person-plus-fill me-2"></i>Приглашенные (<%= (typeof referredUsers !== 'undefined' ? referredUsers.length : 0) %>)
+      </div>
+      <% if (typeof referredUsers !== 'undefined' && referredUsers.length > 0) { %>
+        <div class="list-group list-group-flush overflow-auto" style="max-height: 200px;">
+          <% referredUsers.forEach(refUser => { %>
+            <a href="/user/<%= refUser.id %>" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center p-2">
+              <div>
+                <span class="fw-semibold small"><%- escapeHtml(refUser.first_name) || 'Без имени' %></span>
+                <span class="text-muted small ms-1">(ID: <%= refUser.id %>)</span>
+              </div>
+              <small class="text-muted" style="font-size: 0.75rem;"><%= formatDate(refUser.created_at) %></small>
+            </a>
+          <% }); %>
+        </div>
+      <% } else { %>
+        <div class="card-body text-center text-muted py-3">
+          <small>Нет приглашенных пользователей</small>
+        </div>
+      <% } %>
+    </div>
+
+    <%# Последние скачивания %>
+    <div class="card shadow-sm mb-4">
+      <div class="card-header fw-semibold bg-light d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-music-note-list me-2"></i>История скачиваний</span>
+      </div>
+      <div class="table-responsive">
+        <% if (typeof downloads === 'undefined' || downloads.length === 0) { %>
+          <div class="text-center text-muted py-4">Нет скачиваний</div>
+        <% } else { %>
+          <table class="table table-hover table-sm mb-0 align-middle" style="font-size: 0.9rem;">
+            <thead class="table-light">
+              <tr>
+                <th>Трек</th>
+                <th class="text-end">Дата</th>
+              </tr>
+            </thead>
+            <tbody>
+              <% downloads.forEach((d) => { %>
+                <tr>
+                  <td>
+                    <div class="d-flex align-items-center">
+                      <div class="text-truncate" style="max-width: 300px;" title="<%- escapeHtml(d.track_title) %>">
+                        <%- escapeHtml(d.track_title) %>
+                      </div>
+                      <% if (d.url) { %>
+                        <a href="<%= d.url %>" target="_blank" class="ms-2 text-secondary" title="Открыть ссылку">
+                          <i class="bi bi-box-arrow-up-right" style="font-size: 0.75rem;"></i>
+                        </a>
+                      <% } %>
+                    </div>
+                  </td>
+                  <td class="text-end text-nowrap text-muted" style="font-size: 0.8rem;">
+                    <%= formatDate(d.created_at || d.downloaded_at) %>
+                  </td>
+                </tr>
+              <% }) %>
+            </tbody>
+          </table>
+        <% } %>
+      </div>
+    </div>
+
+    <%# История действий (Logs) %>
+    <div class="card shadow-sm">
+      <div class="card-header fw-semibold bg-light"><i class="bi bi-list-check me-2"></i>Системный лог</div>
+      <div class="table-responsive">
+        <% if (typeof actions === 'undefined' || actions.length === 0) { %>
+          <div class="text-center text-muted py-4">Нет действий</div>
+        <% } else { %>
+          <table class="table table-hover table-sm mb-0 align-middle" style="font-size: 0.85rem;">
+            <thead class="table-light">
+              <tr>
+                <th>Тип</th>
+                <th>Детали</th>
+                <th class="text-end">Время</th>
+              </tr>
+            </thead>
+            <tbody>
+              <% actions.forEach(action => { %>
+                <tr>
+                  <td>
+                    <%
+                      const actionMap = {
+                        'registration': { name: 'Регистрация', class: 'bg-light text-dark border' },
+                        'bonus_received': { name: 'Бонус', class: 'bg-success text-white' },
+                        'tariff_changed_by_admin': { name: 'Смена тарифа', class: 'bg-warning text-dark' },
+                        'banned_by_admin': { name: 'Бан', class: 'bg-danger text-white' },
+                        'unbanned_by_admin': { name: 'Разбан', class: 'bg-success text-white' },
+                        'referral_bonus_received': { name: 'Реф. бонус', class: 'bg-info text-dark' },
+                      };
+                      const act = actionMap[action.action_type] || { name: escapeHtml(action.action_type), class: 'bg-light text-secondary' };
+                    %>
+                    <span class="badge <%= act.class %> fw-normal"><%- act.name %></span>
+                  </td>
+                  <td>
+                    <% if (action.details && typeof action.details === 'object') { %>
+                      <% if (action.details.new_limit) { %>
+                        Limit: <b><%= action.details.new_limit %></b> (<%= action.details.days %>д)
+                      <% } else { %>
+                        <span class="text-muted small"><%= JSON.stringify(action.details).slice(0, 30) %>...</span>
+                      <% } %>
+                    <% } else { %>
+                      <span class="text-muted">—</span>
+                    <% } %>
+                  </td>
+                  <td class="text-end text-muted text-nowrap"><%= formatDate(action.created_at) %></td>
+                </tr>
+              <% }) %>
+            </tbody>
+          </table>
+        <% } %>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<% } else { %>
+  <%# Если пользователь не найден или объект пуст %>
+  <div class="alert alert-danger mt-4">
+    <h4 class="alert-heading">Ошибка</h4>
+    <p>Не удалось загрузить данные пользователя. Возможно, он был удален.</p>
+    <hr>
+    <a href="/users" class="btn btn-outline-danger">Вернуться к списку</a>
+  </div>
+<% } %>

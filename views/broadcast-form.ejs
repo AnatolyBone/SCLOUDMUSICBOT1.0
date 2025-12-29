@@ -1,0 +1,85 @@
+<% // views/broadcast-form.ejs (ФИНАЛЬНАЯ ВЕРСИЯ С ИСПРАВЛЕННОЙ ЛОГИКОЙ) %>
+<%- contentFor('body') %>
+
+<%# --- ВОТ ГЛАВНЫЙ ФИКС --- %>
+<% const isEditing = typeof task !== 'undefined' && task && task.id; %>
+
+<div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+  <h1 class="h2"><%= isEditing ? 'Редактировать рассылку' : 'Создать рассылку' %></h1>
+  <a href="/broadcasts" class="btn btn-sm btn-outline-secondary"><i class="bi bi-arrow-left"></i> Назад к списку</a>
+</div>
+
+<% if (success) { %><div class="alert alert-success"><%= success %></div><% } %>
+<% if (error) { %><div class="alert alert-danger"><%= error %></div><% } %>
+
+<div class="card shadow-sm">
+  <div class="card-body">
+    <form id="broadcastForm" method="POST" action="<%= isEditing ? '/broadcast/edit/' + task.id : '/broadcast/new' %>" enctype="multipart/form-data">
+
+      <div class="mb-3">
+        <label for="message" class="form-label">Текст сообщения</label>
+        <textarea name="message" id="message" class="form-control" rows="5" required><%= (typeof task !== 'undefined' && task.message) ? task.message : '' %></textarea>
+        <div class="form-text">Поддерживается <b>HTML-разметка</b> и тег <code>{first_name}</code> для обращения по имени.</div>
+      </div>
+
+      <div class="mb-3">
+        <label for="buttons" class="form-label">Инлайн-кнопки (необязательно)</label>
+        <textarea name="buttons" id="buttons" class="form-control" rows="3" placeholder="Текст кнопки | тип | данные (каждая кнопка с новой строки)"><%= (typeof task !== 'undefined' && task.buttons_text) ? task.buttons_text : '' %></textarea>
+        <div class="form-text">
+          Типы: <code>url</code>, <code>callback</code>, <code>inline_search</code>. Пример: <code>Наш канал | url | https://t.me/your_channel</code>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="col-md-6 mb-3">
+          <label for="file" class="form-label">Файл (фото, видео, аудио, документ)</label>
+          <input type="file" name="file" id="file" class="form-control" />
+          <% if (isEditing && (task.audio_path || task.file_path || task.file_id)) { %>
+            <div class="form-text">Прикреплен файл. Загрузка нового заменит его.</div>
+          <% } %>
+        </div>
+        <div class="col-md-6 mb-3">
+          <label for="targetAudience" class="form-label">Аудитория</label>
+          <select class="form-select" id="targetAudience" name="targetAudience">
+            <option value="all" <%= (isEditing && task.target_audience === 'all') ? 'selected' : '' %>>Всем активным</option>
+            <option value="free_users" <%= (isEditing && task.target_audience === 'free_users') ? 'selected' : '' %>>Только Free</option>
+            <option value="premium_users" <%= (isEditing && task.target_audience === 'premium_users') ? 'selected' : '' %>>Только Premium</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="row align-items-end">
+        <div class="col-md-6 mb-3">
+          <label for="localScheduledAt" class="form-label">Запланировать на (ваше локальное время)</label>
+          <input type="datetime-local" class="form-control" id="localScheduledAt" value="<%= isEditing && task.scheduled_at ? new Date(new Date(task.scheduled_at).getTime() - (new Date().getTimezoneOffset() * 60000)).toISOString().slice(0, 16) : '' %>">
+          <input type="hidden" name="scheduledAt" id="scheduledAt">
+        </div>
+        <div class="col-md-6 mb-3 d-flex flex-wrap gap-3">
+          <div class="form-check form-switch">
+            <input class="form-check-input" type="checkbox" name="disable_notification" id="disable_notification" <%= (isEditing && task.disable_notification) ? 'checked' : '' %>>
+            <label class="form-check-label" for="disable_notification">Тихая рассылка</label>
+          </div>
+          <div class="form-check form-switch">
+            <input class="form-check-input" type="checkbox" name="enable_web_page_preview" id="enable_web_page_preview" <%= (isEditing && !task.disable_web_page_preview) ? 'checked' : '' %>>
+            <label class="form-check-label" for="enable_web_page_preview">Предпросмотр ссылки</label>
+          </div>
+        </div>
+      </div>
+
+      <div class="d-flex flex-wrap gap-2">
+        <% if (!isEditing) { %><button type="submit" name="action" value="preview" class="btn btn-outline-secondary">Предпросмотр</button><% } %>
+        <button type="submit" name="action" value="send" class="btn btn-primary flex-grow-1" onclick="return confirm('Вы уверены?')">🚀 <%= isEditing ? 'Сохранить' : 'Отправить/Запланировать' %></button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+  document.getElementById('broadcastForm').addEventListener('submit', function(event) {
+    const localTimeInput = document.getElementById('localScheduledAt');
+    const utcTimeInput = document.getElementById('scheduledAt');
+    if (localTimeInput.value) {
+      utcTimeInput.value = new Date(localTimeInput.value).toISOString();
+    }
+  });
+</script>

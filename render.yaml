@@ -1,0 +1,32 @@
+services:
+  - type: web
+    name: soundcloud-bot
+    # ✅ 1. Меняем env с 'docker' на 'node'
+    env: node
+    plan: free
+    # ✅ 2. Указываем команду для сборки
+    buildCommand: "npm install && pip install -r requirements.txt"
+    # ✅ 3. Указываем команду для запуска
+    startCommand: "node index.js"
+    envVars:
+      # ✅ 4. Добавляем версию Python
+      - key: PYTHON_VERSION
+        value: 3.11
+      #
+      # --- Твои существующие переменные (оставляем как есть) ---
+      #
+      - key: SPOTIPY_CLIENT_ID
+        sync: false
+      - key: SPOTIPY_CLIENT_SECRET
+        sync: false
+      - key: BOT_TOKEN
+        sync: false
+      - key: ADMIN_ID
+        sync: false
+      - key: STORAGE_CHANNEL_ID
+        sync: false
+      # Добавь сюда остальные переменные из веб-интерфейса Render:
+      # DATABASE_URL, REDIS_URL, SESSION_SECRET, и т.д.
+      # Важно! WEBHOOK_URL теперь нужно задавать вручную, так как fromService может не сработать.
+      - key: WEBHOOK_URL
+        value: "https://soundcloud-bot.onrender.com" # ⚠️ ЗАМЕНИ НА СВОЙ URL

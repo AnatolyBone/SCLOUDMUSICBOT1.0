@@ -1,0 +1,11 @@
+# SoundCloud Downloader
+scdl
+
+# Spotify Downloader
+spotdl>=4.2.0
+
+# Shazam для распознавания музыки
+shazamio>=0.4.0
+
+# YouTube Downloader
+# yt-dlp устанавливается отдельно в Dockerfile с GitHub (ночная сборка)

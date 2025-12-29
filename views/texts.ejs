@@ -1,0 +1,192 @@
+<%# views/texts.ejs (безопасная финальная версия) %>
+
+<%# === Хелпер для экранирования HTML (ЗАЩИТА ОТ XSS) === %>
+<% 
+  const escapeHtml = (str) => {
+    if (str === undefined || str === null) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  };
+%>
+
+<%- contentFor('styles') %>
+<style>
+  /* Стили для предпросмотра Markdown */
+  .markdown-preview {
+    background-color: var(--bs-body-bg);
+    border: 1px dashed var(--bs-border-color);
+    padding: 1rem;
+    border-radius: .375rem;
+    min-height: 150px;
+  }
+  .markdown-preview strong { font-weight: bold; }
+  .markdown-preview em { font-style: italic; }
+  .markdown-preview code { background-color: rgba(110, 118, 129, 0.2); padding: .2em .4em; border-radius: 6px; }
+  
+  /* Стили для поиска */
+  .search-wrapper {
+    position: sticky;
+    top: 60px; /* Высота вашей навбара */
+    background: var(--bs-body-bg);
+    padding: 1rem 0;
+    z-index: 10;
+  }
+</style>
+
+<%- contentFor('body') %>
+
+<div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+  <h1 class="h2"><i class="bi bi-file-text-fill me-2"></i>Редактор текстов бота</h1>
+</div>
+
+<%# === Уведомления об успехе/ошибке === %>
+<% if (locals.success) { %>
+  <div class="alert alert-success alert-dismissible fade show" role="alert" data-autohide="5000">
+    ✅ Текст успешно сохранен! Изменения вступят в силу в течение минуты.
+    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+  </div>
+<% } %>
+<% if (locals.error) { %>
+  <div class="alert alert-danger alert-dismissible fade show" role="alert" data-autohide="5000">
+    ❌ Ошибка сохранения: <%- escapeHtml(locals.error) %>
+    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+  </div>
+<% } %>
+
+<p class="text-muted">Здесь можно изменить тексты, которые отправляет бот. Поддерживается Markdown: `*жирный*`, `_курсив_`, `[ссылка](url)`.</p>
+
+<%# === Поиск/фильтр по текстам === %>
+<div class="mb-4 search-wrapper">
+  <div class="input-group">
+    <span class="input-group-text"><i class="bi bi-search"></i></span>
+    <input type="text" id="textFilter" class="form-control" placeholder="Найти текст по ключу или содержимому...">
+  </div>
+</div>
+
+<div class="accordion" id="textsAccordion">
+  <% Object.entries(texts).forEach(([key, value]) => { 
+    const safeKey = escapeHtml(key);
+    const safeValue = escapeHtml(value);
+  %>
+    <div class="accordion-item" data-search-text="<%- safeKey.toLowerCase() %> <%- safeValue.toLowerCase().replace(/\n/g, ' ') %>">
+      <h2 class="accordion-header" id="heading-<%- safeKey %>">
+        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapse-<%- safeKey %>">
+          <span class="fw-bold me-2"><%- safeKey %>:</span>
+          <span class="text-truncate text-muted"><%- safeValue.replace(/\n/g, ' ').slice(0, 80) %>...</span>
+        </button>
+      </h2>
+      <div id="collapse-<%- safeKey %>" class="accordion-collapse collapse" data-bs-parent="#textsAccordion">
+        <div class="accordion-body">
+          <form action="/texts/update" method="POST">
+            <input type="hidden" name="key" value="<%- safeKey %>">
+            
+            <ul class="nav nav-tabs mb-3" role="tablist">
+              <li class="nav-item" role="presentation">
+                <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#edit-<%- safeKey %>" type="button" role="tab">Редактировать</button>
+              </li>
+              <li class="nav-item" role="presentation">
+                <button class="nav-link" data-bs-toggle="tab" data-bs-target="#preview-<%- safeKey %>" type="button" role="tab">Предпросмотр</button>
+              </li>
+            </ul>
+            
+            <div class="tab-content">
+              <div class="tab-pane fade show active" id="edit-<%- safeKey %>" role="tabpanel">
+                <textarea class="form-control markdown-input" name="value" rows="8"><%- safeValue %></textarea>
+              </div>
+              <div class="tab-pane fade" id="preview-<%- safeKey %>" role="tabpanel">
+                <div class="markdown-preview p-3"></div>
+              </div>
+            </div>
+            
+            <div class="mt-3">
+              <button type="submit" class="btn btn-primary">
+                <i class="bi bi-check-lg me-2"></i>Сохранить
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  <% }) %>
+  <div id="noResults" class="text-center text-muted p-5" style="display: none;">
+    <i class="bi bi-inbox fs-1"></i>
+    <p class="mt-2">Ничего не найдено</p>
+  </div>
+</div>
+
+<%- contentFor('scripts') %>
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  const textFilter = document.getElementById('textFilter');
+  const accordionItems = document.querySelectorAll('.accordion-item');
+  const noResults = document.getElementById('noResults');
+
+  // --- Фильтр/поиск ---
+  textFilter.addEventListener('input', (e) => {
+    const query = e.target.value.toLowerCase().trim();
+    let found = 0;
+    
+    accordionItems.forEach(item => {
+      const isVisible = item.dataset.searchText.includes(query);
+      item.style.display = isVisible ? '' : 'none';
+      if (isVisible) found++;
+    });
+    
+    noResults.style.display = found === 0 ? '' : 'none';
+  });
+
+  // --- Предпросмотр Markdown ---
+  const accordion = document.getElementById('textsAccordion');
+  accordion.addEventListener('input', (e) => {
+    if (e.target.classList.contains('markdown-input')) {
+      updatePreview(e.target);
+    }
+  });
+  
+  // Обновляем превью при переключении на вкладку
+  accordion.addEventListener('show.bs.tab', (e) => {
+    if (e.target.dataset.bsTarget.startsWith('#preview-')) {
+      const form = e.target.closest('form');
+      const textarea = form.querySelector('.markdown-input');
+      updatePreview(textarea);
+    }
+  });
+
+  function updatePreview(textarea) {
+    const form = textarea.closest('form');
+    const preview = form.querySelector('.markdown-preview');
+    if (preview) {
+      // Простое преобразование Markdown в HTML
+      let html = textarea.value
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') // 1. Escape
+        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>') // **bold**
+        .replace(/\*(.*?)\*/g, '<strong>$1</strong>')       // *bold*
+        .replace(/__(.*?)__/g, '<em>$1</em>')         // __italic__
+        .replace(/_(.*?)_/g, '<em>$1</em>')           // _italic_
+        .replace(/`(.*?)`/g, '<code>$1</code>')       // `code`
+        .replace(/```math
+(.*?)```KATEX_INLINE_OPEN(.*?)KATEX_INLINE_CLOSE/g, '<a href="$2" target="_blank">$1</a>') // [link](url)
+        .replace(/\n/g, '<br>'); // Newlines
+      
+      preview.innerHTML = html;
+    }
+  }
+
+  // --- Открытие аккордеона по хешу в URL ---
+  if (window.location.hash) {
+    const targetId = window.location.hash;
+    const targetElement = document.querySelector(targetId);
+    if (targetElement && targetElement.classList.contains('accordion-collapse')) {
+      const accordionButton = document.querySelector(`[data-bs-target="${targetId}"]`);
+      if (accordionButton) {
+        new bootstrap.Collapse(targetElement).show();
+        accordionButton.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }
+  }
+});
+</script>

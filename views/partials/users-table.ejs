@@ -1,0 +1,318 @@
+<%# views/partials/users-table.ejs (безопасная финальная версия) %>
+
+<div class="table-responsive">
+  <table class="table table-striped table-hover align-middle">
+    <thead class="table-light">
+      <tr>
+        <%# === Функция для генерации ссылок сортировки === %>
+        <% 
+        function sortLink(field, title) { 
+          const params = new URLSearchParams();
+          // Безопасно копируем параметры
+          if (queryParams) {
+            Object.keys(queryParams).forEach(k => {
+              if (k !== 'page') params.set(k, queryParams[k]); // Сбрасываем пагинацию при сортировке
+            });
+          }
+          
+          const isCurrent = (queryParams?.sort === field);
+          const nextOrder = (isCurrent && queryParams?.order === 'asc') ? 'desc' : 'asc';
+          params.set('sort', field);
+          params.set('order', nextOrder);
+          params.set('page', 1); // Возвращаемся на первую страницу
+          
+          const icon = isCurrent 
+            ? (queryParams?.order === 'asc' ? '↑' : '↓')
+            : '';
+        %>
+          <th scope="col" class="text-nowrap">
+            <a href="/users-table?<%= params.toString() %>"
+               hx-get="/users-table?<%= params.toString() %>"
+               hx-include="#usersFilterForm"
+               hx-target="#users-table-container"
+               hx-swap="innerHTML"
+               class="text-decoration-none text-body fw-semibold">
+              <%= title %> <% if (icon) { %><span class="text-primary"><%= icon %></span><% } %>
+            </a>
+          </th>
+        <% } %>
+
+        <%- sortLink('id', 'ID') %>
+        <th>Пользователь</th>
+        <%- sortLink('active', 'Статус') %>
+        <%- sortLink('total_downloads', 'Загрузок') %>
+        <%- sortLink('premium_limit', 'Тариф') %>
+        <%- sortLink('premium_until', 'Премиум до') %>
+        <%- sortLink('created_at', 'Регистрация') %>
+        <%- sortLink('last_active', 'Активность') %>
+        <th>Смена тарифа</th>
+        <th class="text-center">Действия</th>
+      </tr>
+    </thead>
+
+    <tbody>
+      <% if (users && users.length > 0) { %>
+        <% users.forEach(u => { 
+            // === 1. Безопасное экранирование ===
+            const escapeHtml = (str) => {
+              if (!str) return '';
+              return String(str).replace(/[&<>"']/g, (m) => ({
+                '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;'
+              })[m]);
+            };
+            
+            const safeName = escapeHtml(u.first_name) || 'Без имени';
+            const safeUsername = u.username ? '@' + escapeHtml(u.username) : '';
+            
+            // === 2. ЛОГИКА ТАРИФОВ (Исправленная) ===
+            const now = new Date();
+            const until = u.premium_until ? new Date(u.premium_until) : null;
+            const isActive = until && until > now; 
+            const limit = u.premium_limit || 5;
+
+            let plan = 'Free';
+            let planBadge = 'bg-secondary';
+
+            if (isActive) {
+                // Если подписка АКТИВНА
+                if (limit >= 10000) { plan = '💎 Unlim'; planBadge = 'bg-primary'; }
+                else if (limit >= 100) { plan = '💪 Pro'; planBadge = 'bg-warning text-dark'; }
+                else if (limit >= 30) { plan = '🎯 Plus'; planBadge = 'bg-info text-dark'; }
+                else { plan = 'Premium'; planBadge = 'bg-success'; }
+            } else {
+                // Если подписка НЕАКТИВНА
+                if (limit > 10) { 
+                    // Лимит высокий, но время вышло = Истёк
+                    plan = '⌛ Истёк'; 
+                    planBadge = 'bg-danger'; 
+                } else {
+                    // Обычный Free
+                    plan = 'Free'; 
+                    planBadge = 'bg-secondary';
+                }
+            }
+
+            // Форматирование дат
+            const formatDate = (date) => date ? new Date(date).toLocaleDateString('ru-RU', {day:'2-digit',month:'2-digit',year:'2-digit'}) : '—';
+            const formatDateTime = (date) => date ? new Date(date).toLocaleString('ru-RU', {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '—';
+        %>
+          <tr>
+            <%# === ID === %>
+            <td data-label="ID"><a href="/user/<%= u.id %>" class="text-decoration-none font-monospace"><%= u.id %></a></td>
+
+            <%# === Пользователь === %>
+            <td data-label="Пользователь">
+              <div class="fw-bold"><%- safeName %></div>
+              <% if (safeUsername) { %><div class="text-muted small"><%- safeUsername %></div><% } %>
+            </td>
+
+            <%# === Статус === %>
+            <td data-label="Статус">
+              <% if (u.active) { %>
+                <span class="badge bg-success">✓ Активен</span>
+              <% } else { %>
+                <span class="badge bg-danger">✕ Блок</span>
+              <% } %>
+            </td>
+
+            <%# === Загрузок === %>
+            <td data-label="Загрузок" class="text-center">
+              <span class="badge bg-light text-dark border"><%= u.total_downloads || 0 %></span>
+            </td>
+
+            <%# === Тариф (Бейджик) === %>
+            <td data-label="Тариф" class="text-center">
+              <span class="badge <%= planBadge %>"><%= plan %></span>
+            </td>
+
+            <%# === Премиум до === %>
+            <td data-label="Премиум до" class="text-nowrap small">
+              <% if (isActive) { %>
+                <span class="text-success fw-bold"><%= formatDateTime(until) %></span>
+              <% } else if (until) { %>
+                <span class="text-muted text-decoration-line-through"><%= formatDateTime(until) %></span>
+              <% } else { %>
+                <span class="text-muted">—</span>
+              <% } %>
+            </td>
+
+            <%# === Регистрация === %>
+            <td data-label="Регистрация" class="text-nowrap small text-muted"><%= formatDate(u.created_at) %></td>
+
+            <%# === Активность === %>
+            <td data-label="Активность" class="text-nowrap small text-muted"><%= formatDateTime(u.last_active) %></td>
+
+            <%# === Смена тарифа (Форма) === %>
+            <td data-label="Смена тарифа">
+              <form class="d-flex gap-1 align-items-center tariff-form" action="/set-tariff" method="post">
+                <input type="hidden" name="userId" value="<%= u.id %>">
+                <input type="hidden" name="applyMode" value="set">
+                
+                <select name="limit" class="form-select form-select-sm" style="width: 100px;" required>
+                  <option value="5"     <%= limit <= 5 ? 'selected' : '' %>>Free</option>
+                  <option value="30"    <%= limit === 30 ? 'selected' : '' %>>Plus</option>
+                  <option value="100"   <%= limit === 100 ? 'selected' : '' %>>Pro</option>
+                  <option value="10000" <%= limit >= 10000 ? 'selected' : '' %>>Unlim</option>
+                </select>
+                
+                <input type="number" name="days" class="form-control form-control-sm" value="30" style="width: 60px;" placeholder="Дни">
+                
+                <button type="submit" class="btn btn-sm btn-primary px-2">✓</button>
+              </form>
+            </td>
+
+            <%# === Меню действий === %>
+            <td data-label="Действия" class="text-center">
+               <!-- Твой старый код дропдауна (можно оставить как есть в твоем файле, или скопировать ниже) -->
+               <div class="btn-group">
+                <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="dropdown">⋮</button>
+                <ul class="dropdown-menu dropdown-menu-end">
+                  <li><a class="dropdown-item" href="/user/<%= u.id %>">👤 Профиль</a></li>
+                  <li><hr class="dropdown-divider"></li>
+                  <li>
+                    <form action="/user/set-status" method="POST">
+                      <input type="hidden" name="userId" value="<%= u.id %>">
+                      <input type="hidden" name="newStatus" value="<%= !u.active %>">
+                      <button type="submit" class="dropdown-item <%= u.active ? 'text-danger' : 'text-success' %>">
+                        <%= u.active ? 'Заблокировать' : 'Разблокировать' %>
+                      </button>
+                    </form>
+                  </li>
+                </ul>
+              </div>
+            </td>
+          </tr>
+        <% }) %>
+      <% } else { %>
+        <tr><td colspan="10" class="text-center py-5 text-muted">Пользователи не найдены</td></tr>
+      <% } %>
+
+<%# === PAGINATION (Safe Version) === %>
+<% if (typeof totalPages !== 'undefined' && totalPages > 0) { 
+  const curr = typeof queryParams !== 'undefined' ? Number(queryParams.page || 1) : 1;
+  
+  function buildPageUrl(pageNum) {
+    const params = new URLSearchParams();
+    if (typeof queryParams !== 'undefined') {
+      Object.keys(queryParams).forEach(k => params.set(k, queryParams[k]));
+    }
+    params.set('page', pageNum);
+    return '/users-table?' + params.toString();
+  }
+%>
+<nav aria-label="Навигация">
+  <ul class="pagination justify-content-center mt-4 pagination-sm">
+    
+    <%# Кнопка Назад %>
+    <li class="page-item <%= (curr <= 1) ? 'disabled' : '' %>">
+      <% if (curr > 1) { %>
+        <a class="page-link" href="<%= buildPageUrl(curr - 1) %>" 
+           hx-get="<%= buildPageUrl(curr - 1) %>" hx-include="#usersFilterForm" hx-target="#users-table-container">
+           &laquo;
+        </a>
+      <% } else { %>
+        <span class="page-link">&laquo;</span>
+      <% } %>
+    </li>
+
+    <%# Текущая страница %>
+    <li class="page-item active">
+      <span class="page-link"><%= curr %> / <%= totalPages %></span>
+    </li>
+
+    <%# Кнопка Вперед %>
+    <li class="page-item <%= (curr >= totalPages) ? 'disabled' : '' %>">
+      <% if (curr < totalPages) { %>
+        <a class="page-link" href="<%= buildPageUrl(curr + 1) %>"
+           hx-get="<%= buildPageUrl(curr + 1) %>" hx-include="#usersFilterForm" hx-target="#users-table-container">
+           &raquo;
+        </a>
+      <% } else { %>
+        <span class="page-link">&raquo;</span>
+      <% } %>
+    </li>
+  </ul>
+  
+  <%# ИНФОРМАЦИЯ (ИСПРАВЛЕННАЯ СТРОКА) %>
+  <div class="text-center text-muted small mt-2">
+    <% if (typeof totalUsers !== 'undefined' && totalUsers !== null) { %>
+      (всего пользователей: <strong><%= totalUsers.toLocaleString('ru-RU') %></strong>)
+    <% } else { %>
+      Список пользователей
+    <% } %>
+  </div>
+</nav>
+<% } %>
+
+<%# === СКРИПТ ДЛЯ УЛУЧШЕНИЯ UX === %>
+<script>
+// Подтверждение действий (если admin.js не подключен)
+if (typeof window.adminScriptLoaded === 'undefined') {
+  document.addEventListener('DOMContentLoaded', () => {
+    document.querySelectorAll('[data-confirm]').forEach(el => {
+      el.addEventListener('click', (e) => {
+        const message = el.dataset.confirm || 'Вы уверены?';
+        if (!confirm(message)) {
+          e.preventDefault();
+        }
+      });
+    });
+  });
+}
+
+// Индикатор загрузки HTMX
+document.body.addEventListener('htmx:beforeRequest', () => {
+  const container = document.getElementById('users-table-container');
+  if (container) {
+    container.style.opacity = '0.6';
+    container.style.pointerEvents = 'none';
+  }
+});
+
+document.body.addEventListener('htmx:afterRequest', () => {
+  const container = document.getElementById('users-table-container');
+  if (container) {
+    container.style.opacity = '1';
+    container.style.pointerEvents = 'auto';
+  }
+});
+
+// Автосохранение позиции скролла
+document.body.addEventListener('htmx:beforeSwap', () => {
+  sessionStorage.setItem('usersTableScroll', window.scrollY);
+});
+
+document.body.addEventListener('htmx:afterSettle', () => {
+  const scrollPos = sessionStorage.getItem('usersTableScroll');
+  if (scrollPos) {
+    window.scrollTo(0, parseInt(scrollPos, 10));
+  }
+});
+
+// Валидация формы тарифа
+document.addEventListener('submit', (e) => {
+  if (e.target.classList.contains('tariff-form')) {
+    const daysInput = e.target.querySelector('input[name="days"]');
+    const days = parseInt(daysInput.value, 10);
+    
+    if (isNaN(days) || days < 1 || days > 365) {
+      e.preventDefault();
+      alert('Количество дней должно быть от 1 до 365');
+      daysInput.focus();
+    }
+  }
+});
+
+// Highlight только что обновлённой строки
+if (window.location.hash) {
+  const userId = window.location.hash.slice(1);
+  const row = document.querySelector(`a[href="/user/${userId}"]`)?.closest('tr');
+  if (row) {
+    row.style.backgroundColor = 'var(--bs-warning)';
+    row.style.transition = 'background-color 2s ease';
+    setTimeout(() => {
+      row.style.backgroundColor = '';
+    }, 2000);
+  }
+}
+</script>

@@ -1,0 +1,256 @@
+<%# views/settings.ejs %>
+
+<%- contentFor('body') %>
+<div class="d-flex justify-content-between align-items-center pt-3 pb-2 mb-3 border-bottom">
+  <h1 class="h2"><i class="bi bi-gear-fill me-2"></i>Настройки</h1>
+</div>
+
+<% if (locals.success) { %>
+  <div class="alert alert-success alert-dismissible fade show" data-autohide="3000">
+    <i class="bi bi-check-circle me-2"></i>Настройки успешно сохранены!
+    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+  </div>
+<% } %>
+
+<div class="row g-4">
+  <!-- Режим обслуживания -->
+  <div class="col-lg-6">
+    <div class="card shadow-sm">
+      <div class="card-header fw-semibold bg-light">
+        <i class="bi bi-tools me-2"></i>Режим обслуживания
+      </div>
+      <div class="card-body">
+        <p class="text-muted small mb-3">
+          Когда включён — бот отвечает всем пользователям (кроме админа) сообщением о техработах.
+        </p>
+        <form action="/settings/maintenance" method="POST">
+          <div class="d-flex align-items-center gap-3">
+            <div class="form-check form-switch">
+              <input class="form-check-input" type="checkbox" id="maintenanceMode" name="enabled" 
+                     <%= locals.maintenanceMode ? 'checked' : '' %> style="width: 3rem; height: 1.5rem;">
+              <label class="form-check-label fw-semibold" for="maintenanceMode">
+                <%= locals.maintenanceMode ? '🔴 Включён' : '🟢 Выключен' %>
+              </label>
+            </div>
+            <button type="submit" class="btn btn-sm btn-primary">Сохранить</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Очередь загрузок -->
+  <div class="col-lg-6">
+    <div class="card shadow-sm">
+      <div class="card-header fw-semibold bg-light">
+        <i class="bi bi-list-ol me-2"></i>Очередь загрузок
+      </div>
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+          <span>В ожидании: <strong><%= locals.queueWaiting || 0 %></strong></span>
+          <span>В работе: <strong><%= locals.queueActive || 0 %></strong></span>
+        </div>
+        <% if (locals.queueWaiting > 0) { %>
+          <form action="/admin/queue/clear" method="POST">
+            <button type="submit" class="btn btn-danger w-100" 
+                    onclick="return confirm('Очистить всю очередь загрузок?')">
+              <i class="bi bi-trash3 me-2"></i>Очистить очередь
+            </button>
+          </form>
+        <% } else { %>
+          <div class="text-muted text-center py-2">Очередь пуста</div>
+        <% } %>
+      </div>
+    </div>
+  </div>
+
+  <!-- Гибридная архитектура (воркер) -->
+  <div class="col-lg-6">
+    <div class="card shadow-sm">
+      <div class="card-header fw-semibold bg-light">
+        <i class="bi bi-server me-2"></i>Гибридная архитектура
+      </div>
+      <div class="card-body">
+        <p class="text-muted small mb-3">
+          Когда включено — задачи Spotify/YouTube делегируются внешнему воркеру (HuggingFace/VPS). 
+          Когда выключено — все задачи обрабатываются локально на Render.
+        </p>
+        <form action="/settings/update" method="POST" id="hybridWorkerForm" 
+              onsubmit="document.getElementById('useHybridWorkerValue').value = document.getElementById('useHybridWorker').checked ? 'true' : 'false';">
+          <input type="hidden" id="useHybridWorkerValue" name="use_hybrid_worker" value="<%= settings.use_hybrid_worker || 'false' %>">
+          <div class="d-flex align-items-center gap-3">
+            <div class="form-check form-switch">
+              <input class="form-check-input" type="checkbox" id="useHybridWorker"
+                     <%= settings.use_hybrid_worker === 'true' ? 'checked' : '' %> 
+                     onchange="document.getElementById('hybridWorkerForm').submit()" 
+                     style="width: 3rem; height: 1.5rem;">
+              <label class="form-check-label fw-semibold" for="useHybridWorker">
+                <%= settings.use_hybrid_worker === 'true' ? '🟢 Включено (воркер)' : '🔴 Выключено (локально)' %>
+              </label>
+            </div>
+          </div>
+        </form>
+        <% if (settings.use_hybrid_worker === 'true') { %>
+          <div class="alert alert-info mt-3 mb-0 small">
+            <i class="bi bi-info-circle me-1"></i>
+            <strong>Воркер активен:</strong> Spotify/YouTube задачи будут делегироваться внешнему воркеру.
+          </div>
+        <% } else { %>
+          <div class="alert alert-warning mt-3 mb-0 small">
+            <i class="bi bi-exclamation-triangle me-1"></i>
+            <strong>Локальная обработка:</strong> Все задачи обрабатываются на Render (может быть медленнее).
+          </div>
+        <% } %>
+      </div>
+    </div>
+  </div>
+
+  <!-- Управление сервисами -->
+  <div class="col-lg-6">
+    <div class="card shadow-sm">
+      <div class="card-header fw-semibold bg-light">
+        <i class="bi bi-toggle-on me-2"></i>Управление сервисами
+      </div>
+      <div class="card-body">
+        <p class="text-muted small mb-3">
+          Временно отключите сервисы для технического обслуживания или снижения нагрузки на бот.
+        </p>
+        <form action="/settings/update" method="POST" id="servicesForm">
+          <input type="hidden" id="useSpotifyValue" name="use_spotify" value="<%= settings.use_spotify || 'true' %>">
+          <input type="hidden" id="useYoutubeValue" name="use_youtube" value="<%= settings.use_youtube || 'true' %>">
+          <input type="hidden" id="useSoundcloudValue" name="use_soundcloud" value="<%= settings.use_soundcloud || 'true' %>">
+          
+          <div class="d-flex flex-column gap-3">
+            <!-- Spotify -->
+            <div class="d-flex justify-content-between align-items-center p-2 rounded" style="background-color: rgba(0,0,0,0.05);">
+              <div class="d-flex align-items-center gap-2">
+                <span class="fw-semibold">🎵 Spotify</span>
+                <span class="badge <%= settings.use_spotify !== 'false' ? 'bg-success' : 'bg-danger' %>">
+                  <%= settings.use_spotify !== 'false' ? 'Включен' : 'Отключен' %>
+                </span>
+              </div>
+              <div class="form-check form-switch">
+                <input class="form-check-input" type="checkbox" id="useSpotify"
+                       <%= settings.use_spotify !== 'false' ? 'checked' : '' %>
+                       onchange="
+                         document.getElementById('useSpotifyValue').value = this.checked ? 'true' : 'false';
+                         document.getElementById('servicesForm').submit();
+                       "
+                       style="width: 2.5rem; height: 1.25rem;">
+              </div>
+            </div>
+            
+            <!-- YouTube -->
+            <div class="d-flex justify-content-between align-items-center p-2 rounded" style="background-color: rgba(0,0,0,0.05);">
+              <div class="d-flex align-items-center gap-2">
+                <span class="fw-semibold">▶️ YouTube</span>
+                <span class="badge <%= settings.use_youtube !== 'false' ? 'bg-success' : 'bg-danger' %>">
+                  <%= settings.use_youtube !== 'false' ? 'Включен' : 'Отключен' %>
+                </span>
+              </div>
+              <div class="form-check form-switch">
+                <input class="form-check-input" type="checkbox" id="useYoutube"
+                       <%= settings.use_youtube !== 'false' ? 'checked' : '' %>
+                       onchange="
+                         document.getElementById('useYoutubeValue').value = this.checked ? 'true' : 'false';
+                         document.getElementById('servicesForm').submit();
+                       "
+                       style="width: 2.5rem; height: 1.25rem;">
+              </div>
+            </div>
+            
+            <!-- SoundCloud -->
+            <div class="d-flex justify-content-between align-items-center p-2 rounded" style="background-color: rgba(0,0,0,0.05);">
+              <div class="d-flex align-items-center gap-2">
+                <span class="fw-semibold">☁️ SoundCloud</span>
+                <span class="badge <%= settings.use_soundcloud !== 'false' ? 'bg-success' : 'bg-danger' %>">
+                  <%= settings.use_soundcloud !== 'false' ? 'Включен' : 'Отключен' %>
+                </span>
+              </div>
+              <div class="form-check form-switch">
+                <input class="form-check-input" type="checkbox" id="useSoundcloud"
+                       <%= settings.use_soundcloud !== 'false' ? 'checked' : '' %>
+                       onchange="
+                         document.getElementById('useSoundcloudValue').value = this.checked ? 'true' : 'false';
+                         document.getElementById('servicesForm').submit();
+                       "
+                       style="width: 2.5rem; height: 1.25rem;">
+              </div>
+            </div>
+          </div>
+        </form>
+        <div class="alert alert-info mt-3 mb-0 small">
+          <i class="bi bi-info-circle me-1"></i>
+          <strong>Совет:</strong> Отключите проблемный сервис, если бот начинает тормозить или возникают ошибки.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Лимиты для плейлистов -->
+  <div class="col-lg-6">
+    <div class="card shadow-sm">
+      <div class="card-header fw-semibold bg-light">
+        <i class="bi bi-music-note-list me-2"></i>Лимиты для плейлистов
+      </div>
+      <div class="card-body">
+        <form action="/settings/update" method="POST">
+          <div class="row g-3">
+            <div class="col-6">
+              <label for="limit-free" class="form-label small text-muted">🆓 Free</label>
+              <input type="number" class="form-control" id="limit-free" name="playlist_limit_free" 
+                     value="<%= settings.playlist_limit_free %>" min="1" max="100">
+            </div>
+            <div class="col-6">
+              <label for="limit-plus" class="form-label small text-muted">🎯 Plus</label>
+              <input type="number" class="form-control" id="limit-plus" name="playlist_limit_plus" 
+                     value="<%= settings.playlist_limit_plus %>" min="1" max="500">
+            </div>
+            <div class="col-6">
+              <label for="limit-pro" class="form-label small text-muted">💪 Pro</label>
+              <input type="number" class="form-control" id="limit-pro" name="playlist_limit_pro" 
+                     value="<%= settings.playlist_limit_pro %>" min="1" max="1000">
+            </div>
+            <div class="col-6">
+              <label for="limit-unlim" class="form-label small text-muted">💎 Unlimited</label>
+              <input type="number" class="form-control" id="limit-unlim" name="playlist_limit_unlim" 
+                     value="<%= settings.playlist_limit_unlim %>" min="1" max="50000">
+            </div>
+          </div>
+          <button type="submit" class="btn btn-primary w-100 mt-3">
+            <i class="bi bi-check-lg me-2"></i>Сохранить лимиты
+          </button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Информация о системе -->
+  <div class="col-lg-6">
+    <div class="card shadow-sm">
+      <div class="card-header fw-semibold bg-light">
+        <i class="bi bi-info-circle me-2"></i>Информация о системе
+      </div>
+      <div class="card-body">
+        <ul class="list-group list-group-flush">
+          <li class="list-group-item d-flex justify-content-between px-0">
+            <span class="text-muted">Node.js</span>
+            <span class="fw-semibold"><%= process.version %></span>
+          </li>
+          <li class="list-group-item d-flex justify-content-between px-0">
+            <span class="text-muted">Память (heap)</span>
+            <span class="fw-semibold"><%= Math.round(process.memoryUsage().heapUsed / 1024 / 1024) %> MB</span>
+          </li>
+          <li class="list-group-item d-flex justify-content-between px-0">
+            <span class="text-muted">Uptime</span>
+            <span class="fw-semibold"><%= Math.floor(process.uptime() / 3600) %>ч <%= Math.floor((process.uptime() % 3600) / 60) %>м</span>
+          </li>
+          <li class="list-group-item d-flex justify-content-between px-0">
+            <span class="text-muted">Платформа</span>
+            <span class="fw-semibold"><%= process.platform %></span>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>

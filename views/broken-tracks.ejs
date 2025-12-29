@@ -1,0 +1,622 @@
+<!-- views/broken-tracks.ejs -->
+
+<div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+  <h1 class="h2">🚨 Проблемные треки</h1>
+  <div class="btn-toolbar mb-2 mb-md-0 gap-2">
+    <button type="button" class="btn btn-sm btn-outline-danger" id="deleteSelectedBtn" disabled onclick="deleteSelected()">
+      🗑️ Удалить выбранные (<span id="selectedCount">0</span>)
+    </button>
+    <button type="button" class="btn btn-sm btn-outline-primary" onclick="exportCSV()">
+      📥 Экспорт CSV
+    </button>
+    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="location.reload()">
+      🔄 Обновить
+    </button>
+  </div>
+</div>
+
+<!-- 📊 Статистика -->
+<% if (tracks && tracks.length > 0) { %>
+<div class="row mb-4">
+  <div class="col-md-3 col-6 mb-2">
+    <div class="card bg-danger text-white">
+      <div class="card-body text-center py-3">
+        <h3 class="mb-0"><%= totalTracks || 0 %></h3>
+        <small>Всего проблем</small>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-3 col-6 mb-2">
+    <div class="card bg-warning text-dark">
+      <div class="card-body text-center py-3">
+        <h3 class="mb-0"><%= tracks.filter(t => t.reason === 'download_failed').length %></h3>
+        <small>Ошибки загрузки</small>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-3 col-6 mb-2">
+    <div class="card bg-info text-white">
+      <div class="card-body text-center py-3">
+        <h3 class="mb-0"><%= tracks.filter(t => t.reason === 'not_found').length %></h3>
+        <small>Не найдено</small>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-3 col-6 mb-2">
+    <div class="card bg-secondary text-white">
+      <div class="card-body text-center py-3">
+        <h3 class="mb-0"><%= [...new Set(tracks.map(t => t.user_id))].length %></h3>
+        <small>Пользователей</small>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 🔍 Фильтры -->
+<div class="card mb-4">
+  <div class="card-body">
+    <div class="row g-3">
+      <div class="col-md-4">
+        <label class="form-label">🔎 Поиск</label>
+        <input type="text" class="form-control" id="searchInput" placeholder="Название трека или URL..." onkeyup="filterTable()">
+      </div>
+      <div class="col-md-3">
+        <label class="form-label">⚠️ Тип ошибки</label>
+        <select class="form-select" id="reasonFilter" onchange="filterTable()">
+          <option value="">Все ошибки</option>
+          <option value="PREVIEW_ONLY">Только превью (SC/YTDL)</option>
+          <option value="FILE_TOO_LARGE">Файл слишком большой</option>
+          <option value="403_FORBIDDEN">Доступ запрещён (403)</option>
+          <option value="RATE_LIMIT">Лимит запросов (429)</option>
+          <option value="DOWNLOAD_ERROR">Ошибка скачивания</option>
+          <option value="UNKNOWN_ERROR">Другая ошибка</option>
+        </select>
+      </div>
+      <div class="col-md-3">
+        <label class="form-label">📅 Период</label>
+        <select class="form-select" id="dateFilter" onchange="filterTable()">
+          <option value="">Все время</option>
+          <option value="today">Сегодня</option>
+          <option value="week">За неделю</option>
+          <option value="month">За месяц</option>
+        </select>
+      </div>
+      <div class="col-md-2 d-flex align-items-end">
+        <button class="btn btn-outline-secondary w-100" onclick="clearFilters()">Сбросить</button>
+      </div>
+    </div>
+  </div>
+</div>
+<% } %>
+
+<% if (!tracks || tracks.length === 0) { %>
+  <div class="alert alert-success d-flex align-items-center" role="alert">
+    <span style="font-size: 3rem; margin-right: 1rem;">🎉</span>
+    <div>
+      <h4 class="alert-heading mb-1">Отлично!</h4>
+      <p class="mb-0">Проблемных треков не обнаружено. Все работает как часы!</p>
+    </div>
+  </div>
+<% } else { %>
+  <!-- 📋 Таблица -->
+  <div class="table-responsive">
+    <table class="table table-striped table-hover" id="tracksTable">
+      <thead class="table-dark">
+        <tr>
+          <th width="40">
+            <input type="checkbox" class="form-check-input" id="selectAll" onclick="toggleSelectAll()">
+          </th>
+          <th style="cursor: pointer" onclick="sortTable(0)">Дата ⇅</th>
+          <th>Пользователь</th>
+          <th style="cursor: pointer" onclick="sortTable(2)">Трек ⇅</th>
+          <th>Ошибка</th>
+          <th>Ссылка</th>
+          <th width="150">Действия</th>
+        </tr>
+      </thead>
+      <tbody>
+        <% 
+        const reasonBadges = {
+          'PREVIEW_ONLY': 'bg-warning text-dark',
+          'PREVIEW_ONLY_YTDL': 'bg-warning text-dark',
+          'FILE_TOO_LARGE': 'bg-danger',
+          '403_FORBIDDEN': 'bg-info',
+          'RATE_LIMIT': 'bg-secondary',
+          'DOWNLOAD_ERROR': 'bg-danger',
+          'UNKNOWN_ERROR': 'bg-dark'
+        };
+        const reasonLabels = {
+          'PREVIEW_ONLY': '🎧 Только превью (SC)',
+          'PREVIEW_ONLY_YTDL': '🎧 Только превью (YT-DLP)',
+          'FILE_TOO_LARGE': '📦 Файл слишком большой',
+          '403_FORBIDDEN': '🚫 Доступ запрещён (403)',
+          'RATE_LIMIT': '⏱️ Лимит запросов (429)',
+          'DOWNLOAD_ERROR': '❌ Ошибка скачивания',
+          'UNKNOWN_ERROR': '❓ Неизвестная ошибка'
+        };
+        %>
+        <% tracks.forEach((track) => { %>
+          <tr data-id="<%= track.id %>" 
+              data-reason="<%= track.reason || '' %>" 
+              data-date="<%= track.created_at %>"
+              data-title="<%= (track.title || '').toLowerCase() %>"
+              data-url="<%= (track.url || '').toLowerCase() %>">
+            <td>
+              <input type="checkbox" class="form-check-input row-checkbox" value="<%= track.id %>" onchange="updateSelectedCount()">
+            </td>
+            <td>
+              <% if (track.created_at) { %>
+                <span class="text-muted" title="<%= new Date(track.created_at).toLocaleString('ru-RU') %>">
+                  <%= new Date(track.created_at).toLocaleDateString('ru-RU') %>
+                </span>
+                <br>
+                <small class="text-muted"><%= new Date(track.created_at).toLocaleTimeString('ru-RU', {hour: '2-digit', minute:'2-digit'}) %></small>
+              <% } else { %>
+                <span class="text-muted">—</span>
+              <% } %>
+            </td>
+            <td>
+              <a href="/user/<%= track.user_id %>" class="text-decoration-none">
+                <% if (track.username) { %>
+                  @<%= track.username %>
+                <% } else if (track.first_name) { %>
+                  <%= track.first_name %>
+                <% } else { %>
+                  <code><%= track.user_id %></code>
+                <% } %>
+              </a>
+            </td>
+            <td>
+              <strong class="d-block text-truncate" style="max-width: 200px;" title="<%= track.title || '' %>">
+                <%= track.title || 'Без названия' %>
+              </strong>
+            </td>
+            <td>
+              <span class="badge <%= reasonBadges[track.reason] || 'bg-dark' %>" 
+                    title="<%= track.error_message || '' %>">
+                <%= reasonLabels[track.reason] || track.reason || 'Неизвестно' %>
+              </span>
+              <% if (track.retry_count && track.retry_count > 0) { %>
+                <br><small class="text-muted">Попыток: <%= track.retry_count %></small>
+              <% } %>
+            </td>
+            <td>
+              <div class="d-flex align-items-center gap-1">
+                <a href="<%= track.url %>" target="_blank" class="text-truncate" style="max-width: 120px;" title="<%= track.url %>">
+                  🔗 Открыть
+                </a>
+                <button class="btn btn-sm btn-outline-secondary py-0 px-1" onclick="copyUrl('<%= track.url %>')" title="Копировать">
+                  📋
+                </button>
+              </div>
+            </td>
+            <td>
+              <div class="btn-group btn-group-sm" role="group">
+                <button type="button" class="btn btn-outline-warning" 
+                        onclick="fixAndSend('<%= track.id %>', '<%= track.url %>', '<%= track.user_id %>')" 
+                        title="Исправить и отправить пользователю">
+                  📤
+                </button>
+                <button type="button" class="btn btn-outline-primary" 
+                        onclick="retryDownload('<%= track.id %>', '<%= track.url %>')" 
+                        title="Сбросить кэш">
+                  🔄
+                </button>
+                <button type="button" class="btn btn-outline-success" 
+                        onclick="markFixed('<%= track.id %>', '<%= track.url %>')" 
+                        title="Исправлено">
+                  ✅
+                </button>
+                <button type="button" class="btn btn-outline-danger" 
+                        onclick="deleteTrack('<%= track.id %>')" 
+                        title="Удалить">
+                  🗑️
+                </button>
+              </div>
+            </td>
+          </tr>
+        <% }) %>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- 📄 Пагинация -->
+  <% if (totalPages && totalPages > 1) { %>
+  <nav aria-label="Навигация" class="mt-4">
+    <ul class="pagination justify-content-center">
+      <li class="page-item <%= currentPage === 1 ? 'disabled' : '' %>">
+        <a class="page-link" href="?page=<%= currentPage - 1 %>">← Назад</a>
+      </li>
+      
+      <% for (let i = 1; i <= totalPages; i++) { %>
+        <% if (i === 1 || i === totalPages || (i >= currentPage - 2 && i <= currentPage + 2)) { %>
+          <li class="page-item <%= i === currentPage ? 'active' : '' %>">
+            <a class="page-link" href="?page=<%= i %>"><%= i %></a>
+          </li>
+        <% } else if (i === currentPage - 3 || i === currentPage + 3) { %>
+          <li class="page-item disabled"><span class="page-link">...</span></li>
+        <% } %>
+      <% } %>
+      
+      <li class="page-item <%= currentPage === totalPages ? 'disabled' : '' %>">
+        <a class="page-link" href="?page=<%= currentPage + 1 %>">Вперёд →</a>
+      </li>
+    </ul>
+  </nav>
+  <% } %>
+
+  <p class="text-muted text-center">
+    Показано <%= tracks.length %> из <%= totalTracks || 0 %> записей
+  </p>
+<% } %>
+
+<!-- 🔔 Toast уведомления -->
+<div class="toast-container position-fixed bottom-0 end-0 p-3" style="z-index: 9999;">
+  <div id="toast" class="toast" role="alert">
+    <div class="toast-header">
+      <strong class="me-auto" id="toastTitle">Уведомление</strong>
+      <button type="button" class="btn-close" data-bs-dismiss="toast"></button>
+    </div>
+    <div class="toast-body" id="toastBody"></div>
+  </div>
+</div>
+
+<script>
+// ===== Утилиты =====
+
+function showToast(title, message, type) {
+  const toast = document.getElementById('toast');
+  const toastTitle = document.getElementById('toastTitle');
+  const toastBody = document.getElementById('toastBody');
+  
+  toastTitle.textContent = title;
+  toastBody.textContent = message;
+  
+  // Сбрасываем классы
+  toast.className = 'toast';
+  
+  // Добавляем цвет
+  if (type === 'success') {
+    toast.classList.add('bg-success', 'text-white');
+  } else if (type === 'danger') {
+    toast.classList.add('bg-danger', 'text-white');
+  } else if (type === 'warning') {
+    toast.classList.add('bg-warning');
+  }
+  
+  // Показываем
+  const bsToast = new bootstrap.Toast(toast);
+  bsToast.show();
+}
+
+function copyUrl(url) {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(url).then(function() {
+      showToast('✅ Скопировано', 'Ссылка в буфере обмена', 'success');
+    }).catch(function() {
+      fallbackCopy(url);
+    });
+  } else {
+    fallbackCopy(url);
+  }
+}
+
+function fallbackCopy(text) {
+  const input = document.createElement('input');
+  input.value = text;
+  document.body.appendChild(input);
+  input.select();
+  document.execCommand('copy');
+  document.body.removeChild(input);
+  showToast('✅ Скопировано', 'Ссылка в буфере обмена', 'success');
+}
+
+// ===== Выбор строк =====
+
+function toggleSelectAll() {
+  const selectAll = document.getElementById('selectAll');
+  const checkboxes = document.querySelectorAll('.row-checkbox');
+  
+  checkboxes.forEach(function(cb) {
+    const row = cb.closest('tr');
+    if (row.style.display !== 'none') {
+      cb.checked = selectAll.checked;
+    }
+  });
+  
+  updateSelectedCount();
+}
+
+function updateSelectedCount() {
+  const count = document.querySelectorAll('.row-checkbox:checked').length;
+  document.getElementById('selectedCount').textContent = count;
+  document.getElementById('deleteSelectedBtn').disabled = count === 0;
+}
+
+// ===== Фильтрация =====
+
+function filterTable() {
+  const search = document.getElementById('searchInput').value.toLowerCase();
+  const reason = document.getElementById('reasonFilter').value;
+  const dateFilter = document.getElementById('dateFilter').value;
+  const now = new Date();
+  
+  const rows = document.querySelectorAll('#tracksTable tbody tr');
+  
+  rows.forEach(function(row) {
+    const title = row.dataset.title || '';
+    const url = row.dataset.url || '';
+    const rowReason = row.dataset.reason || '';
+    const rowDate = new Date(row.dataset.date);
+    
+    let show = true;
+    
+    // Поиск по тексту
+    if (search && !title.includes(search) && !url.includes(search)) {
+      show = false;
+    }
+    
+    // Фильтр по причине
+    if (reason && rowReason !== reason) {
+      show = false;
+    }
+    
+    // Фильтр по дате
+    if (dateFilter) {
+      const diff = (now - rowDate) / (1000 * 60 * 60 * 24);
+      if (dateFilter === 'today' && diff > 1) show = false;
+      if (dateFilter === 'week' && diff > 7) show = false;
+      if (dateFilter === 'month' && diff > 30) show = false;
+    }
+    
+    row.style.display = show ? '' : 'none';
+  });
+}
+
+function clearFilters() {
+  document.getElementById('searchInput').value = '';
+  document.getElementById('reasonFilter').value = '';
+  document.getElementById('dateFilter').value = '';
+  filterTable();
+}
+
+// ===== Действия с треками =====
+
+async function retryDownload(id, url) {
+  const btn = event.target;
+  const originalText = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '⏳';
+  
+  try {
+    const response = await fetch('/api/broken-tracks/retry', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: id, url: url })
+    });
+    
+    const result = await response.json();
+    
+    if (result.success) {
+      showToast('✅ Готово', result.message || 'Кэш сброшен', 'success');
+      removeRow(id);
+    } else {
+      showToast('❌ Ошибка', result.error || 'Не удалось выполнить', 'danger');
+      btn.disabled = false;
+      btn.innerHTML = originalText;
+    }
+  } catch (err) {
+    showToast('❌ Ошибка', 'Ошибка сервера', 'danger');
+    btn.disabled = false;
+    btn.innerHTML = originalText;
+  }
+}
+
+async function markFixed(id, url) {
+  try {
+    const response = await fetch('/api/broken-tracks/fix', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: id, url: url })
+    });
+    
+    if (response.ok) {
+      removeRow(id);
+      showToast('✅ Готово', 'Помечено как исправленное', 'success');
+    } else {
+      showToast('❌ Ошибка', 'Не удалось обновить', 'danger');
+    }
+  } catch (err) {
+    showToast('❌ Ошибка', 'Ошибка сервера', 'danger');
+  }
+}
+
+async function fixAndSend(id, url, userId) {
+  if (!confirm('Исправить трек и отправить пользователю?')) return;
+  
+  const btn = event.target;
+  const originalText = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '⏳';
+  
+  try {
+    const response = await fetch('/api/broken-tracks/fix-and-send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: id, url: url, userId: userId })
+    });
+    
+    const result = await response.json();
+    
+    if (result.success) {
+      showToast('✅ Отправлено', result.message || 'Трек отправлен пользователю', 'success');
+      removeRow(id);
+    } else {
+      showToast('❌ Ошибка', result.error || 'Не удалось отправить', 'danger');
+      btn.disabled = false;
+      btn.innerHTML = originalText;
+    }
+  } catch (err) {
+    showToast('❌ Ошибка', 'Ошибка сервера', 'danger');
+    btn.disabled = false;
+    btn.innerHTML = originalText;
+  }
+}
+
+async function deleteTrack(id) {
+  if (!confirm('Удалить эту запись?')) return;
+  
+  try {
+    const response = await fetch('/api/broken-tracks/' + id, {
+      method: 'DELETE'
+    });
+    
+    if (response.ok) {
+      removeRow(id);
+      showToast('🗑️ Удалено', 'Запись удалена', 'warning');
+    } else {
+      showToast('❌ Ошибка', 'Не удалось удалить', 'danger');
+    }
+  } catch (err) {
+    showToast('❌ Ошибка', 'Ошибка сервера', 'danger');
+  }
+}
+
+async function deleteSelected() {
+  const checkboxes = document.querySelectorAll('.row-checkbox:checked');
+  const ids = [];
+  
+  checkboxes.forEach(function(cb) {
+    ids.push(cb.value);
+  });
+  
+  if (ids.length === 0) return;
+  if (!confirm('Удалить ' + ids.length + ' записей?')) return;
+  
+  try {
+    const response = await fetch('/api/broken-tracks/bulk-delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids: ids })
+    });
+    
+    if (response.ok) {
+      ids.forEach(function(id) {
+        removeRow(id);
+      });
+      showToast('🗑️ Удалено', ids.length + ' записей удалено', 'warning');
+      document.getElementById('selectAll').checked = false;
+      updateSelectedCount();
+    } else {
+      showToast('❌ Ошибка', 'Не удалось удалить', 'danger');
+    }
+  } catch (err) {
+    showToast('❌ Ошибка', 'Ошибка сервера', 'danger');
+  }
+}
+
+function removeRow(id) {
+  const row = document.querySelector('tr[data-id="' + id + '"]');
+  if (row) {
+    row.style.transition = 'opacity 0.3s, transform 0.3s';
+    row.style.opacity = '0';
+    row.style.transform = 'translateX(20px)';
+    setTimeout(function() {
+      row.remove();
+    }, 300);
+  }
+}
+
+// ===== Экспорт CSV =====
+
+function exportCSV() {
+  const rows = document.querySelectorAll('#tracksTable tbody tr');
+  let csv = 'Дата,User ID,Трек,Ошибка,URL\n';
+  
+  rows.forEach(function(row) {
+    if (row.style.display !== 'none') {
+      const date = row.dataset.date || '';
+      const userCell = row.querySelector('td:nth-child(3)');
+      const userId = userCell ? userCell.textContent.trim() : '';
+      const title = row.dataset.title || '';
+      const reason = row.dataset.reason || '';
+      const url = row.dataset.url || '';
+      
+      csv += '"' + date + '","' + userId + '","' + title + '","' + reason + '","' + url + '"\n';
+    }
+  });
+  
+  // BOM для корректного отображения кириллицы в Excel
+  const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' });
+  const link = document.createElement('a');
+  const dateStr = new Date().toISOString().slice(0, 10);
+  
+  link.href = URL.createObjectURL(blob);
+  link.download = 'broken_tracks_' + dateStr + '.csv';
+  link.click();
+  
+  showToast('📥 Экспорт', 'CSV файл скачан', 'success');
+}
+
+// ===== Сортировка =====
+
+var sortDirections = {};
+
+function sortTable(columnIndex) {
+  const table = document.getElementById('tracksTable');
+  const tbody = table.querySelector('tbody');
+  const rows = Array.from(tbody.querySelectorAll('tr'));
+  
+  sortDirections[columnIndex] = !sortDirections[columnIndex];
+  const direction = sortDirections[columnIndex] ? 1 : -1;
+  
+  rows.sort(function(a, b) {
+    let aVal, bVal;
+    
+    if (columnIndex === 0) {
+      // Сортировка по дате
+      aVal = new Date(a.dataset.date);
+      bVal = new Date(b.dataset.date);
+    } else if (columnIndex === 2) {
+      // Сортировка по названию трека
+      aVal = a.dataset.title || '';
+      bVal = b.dataset.title || '';
+    }
+    
+    if (aVal < bVal) return -1 * direction;
+    if (aVal > bVal) return 1 * direction;
+    return 0;
+  });
+  
+  rows.forEach(function(row) {
+    tbody.appendChild(row);
+  });
+}
+</script>
+
+<style>
+.table th[onclick] {
+  user-select: none;
+}
+
+.table th[onclick]:hover {
+  background-color: rgba(255, 255, 255, 0.1) !important;
+  cursor: pointer;
+}
+
+.btn-group-sm > .btn {
+  padding: 0.2rem 0.4rem;
+}
+
+.card {
+  transition: transform 0.2s;
+}
+
+.card:hover {
+  transform: translateY(-2px);
+}
+
+.toast {
+  min-width: 280px;
+}
+</style>

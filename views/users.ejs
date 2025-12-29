@@ -1,0 +1,354 @@
+<% // views/users.ejs %>
+
+<%- contentFor('body') %>
+
+<style>
+  /* === БАЗОВЫЕ СТИЛИ СТРАНИЦЫ === */
+  .hx-indicator { display: none; }
+  .hx-request .hx-indicator { display: inline-block !important; }
+  .spinner-sm { width: 1rem; height: 1rem; border-width: .15rem; }
+  .form-section-title { font-size: .9rem; color: #6c757d; }
+
+  /* === КАРТОЧКИ СТАТИСТИКИ === */
+  .stat-card {
+    background: var(--bs-card-bg);
+    border: 1px solid var(--bs-border-color);
+    border-radius: 10px;
+    padding: 1rem 1.25rem;
+    text-align: center;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+  }
+  .stat-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+  }
+  .stat-card .stat-value {
+    font-size: 1.75rem;
+    font-weight: 700;
+    line-height: 1.2;
+  }
+  .stat-card .stat-label {
+    font-size: 0.8rem;
+    color: #6c757d;
+    margin-top: 0.25rem;
+  }
+
+  /* === СТИЛИ ТАБЛИЦЫ === */
+  .table { font-size: 0.9rem; }
+  .table th { font-weight: 600; white-space: nowrap; }
+  
+  /* Адаптив для мобильных */
+  @media (max-width: 992px) {
+    .table thead { display: none; }
+    .table tbody tr {
+      display: block; margin-bottom: 1rem; border: 1px solid var(--bs-border-color);
+      border-radius: 10px; padding: 1rem; background-color: var(--bs-card-bg);
+    }
+    .table tbody td {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 0.5rem 0; border: none; border-bottom: 1px solid var(--bs-border-color);
+    }
+    .table tbody td:last-child { border-bottom: none; }
+    .table tbody td::before {
+      content: attr(data-label); font-weight: 600; margin-right: 10px; flex-shrink: 0; color: #6c757d;
+    }
+    .tariff-form { width: 100%; flex-direction: column; gap: 0.5rem !important; }
+    .tariff-form select, .tariff-form input { width: 100% !important; }
+    .btn-group { width: 100%; }
+    .stat-card .stat-value { font-size: 1.5rem; }
+  }
+
+  /* Анимации */
+  .htmx-swapping { opacity: 0; transition: opacity 0.2s ease-out; }
+  .badge { font-size: 0.75rem; padding: 4px 8px; font-weight: 600; }
+
+  /* Dropdown */
+  .dropdown-menu {
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    border: 1px solid var(--bs-border-color);
+    border-radius: 8px;
+  }
+  .dropdown-item { padding: 8px 14px; transition: background-color 0.15s ease; }
+  .dropdown-item:hover { background-color: var(--table-row-hover); }
+
+  /* Форма тарифа */
+  .tariff-form { gap: 6px; }
+  .tariff-form .form-select, .tariff-form .form-control { font-size: 0.8rem; padding: 0.25rem 0.5rem; }
+
+  /* Сортировка */
+  thead th a { display: flex; align-items: center; gap: 4px; }
+  thead th a:hover { color: var(--bs-primary-color) !important; }
+
+  /* Пагинация */
+  .pagination { margin-top: 1.5rem; margin-bottom: 1rem; }
+  .page-link {
+    color: var(--bs-body-color); background-color: var(--bs-card-bg);
+    border-color: var(--bs-border-color); transition: all 0.2s ease;
+  }
+  .page-link:hover {
+    color: #ffffff; background-color: var(--bs-primary-color);
+    border-color: var(--bs-primary-color);
+  }
+  .page-item.active .page-link { background-color: var(--bs-primary-color); border-color: var(--bs-primary-color); }
+  .page-item.disabled .page-link { background-color: var(--bs-card-bg); border-color: var(--bs-border-color); opacity: 0.5; }
+</style>
+
+<script src="https://unpkg.com/htmx.org@1.9.10"></script>
+
+<!-- Дальше идет ваш HTML (div, h1, form...) без изменений -->
+
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <h1 class="h3 mb-0">👥 Пользователи</h1>
+  <div class="hx-indicator">
+    <div class="spinner-border text-primary spinner-sm" role="status">
+      <span class="visually-hidden">Загрузка...</span>
+    </div>
+  </div>
+</div>
+
+<!-- Карточки статистики -->
+<div class="row g-3 mb-4">
+  <div class="col-6 col-md-3">
+    <div class="stat-card">
+      <div class="stat-value text-primary"><%= typeof totalUsers !== 'undefined' ? totalUsers.toLocaleString('ru-RU') : '—' %></div>
+      <div class="stat-label">Всего</div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="stat-card">
+      <div class="stat-value text-success"><%= typeof activeUsers !== 'undefined' ? activeUsers.toLocaleString('ru-RU') : '—' %></div>
+      <div class="stat-label">Активных</div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="stat-card">
+      <div class="stat-value text-warning"><%= typeof premiumUsers !== 'undefined' ? premiumUsers.toLocaleString('ru-RU') : '—' %></div>
+      <div class="stat-label">Премиум</div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="stat-card">
+      <div class="stat-value text-info"><%= typeof newUsersToday !== 'undefined' ? newUsersToday.toLocaleString('ru-RU') : '—' %></div>
+      <div class="stat-label">Новых сегодня</div>
+    </div>
+  </div>
+</div>
+
+<form id="usersFilterForm"
+      class="row g-3 align-items-end mb-4"
+      hx-get="/users-table"
+      hx-target="#users-table-container"
+      hx-trigger="keyup changed delay:300ms from:#searchInput, change from:.form-select, change from:.adv-filter"
+      hx-swap="innerHTML"
+      hx-push-url="true">
+
+  <!-- Поиск / статус / лимит / экспорт -->
+  <div class="col-lg-4 col-md-6">
+    <label class="form-label form-section-title">Поиск</label>
+    <input type="text"
+           class="form-control"
+           id="searchInput"
+           name="q"
+           placeholder="ID, имя, @username..."
+           value="<%= typeof searchQuery !== 'undefined' ? searchQuery : (queryParams?.q || '') %>">
+  </div>
+
+  <div class="col-lg-2 col-md-6">
+    <label class="form-label form-section-title">Статус</label>
+    <select class="form-select" name="status">
+      <option value="" <%= (statusFilter === '' || (queryParams?.status || '') === '') ? 'selected' : '' %>>Все</option>
+      <option value="active"   <%= (statusFilter === 'active' || queryParams?.status === 'active') ? 'selected' : '' %>>Активные</option>
+      <option value="inactive" <%= (statusFilter === 'inactive' || queryParams?.status === 'inactive') ? 'selected' : '' %>>Неактивные</option>
+    </select>
+  </div>
+
+  <div class="col-lg-2 col-md-6">
+    <label class="form-label form-section-title">На странице</label>
+    <select class="form-select" name="limit">
+      <option value="25"  <%= (limit == 25  || queryParams?.limit == 25)  ? 'selected' : '' %>>25</option>
+      <option value="50"  <%= (limit == 50  || queryParams?.limit == 50)  ? 'selected' : '' %>>50</option>
+      <option value="100" <%= (limit == 100 || queryParams?.limit == 100) ? 'selected' : '' %>>100</option>
+    </select>
+  </div>
+
+  <div class="col-lg-4 col-md-6">
+    <label class="form-label form-section-title">Экспорт</label>
+    <div class="d-flex gap-2">
+      <a id="export-link" href="/users/export.csv" class="btn btn-outline-success w-100">
+        <i class="bi bi-file-earmark-spreadsheet"></i> Экспорт в CSV
+      </a>
+      <button type="button"
+              class="btn btn-outline-secondary"
+              onclick="resetUsersFilters()">
+        Сбросить
+      </button>
+    </div>
+  </div>
+
+  <!-- Тариф / Премиум -->
+  <div class="col-lg-2 col-md-6">
+    <label class="form-label form-section-title">Тариф</label>
+    <select class="form-select adv-filter" name="tariff">
+      <% const tariffSel = queryParams?.tariff || ''; %>
+      <option value="" <%= tariffSel === '' ? 'selected' : '' %>>Все</option>
+      <option value="Free"      <%= tariffSel === 'Free' ? 'selected' : '' %>>Free (5)</option>
+      <option value="Plus"      <%= tariffSel === 'Plus' ? 'selected' : '' %>>Plus (30)</option>
+      <option value="Pro"       <%= tariffSel === 'Pro' ? 'selected' : '' %>>Pro (100)</option>
+      <option value="Unlimited" <%= tariffSel === 'Unlimited' ? 'selected' : '' %>>Unlim</option>
+      <option value="Other"     <%= tariffSel === 'Other' ? 'selected' : '' %>>Other</option>
+    </select>
+  </div>
+
+  <div class="col-lg-3 col-md-6">
+    <label class="form-label form-section-title">Премиум</label>
+    <select class="form-select adv-filter" name="premium">
+      <% const premiumSel = queryParams?.premium || ''; %>
+      <option value=""        <%= premiumSel === '' ? 'selected' : '' %>>Любой</option>
+      <option value="active"  <%= premiumSel === 'active' ? 'selected' : '' %>>Активная премиум</option>
+      <option value="expired" <%= premiumSel === 'expired' ? 'selected' : '' %>>Истёкшая премиум</option>
+      <option value="free"    <%= premiumSel === 'free' ? 'selected' : '' %>>Только Free</option>
+    </select>
+  </div>
+
+  <!-- Расширенные фильтры (collapsible) -->
+  <div class="col-12">
+    <a class="text-decoration-none" data-bs-toggle="collapse" href="#advancedFilters" role="button" aria-expanded="false" aria-controls="advancedFilters">
+      Расширенные фильтры
+    </a>
+    <div class="collapse mt-3" id="advancedFilters">
+      <div class="row g-2">
+        <div class="col-md-3">
+          <label class="form-label">Дата регистрации c</label>
+          <input type="date"
+                 class="form-control adv-filter"
+                 name="created_from"
+                 value="<%= queryParams?.created_from || '' %>">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Дата регистрации по</label>
+          <input type="date"
+                 class="form-control adv-filter"
+                 name="created_to"
+                 value="<%= queryParams?.created_to || '' %>">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Был активен за N дней</label>
+          <input type="number"
+                 class="form-control adv-filter"
+                 name="active_within_days"
+                 min="1"
+                 placeholder="7"
+                 value="<%= queryParams?.active_within_days || '' %>">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Источник трафика</label>
+          <input type="text"
+                 class="form-control adv-filter"
+                 name="ref_source"
+                 placeholder="utm / ключевое..."
+                 value="<%= queryParams?.ref_source || '' %>">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Реферер</label>
+          <select class="form-select adv-filter" name="has_referrer">
+            <% const hasRef = queryParams?.has_referrer || ''; %>
+            <option value=""   <%= hasRef === '' ? 'selected' : '' %>>Любой</option>
+            <option value="yes"<%= hasRef === 'yes' ? 'selected' : '' %>>С реферером</option>
+            <option value="no" <%= hasRef === 'no' ? 'selected' : '' %>>Без реферера</option>
+          </select>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Скачиваний ≥</label>
+          <input type="number"
+                 class="form-control adv-filter"
+                 name="downloads_min"
+                 min="0"
+                 placeholder="1"
+                 value="<%= queryParams?.downloads_min || '' %>">
+        </div>
+      </div>
+    </div>
+  </div>
+</form>
+
+<!-- Контейнер для живой подстановки таблицы -->
+<div id="users-table-container">
+  <%- include('partials/users-table', {
+        users,
+        totalPages,
+        currentPage,
+        queryParams
+      }) %>
+</div>
+
+<script>
+  // 1. Функция сбора фильтров для CSV
+  function collectFilters() {
+    const form = document.getElementById('usersFilterForm');
+    if (!form) return {};
+    const data = new FormData(form);
+    const params = new URLSearchParams();
+
+    const fields = [
+      'q','status','limit','tariff','premium',
+      'created_from','created_to','active_within_days',
+      'ref_source','has_referrer','downloads_min'
+    ];
+    fields.forEach(k => {
+      const v = data.get(k);
+      if (v !== null && v !== '') params.set(k, v);
+    });
+    return params;
+  }
+
+  // 2. Обновление ссылки экспорта
+  function updateExportLink() {
+    const exportLink = document.getElementById('export-link');
+    if (!exportLink) return;
+    const params = collectFilters();
+    const qs = params.toString();
+    exportLink.href = qs ? `/users/export.csv?${qs}` : '/users/export.csv';
+  }
+
+  function resetUsersFilters() {
+    const form = document.getElementById('usersFilterForm');
+    if (!form) return;
+    form.reset();
+    htmx.trigger(form, 'change');
+    updateExportLink();
+  }
+
+  // При первой загрузке
+  document.addEventListener('DOMContentLoaded', updateExportLink);
+
+  // === ГЛАВНОЕ ИСПРАВЛЕНИЕ ===
+  // Слушаем событие HTMX после того, как контент был заменен (afterSwap)
+  document.addEventListener('htmx:afterSwap', function(event) {
+    
+    // Проверяем, что обновился именно контейнер таблицы
+    if (event.detail.target.id === 'users-table-container') {
+      console.log('HTMX: Таблица обновлена, перезапускаем Bootstrap компоненты...');
+
+      // 1. Перезапускаем Dropdowns (выпадающие меню в "Действиях")
+      // Ищем все элементы с data-bs-toggle="dropdown" внутри контейнера
+      var dropdowns = event.detail.target.querySelectorAll('[data-bs-toggle="dropdown"]');
+      dropdowns.forEach(function (el) {
+        new bootstrap.Dropdown(el);
+      });
+
+      // 2. Перезапускаем Tooltips (всплывающие подсказки), если есть
+      var tooltips = event.detail.target.querySelectorAll('[data-bs-toggle="tooltip"]');
+      tooltips.forEach(function (el) {
+        new bootstrap.Tooltip(el);
+      });
+    }
+  });
+
+  // Обновляем ссылку экспорта после завершения запроса
+  document.body.addEventListener('htmx:afterSettle', function (evt) {
+    const form = document.getElementById('usersFilterForm');
+    if (evt?.detail?.elt === form || evt?.target?.id === 'usersFilterForm') {
+      updateExportLink();
+    }
+  });
+</script>
