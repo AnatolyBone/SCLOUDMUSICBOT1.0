@@ -836,7 +836,6 @@ bot.action(/pl_download_all:|pl_download_10:/, async (ctx) => {
         await ctx.editMessageText('⏳ Получаю полные данные плейлиста... Это может занять несколько секунд.');
         
         try {
-            const youtubeDl = getYoutubeDl();
             const fullData = await youtubeDl(session.originalUrl, { dumpSingleJson: true });
             session.tracks = fullData.entries.filter(track => track && track.url);
             session.fullTracks = true;
@@ -927,7 +926,6 @@ bot.action(/pl_select_manual:(.+)/, async (ctx) => {
         
         try {
             // 3. Запускаем долгую операцию
-            const youtubeDl = getYoutubeDl();
             const fullData = await youtubeDl(session.originalUrl, { dumpSingleJson: true });
             
             session.tracks = fullData.entries.filter(track => track && track.url);
@@ -1107,44 +1105,39 @@ async function processUrlInBackground(ctx, url) {
     try {
         loadingMessage = await ctx.reply('🔍 Анализирую ссылку...');
         
-        // 1. Сначала превращаем короткую ссылку в длинную
         const resolvedUrl = await resolveSoundCloudLink(url);
         
-        const youtubeDl = getYoutubeDl();
+        // ============================================
+        // ИСПРАВЛЕНО: Убран const youtubeDl = ...
+        // ============================================
         
         let data;
         try {
-            // Используем уже РАСШИФРОВАННУЮ ссылку
-            data = await youtubeDl(resolvedUrl, { dumpSingleJson: true, flatPlaylist: true });
+            data = await getYoutubeDl(resolvedUrl, { 
+                dumpSingleJson: true, 
+                flatPlaylist: true 
+            });
         } catch (ytdlError) {
             console.error(`[youtube-dl] Критическая ошибка (processUrlInBackground) для ${resolvedUrl}:`, ytdlError.stderr || ytdlError.message);
-            throw new Error('Не удалось получить метаданные. Ссылка может быть недействительной или трек недоступен.');
-        }
-
-        if (!data) {
             throw new Error('Не удалось получить метаданные.');
         }
 
+        if (!data) throw new Error('Не удалось получить метаданные.');
+
+        // ... (дальше код без изменений) ...
         if (data.entries && data.entries.length > 0) {
             await ctx.deleteMessage(loadingMessage.message_id).catch(() => {});
-            
             const playlistId = `pl_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
             playlistSessions.set(ctx.from.id, {
-                playlistId,
-                title: data.title,
-                tracks: data.entries,
-                originalUrl: resolvedUrl, // Сохраняем полную ссылку
-                selected: new Set(),
-                currentPage: 0,
-                fullTracks: false
+                playlistId, title: data.title, tracks: data.entries,
+                originalUrl: resolvedUrl, selected: new Set(), currentPage: 0, fullTracks: false
             });
             const message = `🎶 В плейлисте <b>"${escapeHtml(data.title)}"</b> найдено <b>${data.entries.length}</b> треков.\n\nЧто делаем?`;
             await ctx.reply(message, { parse_mode: 'HTML', ...generateInitialPlaylistMenu(playlistId, data.entries.length) });
-            
         } else {
-            const user = await getUser(ctx.from.id);
+            // ... (логика для одиночного трека) ...
+             const user = await getUser(ctx.from.id);
             if ((user.downloads_today || 0) >= (user.premium_limit || 0)) {
-                // ... (код проверки лимитов, без изменений) ...
                  const bonusAvailable = Boolean(CHANNEL_USERNAME && !user.subscribed_bonus_used);
                 const cleanUsername = CHANNEL_USERNAME?.replace('@', '');
                 const bonusText = bonusAvailable ? `\n\n🎁 Доступен бонус! Подпишись на <a href="https://t.me/${cleanUsername}">@${cleanUsername}</a> и получи <b>7 дней тарифа Plus</b>.` : '';
@@ -1155,28 +1148,19 @@ async function processUrlInBackground(ctx, url) {
                 await ctx.telegram.editMessageText(ctx.chat.id, loadingMessage.message_id, undefined, `${T('limitReached')}${bonusText}`, extra);
                 return;
             }
-            
             await ctx.telegram.editMessageText(ctx.chat.id, loadingMessage.message_id, undefined, '✅ Распознал трек, ставлю в очередь...');
-            
             setTimeout(() => ctx.deleteMessage(loadingMessage.message_id).catch(() => {}), 3000);
-            
             addTaskToQueue({
-                userId: ctx.from.id,
-                source: 'soundcloud',
-                url: data.webpage_url || resolvedUrl,
-                originalUrl: data.webpage_url || resolvedUrl,
-                metadata: { id: data.id, title: data.title, uploader: data.uploader, duration: data.duration, thumbnail: data.thumbnail },
-                ctx: null
+                userId: ctx.from.id, source: 'soundcloud',
+                url: data.webpage_url || resolvedUrl, originalUrl: data.webpage_url || resolvedUrl,
+                metadata: { id: data.id, title: data.title, uploader: data.uploader, duration: data.duration, thumbnail: data.thumbnail }, ctx: null
             });
         }
     } catch (error) {
         console.error('Ошибка при фоновой обработке URL:', error.message);
-        const userMessage = '❌ Не удалось обработать ссылку. Убедитесь, что она корректна и контент доступен.';
-        if (loadingMessage) {
-            await ctx.telegram.editMessageText(ctx.chat.id, loadingMessage.message_id, undefined, userMessage).catch(() => {});
-        } else {
-            await ctx.reply(userMessage);
-        }
+        const userMessage = '❌ Не удалось обработать ссылку.';
+        if (loadingMessage) await ctx.telegram.editMessageText(ctx.chat.id, loadingMessage.message_id, undefined, userMessage).catch(() => {});
+        else await ctx.reply(userMessage);
     }
 }
 async function handleSoundCloudUrl(ctx, url) {
@@ -1187,17 +1171,20 @@ async function handleSoundCloudUrl(ctx, url) {
         // 1. Превращаем короткую ссылку в длинную
         const resolvedUrl = await resolveSoundCloudLink(url);
         
-        const youtubeDl = getYoutubeDl();
+        // ============================================
+        // ИСПРАВЛЕНО: Убран лишний вызов фабрики
+        // ============================================
         
         let data;
         try {
-            // Используем расшифрованную ссылку
-            data = await youtubeDl(resolvedUrl, { dumpSingleJson: true, flatPlaylist: true });
+            // Используем расшифрованную ссылку, вызываем getYoutubeDl как обычную функцию
+            data = await getYoutubeDl(resolvedUrl, { 
+                dumpSingleJson: true, 
+                flatPlaylist: true 
+            });
         } catch (ytdlError) {
-            // ВАЖНОЕ ИЗМЕНЕНИЕ: Логируем ПОЛНЫЙ текст ошибки от youtube-dl
             console.error(`[youtube-dl] ДЕТАЛИ ОШИБКИ для ${resolvedUrl}:`);
             console.error(ytdlError.stderr || ytdlError.message || ytdlError);
-            
             throw new Error('Ошибка при запросе к SoundCloud (см. логи)');
         }
         
