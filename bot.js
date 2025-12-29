@@ -22,30 +22,32 @@ import { isShuttingDown, isMaintenanceMode, setMaintenanceMode } from './service
 const playlistSessions = new Map();
 const TRACKS_PER_PAGE = 5;
 
-function getYoutubeDl() {
+function getYoutubeDl(url, flags) {
     const options = {};
     if (PROXY_URL) {
-        options.proxy = PROXY_URL;
+        // Устанавливаем прокси для самого процесса Node.js
+        // Это более надежно для yt-dlp
+        process.env.http_proxy = PROXY_URL;
+        process.env.https_proxy = PROXY_URL;
     }
     
-    // ОБНОВЛЕНИЕ: Добавлены Sec-Fetch заголовки. 
-    // Это заставляет SoundCloud думать, что запрос делает реальный человек через Chrome.
     const defaultFlags = {
         'no-warnings': true,
+        'ignore-errors': true, // Игнорировать ошибки плейлиста
+        'no-check-certificates': true, // Важно для прокси
         'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'referer': 'https://soundcloud.com/',
-        'add-header': [
-            'Accept-Language:en-US,en;q=0.9,ru;q=0.8',
-            'Accept:text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-            'Sec-Fetch-Dest:document',
-            'Sec-Fetch-Mode:navigate',
-            'Sec-Fetch-Site:same-origin',
-            'Sec-Fetch-User:?1',
-            'Upgrade-Insecure-Requests:1'
-        ]
+        // 'referer': 'https://soundcloud.com/', // Можно убрать, иногда мешает
+        
+        // Явно передаем прокси флаг в yt-dlp
+        proxy: PROXY_URL 
     };
     
-    return (url, flags) => execYoutubeDl(url, { ...defaultFlags, ...flags }, options);
+    // Удаляем куки из флагов, если они вдруг передались
+    if (flags && flags.cookies) {
+        delete flags.cookies;
+    }
+
+    return execYoutubeDl(url, { ...defaultFlags, ...flags }, options);
 }
 /**
  * Асинхронно добавляет задачу в очередь, не блокируя основной поток.
