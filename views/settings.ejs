@@ -64,7 +64,7 @@
     </div>
   </div>
 
-<!-- Гибридная архитектура (воркер) -->
+<!-- Гибридная архитектура (Железобетонный вариант) -->
 <div class="col-lg-6">
   <div class="card shadow-sm">
     <div class="card-header fw-semibold bg-light">
@@ -72,35 +72,38 @@
     </div>
     <div class="card-body">
       <p class="text-muted small mb-3">
-        Когда включено — задачи Spotify/YouTube делегируются внешнему воркеру (Твой ПК). 
-        Когда выключено — все задачи обрабатываются локально на Render.
+        Переключатель между Render (локально) и твоим ПК (воркер).
       </p>
-      
-      <div class="d-flex align-items-center gap-3">
-        <div class="form-check form-switch">
-          <!-- ID и атрибуты -->
-          <input class="form-check-input" type="checkbox" id="useHybridWorker"
-                 <%= settings.use_hybrid_worker === 'true' ? 'checked' : '' %> 
-                 style="width: 3rem; height: 1.5rem;">
-                 
-          <label class="form-check-label fw-semibold" for="useHybridWorker" id="hybridWorkerLabel">
-            <%= settings.use_hybrid_worker === 'true' ? '🟢 Включено (воркер)' : '🔴 Выключено (локально)' %>
-          </label>
+
+      <form action="/settings/update" method="POST" id="hybridForm">
+        <!-- 1. Скрытое поле. Именно оно полетит на сервер -->
+        <!-- По умолчанию ставим текущее значение -->
+        <input type="hidden" id="realValue" name="use_hybrid_worker" value="<%= settings.use_hybrid_worker %>">
+
+        <div class="d-flex align-items-center gap-3">
+          <div class="form-check form-switch">
+            <!-- 2. Визуальный чекбокс. У него НЕТ name, он ничего не отправляет сам -->
+            <input class="form-check-input" type="checkbox" id="visualToggle"
+                   style="width: 3rem; height: 1.5rem;"
+                   <%= settings.use_hybrid_worker === 'true' ? 'checked' : '' %>
+                   onchange="toggleAndSubmit()">
+                   
+            <label class="form-check-label fw-semibold" for="visualToggle">
+              <%= settings.use_hybrid_worker === 'true' ? '🟢 Включено (Воркер)' : '🔴 Выключено (Локально)' %>
+            </label>
+          </div>
         </div>
-        
-        <!-- Спиннер загрузки -->
-        <span id="hybridWorkerSpinner" class="spinner-border spinner-border-sm text-primary d-none"></span>
-      </div>
+      </form>
 
       <% if (settings.use_hybrid_worker === 'true') { %>
         <div class="alert alert-info mt-3 mb-0 small">
           <i class="bi bi-info-circle me-1"></i>
-          <strong>Воркер активен:</strong> Задачи уходят на домашний ПК.
+          <strong>Воркер активен:</strong> Задачи обрабатывает домашний ПК.
         </div>
       <% } else { %>
         <div class="alert alert-warning mt-3 mb-0 small">
           <i class="bi bi-exclamation-triangle me-1"></i>
-          <strong>Локальная обработка:</strong> Все задачи обрабатываются на Render.
+          <strong>Локальная обработка:</strong> Задачи обрабатывает сервер Render.
         </div>
       <% } %>
     </div>
@@ -108,6 +111,18 @@
 </div>
 
 <script>
+  function toggleAndSubmit() {
+    const checkbox = document.getElementById('visualToggle');
+    const hiddenInput = document.getElementById('realValue');
+    const form = document.getElementById('hybridForm');
+
+    // 1. Меняем значение скрытого поля на 'true' или 'false'
+    hiddenInput.value = checkbox.checked ? 'true' : 'false';
+
+    // 2. Отправляем форму классическим способом
+    form.submit();
+  }
+</script>
 document.getElementById('useHybridWorker').addEventListener('change', async function() {
   const checkbox = this;
   const newValue = checkbox.checked ? 'true' : 'false'; // Строка 'true' или 'false'
