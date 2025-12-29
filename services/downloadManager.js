@@ -469,11 +469,35 @@ export async function downloadTrackForUser(url, userId, metadata = null) {
   try {
     // Получаем метаданные если нет
     if (!metadata) {
-      const info = await ytdl(url, { 
-        'dump-single-json': true, 
-        'skip-download': true,
-        ...YTDL_OPTIONS 
-      });
+      let info;
+      try {
+        console.log(`[Enqueue] Запрашиваю данные для: ${url}`);
+        
+        info = await ytdl(url, { 
+          'dump-single-json': true, 
+          'flat-playlist': true, 
+          ...YTDL_COMMON 
+        });
+        
+        console.log(`[Enqueue] Получен ответ:`, {
+          hasInfo: !!info,
+          hasEntries: !!info?.entries,
+          entriesCount: info?.entries?.length || 0,
+          title: info?.title
+        });
+        
+      } catch (ytdlError) {
+        console.error(`[Enqueue] ❌ Ошибка yt-dlp:`, ytdlError.message);
+        console.error(`[Enqueue] Stderr:`, ytdlError.stderr?.slice(-500));
+        throw new Error(`Не удалось получить данные: ${ytdlError.message}`);
+      }
+      
+      // Проверка пустого ответа
+      if (!info) {
+        console.error(`[Enqueue] ❌ Пустой ответ от yt-dlp для URL: ${url}`);
+        await safeSendMessage(userId, '❌ SoundCloud не отдал данные. Попробуйте другую ссылку или позже.');
+        return;
+      }
       metadata = extractMetadataFromInfo(info);
     }
     
